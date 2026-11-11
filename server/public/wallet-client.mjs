@@ -16,7 +16,7 @@ function walletFor(networkId) {
   return wallets.get(networkId);
 }
 
-const methods = new Set(['create_bet', 'accept_bet', 'cancel_bet', 'expire_bet', 'propose_outcome', 'confirm_outcome', 'dispute_outcome', 'refund_unresolved', 'withdraw']);
+const methods = new Set(['create_bet', 'accept_bet', 'cancel_bet', 'expire_bet', 'propose_outcome', 'confirm_outcome', 'dispute_outcome', 'finalize_unanswered', 'referee_resolve', 'refund_unresolved', 'withdraw']);
 const namedAccount = { testnet: /^(?:[a-z0-9]+(?:[-_][a-z0-9]+)*\.)+testnet$/, mainnet: /^(?:[a-z0-9]+(?:[-_][a-z0-9]+)*\.)+near$/ };
 const implicitAccount = /^[0-9a-f]{64}$/;
 const hashPattern = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
