@@ -12,6 +12,19 @@ The [original prediction](https://x.com/ChainAbstracted/status/21205900420746652
 
 Verify the [referee transaction](https://testnet.nearblocks.io/txns/4Gix2npAw4PGEfCDTnifCByGagz4FZdG5mArTtA6kazt) separately from the [completed payout](https://testnet.nearblocks.io/txns/8gqtVGRBxghhqnTveMrjW2X6AW89GUGvV6azmebWMr6B). Public RPC verification confirmed the exact transfer and successful withdrawal callback; settlement alone does not prove delivery. [Public proof record](evidence/hosted-real-x-testnet-20261111.json)
 
+## Verify the hosted payout
+
+From a checkout with Node.js 22.9 or later and outbound HTTPS:
+
+```sh
+npm ci
+node scripts/verify-hosted-payout.mjs
+```
+
+The command reads the [completed hosted Bet](https://stated-production.up.railway.app/bets/c171de89-f223-4309-886e-180ad69af092) and its recorded transactions from both fixed public testnet RPC endpoints. It checks finalized settlement, the referee's exact ruling, the winner's 0.2 test NEAR transfer and the linked successful callback. No database, X account, wallet, API key or faucet is needed, and no transaction is submitted. [Public evidence](evidence/hosted-real-x-testnet-20261111.json)
+
+It prints a JSON report. Exit `0` requires both endpoints to pass and agree; exit `1` means evidence did not match, and exit `2` means an endpoint was unavailable. The command corroborates RPC responses; X identities and the human outcome decision remain outside its checks. Both recorded participants were operator-controlled.
+
 ## Run the judge demo
 
 No X account, API key or NEAR wallet is needed to browse predictions and try capture. The stack runs the real server, worker and pages against **simulated X** with labelled test accounts and posts. Prediction capture works locally. The reply Bet uses real NEAR testnet and requires outbound RPC access and a funded testnet treasury.
@@ -89,7 +102,7 @@ curl -fsS https://test.rpc.fastnear.com -H 'content-type: application/json' \
 
 ## NEAR HACKATHON notes
 
-The recording evidence records the test run at filming. The release verification ran 420 app tests and 71 contract tests separately. `npm audit --omit=dev` flags four high-severity entries in the Meteor SDK dependency tree. The reply-to-payout demo uses app-managed testnet accounts.
+The recording evidence records the test run at filming. The release verification ran 475 app tests; the existing contract verification passed 71 tests separately. `npm audit --omit=dev` flags four high-severity entries in the Meteor SDK dependency tree. The reply-to-payout demo uses app-managed testnet accounts.
 
 - **Development dates.** The first recorded Stated development snapshot is dated 9 November 2026, after the hackathon announcement. It includes the standalone forecasting prototype. The judge walkthrough uses the Node app and its NEAR integration.
 - **NEAR integration.** The escrow contract (Rust, `near-sdk` 5.29.0; version 2 adds the referee and the unanswered-result rule), live dry-run quotes from NEAR Intents for paying a stake from another chain (the mainnet payment path is implemented and unverified), named accounts per X handle with a claim step that swaps keys, wallet signing through the self-hosted Meteor SDK, exact finalized-transaction verification, and a bounded testnet reconciler that keeps Bet pages current without a browser. A full reply-to-settlement run on testnet is recorded in `evidence/reply-bets-testnet-live.json` (`node scripts/reply-bets-live.mjs` repeats it).
