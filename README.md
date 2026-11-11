@@ -2,6 +2,16 @@
 
 Stated turns a reply under a prediction into a two-person bet. One bettor offers a stake, the other matches it, and a NEAR escrow contract pays the winner after Stated’s referee records the result. You can also tag the bot to track a prediction without offering a bet. The hosted app uses real X and NEAR testnet; the local Docker walkthrough uses simulated X.
 
+**In one line:** reply `@statedforecast bet 0.1 no` under a dated prediction on X, someone takes the other side, and a NEAR contract holds both stakes and pays the winner.
+
+| | |
+| --- | --- |
+| Tracks | Open Innovation, Social Money |
+| Try it, no sign-in | [stated-production.up.railway.app](https://stated-production.up.railway.app/) |
+| Watch, 70 seconds | [docs/stated-demo-70s.mp4](docs/stated-demo-70s.mp4): a real X thread from bet to payout, then a new bet started from the result |
+| Check it in 30 seconds | `npm ci && node scripts/verify-hosted-payout.mjs` exits 0 when two public NEAR RPC endpoints agree on the finalized 0.2 test NEAR payout |
+| Run the tests | `npm test` (Node 22.9+, PostgreSQL 15+ tools on PATH) |
+
 ## Try the hosted app
 
 Open [Stated](https://stated-production.up.railway.app/) or inspect the [completed test bet](https://stated-production.up.railway.app/bets/c171de89-f223-4309-886e-180ad69af092) without signing in. Two operator-controlled X identities completed this test on 11 November 2026. Each staked 0.1 test NEAR; the winner received 0.2 test NEAR. These tokens have no monetary value.
