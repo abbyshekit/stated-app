@@ -329,6 +329,10 @@ export async function processMention(db, config, { mention, includes = {}, bot, 
       return { outcome: 'ignored_implicit', event: await recordEvent(db, config, mention, { outcome: 'ignored_implicit' }) };
     }
     const targetId = quoted?.id || parent?.id || links.statusIds[0] || null;
+    const ownHost = (() => { try { return new URL(config.baseUrl).host; } catch { return ''; } })();
+    const outside = links.articles.filter((url) => {
+      try { const to = new URL(url); return to.host !== ownHost && to.hostname.replace(/^www\./, '') !== 'github.com'; } catch { return true; }
+    });
 
     let target = null;
     let targetAuthor = null;
@@ -360,14 +364,17 @@ export async function processMention(db, config, { mention, includes = {}, bot, 
         return { outcome: 'ignored_bot_target', event: await recordEvent(db, config, mention, { outcome: 'ignored_bot_target' }) };
       }
       targetText = postText(target);
-    } else if (links.articles.length) {
+    } else if (links.articles.length && !outside.length) {
+      // A post that only links to Stated itself or its source, such as an announcement, is not a request to read an article.
+      return { outcome: 'ignored_own_link', event: await recordEvent(db, config, mention, { outcome: 'ignored_own_link' }) };
+    } else if (outside.length) {
       if ((await intakesInLastHour(db, mention.author_id)) >= INTAKES_PER_HOUR) {
         return { outcome: 'rate_limited', event: await recordEvent(db, config, mention, { outcome: 'rate_limited' }) };
       }
       const owner = await userByXId(db, mention.author_id);
       const intake = await db.one(
         `insert into url_intakes (owner_x_user_id, url, route, status) values ($1, $2, 'mention', 'queued') returning *`,
-        [mention.author_id, links.articles[0]],
+        [mention.author_id, outside[0]],
       );
       const replyText = replyFor({ outcome: 'article', owner, baseUrl: config.baseUrl, links: config.x.replyLinks });
       const event = await recordEvent(db, config, mention, {

@@ -202,6 +202,16 @@ test('a mention with an article link queues it and lands candidates in the tagge
   assert.equal(await count(`select 1 from inbox where owner_x_user_id = $1 and kind = 'pick_predictions'`, [dave.id]), 1);
 });
 
+test('a post that only links to Stated or its source is not read as an article and gets no reply', async () => {
+  const before = await count('select 1 from url_intakes');
+  const m = s.fakeX.post(dave.id, `Turn an X argument into a bet. Reply "@statedbot bet 0.1 no". ${s.config.baseUrl}/ https://github.com/example/stated`);
+  await tick(s.db, s.config, s.x);
+  const event = await s.db.one('select * from mention_events where event_id = $1', [m.id]);
+  assert.equal(event.outcome, 'ignored_own_link');
+  assert.equal(event.reply_text, null);
+  assert.equal(await count('select 1 from url_intakes'), before);
+});
+
 test('first sign-in claims the pending saves; setup defaults to private', async () => {
   const b = await s.signIn(alice);
   assert.match(b.lastPage.url, /\/setup$/);
