@@ -10,7 +10,7 @@ import { processMention, sendPendingReplies } from '../src/intake.mjs';
 import { metrics } from '../src/metrics.mjs';
 import { createApp } from '../src/web.mjs';
 import { tick } from '../src/worker.mjs';
-import { botClient } from '../src/xapi.mjs';
+import { botClient, saveBotCredentials } from '../src/xapi.mjs';
 import { startStack } from './support/app.mjs';
 
 const YEAR = new Date().getUTCFullYear() + 1;
@@ -259,6 +259,67 @@ test('an expired bot token refreshes once and the new refresh token is stored', 
   assert.notEqual(after.refresh_token, before.refresh_token);
   assert.ok(new Date(after.expires_at) > new Date());
   assert.equal(s.fakeX.refreshGrants, 1, 'two clients racing spend the single-use refresh token once');
+});
+
+test('a rejected refresh persists disconnected status without changing bot credentials', async () => {
+  await kvSet(s.db, 'bot_status', 'connected');
+  const before = await s.db.one('select * from bot_credentials where id = 1');
+  let refreshAttempts = 0;
+  const error = { error: 'invalid_request', error_description: 'Value passed for the token was invalid.' };
+  const client = botClient(s.db, s.config, async (url, options) => {
+    if (new URL(url).pathname === '/2/oauth2/token') {
+      assert.equal(options.method, 'POST');
+      refreshAttempts += 1;
+      return new Response(JSON.stringify(error), { status: 400 });
+    }
+    return new Response('{}', { status: 401 });
+  });
+  try {
+    await assert.rejects(client.mentions(), (err) => {
+      assert.equal(err.status, 400);
+      assert.deepEqual(err.body, error);
+      return true;
+    });
+    assert.equal(refreshAttempts, 1);
+    assert.deepEqual(await s.db.one('select * from bot_credentials where id = 1'), before);
+    assert.equal((await s.db.one("select value from kv where key = 'bot_status'")).value, 'disconnected');
+  } finally {
+    await kvSet(s.db, 'bot_status', 'connected');
+  }
+});
+
+test('a stale client uses reauthorized credentials without refreshing or disconnecting them', async () => {
+  await s.db.query("update bot_credentials set updated_at = now() - interval '1 second' where id = 1");
+  let calls = 0;
+  let refreshAttempts = 0;
+  const client = botClient(s.db, s.config, async (url, options) => {
+    if (new URL(url).pathname === '/2/oauth2/token') {
+      refreshAttempts += 1;
+      return new Response('{"error":"invalid_request"}', { status: 400 });
+    }
+    calls += 1;
+    if (calls === 1) return new Response('{}', { status: 401 });
+    assert.equal(options.headers.authorization, 'Bearer reauthorized-access');
+    return new Response('{"data":[]}', { status: 200 });
+  });
+  await client.identity();
+  try {
+    await saveBotCredentials(s.db, s.config, {
+      user: bot,
+      tokens: {
+        accessToken: 'reauthorized-access', refreshToken: 'reauthorized-refresh',
+        expiresAt: new Date(Date.now() + 7_200_000), scopes: 'tweet.read users.read offline.access',
+      },
+    });
+    const reauthorized = await s.db.one('select * from bot_credentials where id = 1');
+    assert.deepEqual(await client.mentions(), { data: [] });
+    assert.equal(calls, 2);
+    assert.equal(refreshAttempts, 0);
+    assert.deepEqual(await s.db.one('select * from bot_credentials where id = 1'), reauthorized);
+    assert.equal((await s.db.one("select value from kv where key = 'bot_status'")).value, 'connected');
+  } finally {
+    await s.connectBot(bot);
+  }
 });
 
 test('metrics count real tags, repeat savers and replies, without editorial records', async () => {

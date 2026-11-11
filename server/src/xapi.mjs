@@ -171,6 +171,8 @@ export function botClient(db, config, fetchImpl = fetch) {
       } catch (err) {
         if (err.status === 400 || err.status === 401) {
           await tx.query(`insert into kv (key, value) values ('bot_status', 'disconnected') on conflict (key) do update set value = 'disconnected', updated_at = now()`);
+          // Commit the status under the credential lock before rethrowing.
+          return { refreshError: err };
         }
         throw err;
       }
@@ -187,6 +189,7 @@ export function botClient(db, config, fetchImpl = fetch) {
       );
       return decode(updated, config);
     });
+    if (next.refreshError) throw next.refreshError;
     cached = next;
     return next;
   }
