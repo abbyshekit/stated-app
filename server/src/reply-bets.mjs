@@ -7,7 +7,7 @@
 // Every public reply is a fixed template. Nothing a person typed is echoed.
 import { createHash } from 'node:crypto';
 import { createBet } from './bets.mjs';
-import { consentToPublicBet, publishBet } from './bet-public.mjs';
+import { consentToPublicBet, publicBet, publishBet } from './bet-public.mjs';
 import { dayMonth } from './marked.mjs';
 import { formatTestNear } from './near-escrow.mjs';
 import { network, networkName, unit } from './near-network.mjs';
@@ -73,6 +73,7 @@ export const betReplies = {
     + `To take the other side, reply here with "@${bot} take".${url ? ` ${url}` : ''}`,
   match: ({ pot, date, creator, creatorSide, taker, url }) => `It’s on. ${pot} ${unit()} is held on ${networkName()} until ${date}. `
     + `@${creator} says ${creatorSide}; @${taker} says ${creatorSide === 'yes' ? 'no' : 'yes'}.${url ? ` ${url}` : ''}`,
+  webMatch: ({ pot, url }) => `Both sides are funded. ${pot} ${unit()} is held on ${networkName()}.${url ? ` ${url}` : ''}`,
   result: ({ outcome, winner, loser, pot, url }) => (outcome === 'void'
     ? 'No clear result on this one. Both stakes are returned.'
     : `${outcome === 'yes' ? 'It happened.' : 'It did not happen.'} @${winner} wins the ${pot} ${unit()} pot.`) + (url ? ` ${url}` : ''),
@@ -121,6 +122,47 @@ async function ensureUser(db, { xUserId, username }) {
 }
 
 const linkFor = (config, betId) => (config.x.replyLinks ? `${config.baseUrl}/bets/${betId}` : '');
+
+// Web consent permits naming on the Bet page, not an X mention. Tell only the
+// creator who explicitly summoned the bot, with no handles or claim text.
+// Called after finalized sync, including a retry after an interrupted insert.
+export async function queueWebMatchNotice(db, config, user, betId) {
+  if (!config.play?.enabled || !inPilot(config, user.x_user_id)) return;
+  await db.tx(async (tx) => {
+    // Wallet reservations lock a participant before the bet. Lock both people
+    // in stable order first: either may reserve a wallet request concurrently.
+    const before = await tx.one('select creator_user_id from bilateral_bets where id=$1', [betId]);
+    if (!before || String(before.creator_user_id) === String(user.id)) return;
+    const people = await tx.many('select id from users where id=any($1::bigint[]) order by id for share',
+      [[String(before.creator_user_id), String(user.id)]]);
+    if (people.length !== 2) return;
+    // Keep the canonical publication/snapshot check and its share locks in this
+    // transaction, so withdrawal cannot race the outbox insert.
+    const published = await publicBet({ tx: (read) => read(tx) }, betId);
+    if (!published?.funded || published.status !== 'accepted' || published.chain_freshness !== 'recent') return;
+    const bet = await tx.one(`select b.*, a.account_id, a.ready, a.claimed_at,
+      exists (select 1 from bilateral_near_requests r where r.bet_id=b.id and r.method='accept_bet'
+        and r.user_id=u.id and r.wallet_account=a.account_id
+        and r.binding_hash=b.chain_state->>'acceptor_binding_hash') as acceptor_bound
+      from bilateral_bets b join users u on u.id=b.acceptor_user_id
+      join play_accounts a on a.x_user_id=u.x_user_id
+      where b.id=$1 and u.id=$2 and u.x_user_id=$3 and u.kind='person'
+        and exists (select 1 from bilateral_bet_public_consents c where c.bet_id=b.id and c.user_id=u.id)
+      for share of a`, [betId, user.id, user.x_user_id]);
+    if (!bet?.ready || String(bet.creator_user_id) !== String(before.creator_user_id)
+      || bet.claimed_at || !bet.acceptor_bound || bet.status !== 'accepted'
+      || bet.chain_state?.status !== 'accepted' || bet.chain_state.acceptor !== bet.account_id
+      || bet.acceptor_wallet !== bet.account_id || published.acceptor_wallet !== bet.account_id
+      || !bet.referee_wallet || bet.chain_state.referee !== bet.referee_wallet
+      || bet.account_id === bet.chain_state.creator || bet.account_id === bet.referee_wallet) return;
+    const origin = await tx.one(`select c.event_id from bet_commands c join users creator on creator.id=$2
+      where c.bet_id=$1 and c.kind='bet' and c.status='done' and c.x_user_id=creator.x_user_id
+      order by c.created_at, c.event_id limit 1 for share of c`, [betId, bet.creator_user_id]);
+    if (!origin) return;
+    await say(tx, config, { key: `match:${betId}`, inReplyTo: origin.event_id, betId,
+      body: betReplies.webMatch({ pot: formatTestNear((BigInt(bet.stake_yocto) * 2n).toString()), url: linkFor(config, betId) }) });
+  });
+}
 
 async function offer(db, config, chain, cmd, deps) {
   if (!inPilot(config, cmd.x_user_id)) throw new Refused('pilot');

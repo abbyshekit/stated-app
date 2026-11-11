@@ -16,6 +16,7 @@ import { cancelUnfundedBet, prepareNearAction, syncNearBet } from './near-bets.m
 import { syncPendingBetTransactions, verifyBetTransaction, withdrawalView } from './near-execution-state.mjs';
 import { latestWalletRequests, walletRequestHistory } from './near-request-view.mjs';
 import { ensurePlayAccount, playAccountFor, playAction, shortfall, yocto } from './play.mjs';
+import { queueWebMatchNotice } from './reply-bets.mjs';
 import { MAX_DEPOSIT_NEAR, MIN_DEPOSIT_NEAR } from './funding.mjs';
 import { tokenChoices } from './play-pages.mjs';
 import { nearUp, shortAmount } from './intents.mjs';
@@ -560,6 +561,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needPos
       const account = await playAccountFor(db, ctx.user.x_user_id);
       if (bet.terms_hash !== termsHash) throw new UserError('Review the current terms before taking this bet.', 409);
       if (account?.ready && String(bet.acceptor_user_id) === String(ctx.user.id) && bet.chain_state?.acceptor === account.account_id) {
+        await queueWebMatchNotice(db, config, ctx.user, id);
         return redirect(ctx.res, pathFor(id));
       }
       if (!managedOffer(bet, ctx.user, account) || (config.near?.real && !account?.ready)) {
@@ -568,6 +570,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needPos
       await consentToPublicBet(db, ctx.user, id);
       if (!account?.ready) await ensurePlayAccount(db, config, chain(), { xUserId: ctx.user.x_user_id, username: ctx.user.x_username });
       await playAction(db, config, chain(), ctx.user, id, { action: 'accept', termsHash }, { fetchImpl });
+      await queueWebMatchNotice(db, config, ctx.user, id);
     } catch (error) {
       if (recoverable(error)) return betPage(ctx, { failed: error });
       throw error;
