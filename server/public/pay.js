@@ -10,6 +10,37 @@ for (const time of document.querySelectorAll('time[datetime]')) {
 const cost = document.getElementById('add-cost');
 if (cost) for (const id of ['add-near', 'add-with']) document.getElementById(id)?.addEventListener('input', () => { cost.hidden = true; });
 
+// Only the server-marked managed acceptance form gets pending feedback.
+for (const form of document.querySelectorAll('form[data-managed-take]')) {
+  const action = new URL(form.action, window.location.href);
+  if (form.method.toLowerCase() !== 'post' || action.origin !== window.location.origin ||
+      action.pathname !== `/bets/${form.dataset.managedTake}/take` || action.search || action.hash) continue;
+  const button = form.querySelector('button[type="submit"]');
+  const status = document.getElementById('managed-take-status');
+  if (!button || !status) continue;
+  const label = button.textContent, disabled = button.disabled, busy = form.getAttribute('aria-busy');
+  let pending = false, generation = 0;
+  const reset = () => {
+    pending = false; generation++;
+    button.textContent = label; button.disabled = disabled; status.textContent = '';
+    if (busy === null) form.removeAttribute('aria-busy'); else form.setAttribute('aria-busy', busy);
+  };
+  form.addEventListener('submit', event => {
+    if (event.defaultPrevented) return;
+    if (pending) { event.preventDefault(); return; }
+    pending = true;
+    const current = ++generation;
+    // Wait until all submit listeners have run and the browser has serialized the submitter.
+    setTimeout(() => {
+      if (current !== generation) return;
+      if (event.defaultPrevented) { reset(); return; }
+      button.disabled = true; button.textContent = 'Matching stake';
+      form.setAttribute('aria-busy', 'true'); status.textContent = 'Matching stake';
+    }, 0);
+  });
+  window.addEventListener('pageshow', reset);
+}
+
 // Each button names the link or text it copies. The source remains available
 // when the browser lacks clipboard access.
 for (const button of document.querySelectorAll('button[data-copy]')) {

@@ -155,11 +155,12 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needPos
     }
     const stake = formatTestNear(bet.stake_yocto);
     return html`<p class="stakes">${account?.ready ? `Stake ${stake} ${unit()} from your Stated account.` : `Stated opens an account for you and stakes ${stake} ${unit()}.`}</p>
-      <div class="acts"><form method="post" action="${pathFor(bet.id)}/take" id="accept">
+      <div class="acts"><form method="post" action="${pathFor(bet.id)}/take" id="accept" data-managed-take="${bet.id}">
         ${csrfField(ctx)}<input type="hidden" name="termsHash" value="${bet.terms_hash}">
         <label class="check"><input type="checkbox" name="publicConsent" value="1" required><span>Show my X name and wallet on this public bet.</span></label>
         <button class="primary big" type="submit">Bet ${otherSide(bet)}</button>
-      </form></div>`;
+      </form><span class="visually-hidden" role="status" id="managed-take-status"></span></div>
+      <script src="/static/pay.js?v=${payVersion}" defer></script>`;
   }
 
   async function publicPage(ctx, bet) {
