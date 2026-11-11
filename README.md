@@ -6,6 +6,8 @@ Stated turns a reply under a prediction into a two-person bet. One bettor offers
 
 Open [Stated](https://stated-production.up.railway.app/) or inspect the [completed test bet](https://stated-production.up.railway.app/bets/c171de89-f223-4309-886e-180ad69af092) without signing in. Two operator-controlled X identities completed this test on 11 November 2026. Each staked 0.1 test NEAR; the winner received 0.2 test NEAR. These tokens have no monetary value.
 
+When a deliberately published offer has an open seat and recent verified funding, the home page offers its opposite side. The original prediction save can remain private. Sign-in returns to that Bet, where acceptance requires consent and a matching stake. Withdrawn, invited, expired and stale offers are excluded.
+
 The [original prediction](https://x.com/ChainAbstracted/status/2120590042074665286) led to a [bet command](https://x.com/ChainAbstracted/status/2120590352880951797), a [bot offer](https://x.com/statedforecast/status/2120590654430650560), web acceptance and a [match reply](https://x.com/statedforecast/status/2120597844256305438). A reviewer recorded No from the specified Coinbase candle. After the ten-minute correction delay, the worker settled, withdrew the winnings and published the [result](https://x.com/statedforecast/status/2120598097608987019).
 
 Verify the [referee transaction](https://testnet.nearblocks.io/txns/4Gix2npAw4PGEfCDTnifCByGagz4FZdG5mArTtA6kazt) separately from the [completed payout](https://testnet.nearblocks.io/txns/8gqtVGRBxghhqnTveMrjW2X6AW89GUGvV6azmebWMr6B). Public RPC verification confirmed the exact transfer and successful withdrawal callback; settlement alone does not prove delivery. [Public proof record](evidence/hosted-real-x-testnet-20261111.json)
@@ -85,7 +87,7 @@ curl -fsS https://test.rpc.fastnear.com -H 'content-type: application/json' \
 
 ## NEAR HACKATHON notes
 
-The recording evidence records the test run at filming. The release verification ran 394 app tests and 71 contract tests separately. `npm audit --omit=dev` flags four high-severity entries in the Meteor SDK dependency tree. The reply-to-payout demo uses app-managed testnet accounts.
+The recording evidence records the test run at filming. The release verification ran 401 app tests and 71 contract tests separately. `npm audit --omit=dev` flags four high-severity entries in the Meteor SDK dependency tree. The reply-to-payout demo uses app-managed testnet accounts.
 
 - **Development dates.** The first recorded Stated development snapshot is dated 9 November 2026, after the hackathon announcement. It includes the standalone forecasting prototype. The judge walkthrough uses the Node app and its NEAR integration.
 - **NEAR integration.** The escrow contract (Rust, `near-sdk` 5.29.0; version 2 adds the referee and the unanswered-result rule), live dry-run quotes from NEAR Intents for paying a stake from another chain (the mainnet payment path is implemented and unverified), named accounts per X handle with a claim step that swaps keys, wallet signing through the self-hosted Meteor SDK, exact finalized-transaction verification, and a bounded testnet reconciler that keeps Bet pages current without a browser. A full reply-to-settlement run on testnet is recorded in `evidence/reply-bets-testnet-live.json` (`node scripts/reply-bets-live.mjs` repeats it).

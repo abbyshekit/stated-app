@@ -8,7 +8,7 @@ import { registerBetRoutes } from './bet-pages.mjs';
 import { registerWalletRpc } from './near-wallet-rpc.mjs';
 import { registerShareRoutes } from './share-pages.mjs';
 import { betsFor } from './bets.mjs';
-import { publicBet, publicBetsForSave, firstPublicBetsForSaves } from './bet-public.mjs';
+import { publicBet, publicBetsForSave, firstPublicBetsForSaves, nextOpenPublicBet } from './bet-public.mjs';
 import { betBlock, betState, dayMonth, timeLeft } from './marked.mjs';
 import { formatTestNear } from './near-escrow.mjs';
 import { network, unit } from './near-network.mjs';
@@ -855,25 +855,29 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
     const dare = config.play?.enabled
       ? recent.find((row) => betLines.dares.has(String(row.save_id)) && !isPlaceholder(row)) || null : null;
     const lead = dare || recent.find((row) => verdictOf(row) === 'yes' && row.available && !isPlaceholder(row)) || null;
-    const rest = recent.filter((row) => row !== lead).slice(0, 8);
     const dareBet = dare ? betLines.dareBets.get(String(dare.save_id)) : null;
+    const fallback = !dareBet && config.play?.enabled && !config.near.real
+      ? await nextOpenPublicBet(db, ctx.user?.id) : null;
+    const rest = recent.filter((row) => fallback || row !== lead).slice(0, 8);
+    const fallbackFaces = fallback ? await facesByUsername(db, [fallback.creator_username], ctx.user) : null;
+    const fallbackOther = fallback?.creator_side === 'yes' ? 'no' : 'yes';
     const demo = !ctx.user && !config.near.real && config.demoBetId ? await publicBet(db, config.demoBetId) : null;
     const showDemo = demo?.funded && demo.last_verified_at && demo.status === 'settled'
       && ['yes', 'no'].includes(demo.outcome) && demo.creator_username && demo.acceptor_username;
     const intro = config.play?.enabled
-      ? (dareBet ? html`<h1 class="visually-hidden">Stated</h1>` : html`<h1 class="visually-hidden">Stated</h1>
+      ? (dareBet || fallback ? html`<h1 class="visually-hidden">Stated</h1>` : html`<h1 class="visually-hidden">Stated</h1>
       <p class="pitch"><b>Think they’re wrong?</b> Reply under their post on X:</p>
       <p class="say">@${bot} bet ${config.play.defaultStakeNear} no</p>`)
       : html`<h1 class="visually-hidden">Stated</h1>
       <p class="pitch"><b>Sure about that?</b> Reply <b>@${bot}</b> under any prediction on X. Private until you publish.</p>`;
     send(ctx.res, 200, await layout(ctx, 'Give your predictions a record', html`
-      <div class="pri">${lead ? html`${postCard(lead, { faces, sweep: true, link: publicRow(lead).link })}${dareBet ? html`<div class="dare">${dareBet.line}</div>` : ''}${intro}` : intro}
-      ${dareBet ? html`<div class="acts"><a class="pill solid big" href="/bets/${dareBet.id}">Take ${dareBet.other}</a></div>
+      <div class="pri">${fallback ? html`${intro}<p class="prop">${fallback.claim}</p>${betBlock(fallback, { viewer: ctx.user, faces: fallbackFaces, joinHref: `/bets/${fallback.id}?join=1#accept` })}` : lead ? html`${postCard(lead, { faces, sweep: true, link: publicRow(lead).link })}${dareBet ? html`<div class="dare">${dareBet.line}</div>` : ''}${intro}` : intro}
+      ${dareBet || fallback ? html`<div class="acts"><a class="pill solid big" href="${fallback ? `/bets/${fallback.id}?join=1#accept` : `/bets/${dareBet.id}`}">Take ${fallback ? fallbackOther : dareBet.other}</a></div>
         <p class="pitch own"><b>Or make your own.</b> Reply under any prediction on X: <b>@${bot} bet ${config.play.defaultStakeNear} no</b></p>`
       : html`<div class="acts line">${ctx.user ? html`<a class="pill solid big" href="/me">Your predictions</a>` : html`<a class="pill solid big" href="/signin">${X_MARK}Sign in with X</a>`}</div>`}
       ${showDemo ? html`<p class="pitch">Operator-controlled test on NEAR testnet</p><div class="acts"><a class="pill big" href="/bets/${demo.id}">View test bet</a></div>` : ''}</div>
       ${rest.length ? fileList(rest, publicRow, faces, betLines) : ''}
-    `, { flush: true, signin: Boolean(dareBet), two: rest.length > 0 }), { headers: refCookie(ctx) });
+    `, { flush: true, signin: Boolean(dareBet || fallback), two: rest.length > 0 }), { headers: refCookie(ctx) });
   });
 
   route('GET', /^\/signin$/, async (ctx) => {

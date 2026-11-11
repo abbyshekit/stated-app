@@ -174,8 +174,10 @@ export async function nextOpenPublicBet(db, viewerId = null) {
       where p.withdrawn_at is null and b.status='offered' and b.accept_by>clock_timestamp()
         and b.invited_user_id is null and b.invited_wallet is null
         and ($1::bigint is null or b.creator_user_id<>$1)
-      order by p.published_at desc, b.id desc limit 20 for share of b,p`, [viewerId]);
-    return rows.map(view).find((bet) => bet.status === 'offered') || null;
+        and b.near_verified_at between clock_timestamp() - ($2::double precision * interval '1 millisecond') and clock_timestamp()
+      order by p.published_at desc, b.id desc limit 20 for share of b,p`, [viewerId, STALE_AFTER_MS]);
+    return rows.map(view).find((bet) => bet.status === 'offered' && bet.funded
+      && bet.chain_freshness === 'recent' && bet.creator_username) || null;
   });
 }
 
