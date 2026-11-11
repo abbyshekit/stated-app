@@ -5,6 +5,10 @@ import { editorialIntake, personIntake, selectCandidates } from './articles.mjs'
 import { nearChain } from './play.mjs';
 import { registerPlayRoutes } from './play-pages.mjs';
 import { registerBetRoutes } from './bet-pages.mjs';
+import { registerBetStartRoutes } from './bet-start.mjs';
+
+// One policy for every page. A page that must hand a form to another origin widens form-action for itself only.
+const CONTENT_SECURITY_POLICY = "default-src 'self'; style-src 'self'; img-src 'self' data: https://pbs.twimg.com; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
 import { registerWalletRpc } from './near-wallet-rpc.mjs';
 import { registerShareRoutes } from './share-pages.mjs';
 import { betsFor } from './bets.mjs';
@@ -147,7 +151,7 @@ async function readForm(req, limit = 100_000) {
 
 function headersFor(kind) {
   const base = {
-    'content-security-policy': "default-src 'self'; style-src 'self'; img-src 'self' data: https://pbs.twimg.com; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+    'content-security-policy': CONTENT_SECURITY_POLICY,
     'x-content-type-options': 'nosniff',
     'referrer-policy': 'strict-origin-when-cross-origin',
   };
@@ -873,7 +877,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
     send(ctx.res, 200, await layout(ctx, 'Give your predictions a record', html`
       <div class="pri">${fallback ? html`${intro}<p class="prop">${fallback.claim}</p>${betBlock(fallback, { viewer: ctx.user, faces: fallbackFaces, joinHref: `/bets/${fallback.id}?join=1#accept` })}` : lead ? html`${postCard(lead, { faces, sweep: true, link: publicRow(lead).link })}${dareBet ? html`<div class="dare">${dareBet.line}</div>` : ''}${intro}` : intro}
       ${dareBet || fallback ? html`<div class="acts"><a class="pill solid big" href="${fallback ? `/bets/${fallback.id}?join=1#accept` : `/bets/${dareBet.id}`}">Take ${fallback ? fallbackOther : dareBet.other}</a></div>
-        <p class="pitch own"><b>Or make your own.</b> Reply under any prediction on X: <b>@${bot} bet ${config.play.defaultStakeNear} no</b></p>`
+        <p class="pitch own"><a href="/bets/new"><b>Or make your own.</b></a> Reply under any prediction on X: <b>@${bot} bet ${config.play.defaultStakeNear} no</b></p>`
       : html`<div class="acts line">${ctx.user ? html`<a class="pill solid big" href="/me">Your predictions</a>` : html`<a class="pill solid big" href="/signin">${X_MARK}Sign in with X</a>`}</div>`}
       ${showDemo ? html`<p class="pitch">Operator-controlled test on NEAR testnet</p><div class="acts"><a class="pill big" href="/bets/${demo.id}">View test bet</a></div>` : ''}</div>
       ${rest.length ? fileList(rest, publicRow, faces, betLines) : ''}
@@ -1917,7 +1921,8 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
     redirect(ctx.res, '/desk');
   });
 
-  registerBetRoutes({ route, db, config, layout, needUser, needPost, csrfField, send, redirect, notFound, fetchImpl, walletVersion: WALLET_VERSION, payVersion: PAY_VERSION, botUsername, chain: chainFor, quotes });
+  registerBetRoutes({ route, db, config, layout, needUser, needAdmin, isAdmin, needPost, csrfField, send, redirect, notFound, fetchImpl, walletVersion: WALLET_VERSION, payVersion: PAY_VERSION, botUsername, chain: chainFor, quotes });
+  registerBetStartRoutes({ route, db, config, layout, send, redirect, botUsername, fileList, betLinesFor, publicRow, csp: CONTENT_SECURITY_POLICY });
   registerPlayRoutes({ botUsername, route, db, config, layout, needUser, needPost, csrfField, send, redirect, notFound, chain: chainFor, quotes, payVersion: PAY_VERSION });
   registerWalletRpc({ route, config, needUser, json, fetchImpl });
   registerShareRoutes({ route, db, config, notFound, headersFor });

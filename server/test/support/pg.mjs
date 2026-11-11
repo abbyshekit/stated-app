@@ -18,22 +18,26 @@ function freePort() {
   });
 }
 
+// Postgres refuses to start in a shell with no usable locale (macOS reports "postmaster became
+// multithreaded during startup"). The tests never depend on collation, so they pin C.
+const pgEnv = { ...process.env, LC_ALL: 'C' };
+
 export async function startPostgres() {
   const dir = mkdtempSync(join(tmpdir(), 'stated-pg-'));
   const data = join(dir, 'data');
-  execFileSync('initdb', ['-D', data, '-A', 'trust', '-U', 'postgres', '-E', 'UTF8', '--no-sync'], { stdio: 'ignore' });
+  execFileSync('initdb', ['-D', data, '-A', 'trust', '-U', 'postgres', '-E', 'UTF8', '--locale=C', '--no-sync'], { stdio: 'ignore', env: pgEnv });
   const port = await freePort();
   execFileSync('pg_ctl', [
     '-D', data,
     '-o', `-p ${port} -c listen_addresses=127.0.0.1 -k ${dir} -c fsync=off`,
     '-l', join(dir, 'log'),
     '-w', 'start',
-  ], { stdio: 'ignore' });
+  ], { stdio: 'ignore', env: pgEnv });
   return {
     url: `postgres://postgres@127.0.0.1:${port}/postgres`,
     stop() {
       try {
-        execFileSync('pg_ctl', ['-D', data, '-m', 'immediate', '-w', 'stop'], { stdio: 'ignore' });
+        execFileSync('pg_ctl', ['-D', data, '-m', 'immediate', '-w', 'stop'], { stdio: 'ignore', env: pgEnv });
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }

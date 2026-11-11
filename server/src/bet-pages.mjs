@@ -7,7 +7,8 @@ import { betFor, betsFor, createBet, sourceForBet } from './bets.mjs';
 import { betDraft } from './bet-draft.mjs';
 import { betDateFields, readBetDate } from './bet-date-fields.mjs';
 import { betSourceHeader, predictionSourceHeader } from './bet-source-view.mjs';
-import { consentToPublicBet, followPublicBet, followsFor, nextOpenPublicBet, publicBet, publishBet, withdrawBetPublication } from './bet-public.mjs';
+import { consentToPublicBet, followPublicBet, followsFor, nextOpenPublicBet, publicBet, publishBet, readPublicBet, withdrawBetPublication } from './bet-public.mjs';
+import { publishPublicResultEvidence } from './bet-result-evidence.mjs';
 import { betList, betShareLink, betTerms, displayBetStatus } from './bet-view.mjs';
 import { facesByUsername } from './certificate.mjs';
 import { betBlock, betLead, betState, dayMonth } from './marked.mjs';
@@ -44,7 +45,7 @@ const claimWords = (bet) => {
   return bet.claim;
 };
 
-export function registerBetRoutes({ route, db, config, layout, needUser, needPost, csrfField, send, redirect, notFound, fetchImpl, walletVersion, payVersion, botUsername, chain, quotes = null }) {
+export function registerBetRoutes({ route, db, config, layout, needUser, needAdmin, isAdmin, needPost, csrfField, send, redirect, notFound, fetchImpl, walletVersion, payVersion, botUsername, chain, quotes = null }) {
   const sourceHeader = (viewer, bet) => betSourceHeader(db, viewer, bet, config.x.simulatedOrigin);
   const copyBetLink = (bet) => html`
     <a class="tl" id="bet-link" href="${config.baseUrl}${pathFor(bet.id)}">Bet link</a>
@@ -179,18 +180,23 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needPos
       ${csrfField(ctx)}<button class="${followPrimary ? 'primary big' : 'tl'}" type="submit">${followLabel}</button></form>`
       : html`<a class="${followPrimary ? 'pill solid big' : 'tl'}" href="/signin?return=${encodeURIComponent(`${pathFor(bet.id)}?follow=1#follow`)}">${followLabel}</a>`;
     const closed = expired || ['settled', 'cancelled', 'refunded', 'expired'].includes(bet.status);
-    const next = eligible && closed ? await nextOpenPublicBet(db, ctx.user?.id) : null;
-    const share = betShareLink(config.baseUrl, bet, { mine: false, ghost: Boolean(next) });
+    // With bets from replies on, a finished Bet's one filled action starts the next one.
+    // That page lists the open offers too, so this one does not also point at one.
+    const start = closed && eligible && config.play?.enabled ? `/bets/new?from=${bet.id}` : null;
+    const next = eligible && closed && !start ? await nextOpenPublicBet(db, ctx.user?.id) : null;
+    const share = betShareLink(config.baseUrl, bet, { mine: false, ghost: Boolean(next || start) });
     let primary = share;
     if (next) primary = html`<a class="pill solid big" href="${pathFor(next.id)}">Take another bet</a>`;
+    if (start) primary = html`<a class="pill solid big" href="${start}">Make your own bet</a>`;
     if (followPrimary) primary = following ? '' : follow;
     else if (open) {
       if (!eligible) primary = html`<p class="stakes">Bets with real NEAR are invite-only for now.</p>`;
       else primary = ctx.user ? html`<a class="pill solid big" href="${join}">Bet ${take}</a>`
         : html`<a class="pill solid big" href="/signin?return=${encodeURIComponent(join)}">${X_MARK}Sign in to bet ${take}</a>`;
     }
+    const evidence = bet.result_evidence;
     const proof = bet.settlement_transaction_hash
-      ? html`<p class="proof"><b>${bet.outcome === 'yes' ? 'Came true' : 'Did not come true'}</b><a class="tl" href="${transactionLink(bet.settlement_transaction_hash)}" rel="noopener noreferrer">Verify settlement</a></p>`
+      ? html`<p class="proof"><b>${evidence ? `Stated settled this Bet ${bet.outcome === 'yes' ? 'Yes' : 'No'}` : bet.outcome === 'yes' ? 'Came true' : 'Did not come true'}</b><a class="tl" href="${transactionLink(bet.settlement_transaction_hash)}" rel="noopener noreferrer">Verify settlement</a></p>`
       : '';
     send(ctx.res, 200, await layout(ctx, bet.claim.slice(0, 80), html`
       <h1 class="visually-hidden">Bet: ${bet.claim}</h1>
@@ -198,13 +204,67 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needPos
       <p class="prop">${claimWords(bet)}</p></div>
       ${betBlock(bet, { cameTrue: refereeRuling(bet) === 'yes', viewer: ctx.user, faces: await faces(ctx, bet), joinHref: open && eligible ? join : null })}
       ${proof}
+      ${evidence ? html`<p class="gut">${evidence.note}</p><p class="proof"><a class="tl" href="${evidence.url}" rel="noopener noreferrer">Evidence</a></p>` : ''}
+      ${bet.settlement_transaction_hash && isAdmin(ctx.user) ? html`<p class="gut"><a class="tl" href="/admin/bets/${bet.id}/evidence">${evidence ? 'View evidence record' : 'Publish evidence'}</a></p>` : ''}
       ${following ? html`<p class="notice" role="status">Following. Updates will appear in your Inbox.</p>` : ''}
-      <div class="acts">${primary}<div class="two">${reply}${open ? copyBetLink(bet) : ''}${open && !followPrimary ? follow : next ? share : ''}<a class="tl" href="/share/bets/${bet.id}.png" download="stated-bet-${bet.id}.png">Download card</a></div></div>
-      <div class="folds">${betTerms(bet, { extra: html`<dt>Checked on NEAR</dt><dd>${bet.last_verified_at ? `Last verified ${time(bet.last_verified_at)}.` : 'Chain verification is unavailable.'}${bet.chain_freshness === 'stale' ? ' This snapshot may have changed. Acceptance checks the chain again.' : ''}</dd>` })}${open ? await payFold(ctx, bet) : ''}</div>`, {
+      <div class="acts">${primary}<div class="two">${reply}${open ? copyBetLink(bet) : ''}${open && !followPrimary ? follow : next || start ? share : ''}<a class="tl" href="/share/bets/${bet.id}.png" download="stated-bet-${bet.id}.png">Download card</a></div></div>
+      <div class="folds">${betTerms(bet, { extra: html`${evidence ? html`<dt>Outcome known</dt><dd>${time(evidence.knownAt)}</dd><dt>Settlement recorded</dt><dd>${time(bet.settled_at)}</dd><dt>Explanation published</dt><dd>${time(evidence.publishedAt)}. Published after settlement.</dd>` : ''}<dt>Checked on NEAR</dt><dd>${bet.last_verified_at ? `Last verified ${time(bet.last_verified_at)}.` : 'Chain verification is unavailable.'}${bet.chain_freshness === 'stale' ? ' This snapshot may have changed. Acceptance checks the chain again.' : ''}</dd>` })}${open ? await payFold(ctx, bet) : ''}</div>`, {
       kind: 'public', flush: true, back: ctx.user ? '/me/bets' : null, signin: Boolean(ctx.user || !(open || followPrimary)), two: true,
       og: { title: `${betLead(bet).text} on Stated`, description: bet.claim.slice(0, 200), image: `/share/bets/${bet.id}.png` },
     }), { kind: 'public' });
   }
+
+  async function evidencePage(ctx, bet, { error = null, typed = {}, status = 200 } = {}) {
+    const evidence = bet.result_evidence;
+    await show(ctx, 'Public Result evidence', html`
+      <div class="hero"><h1>Public Result evidence</h1></div>
+      <p class="prop">${bet.claim}</p>
+      <p class="gut">Stated settled this Bet ${bet.outcome === 'yes' ? 'Yes' : 'No'}; recorded ${time(bet.settled_at)}.</p>
+      ${error ? html`<p class="err" role="alert">${error.message}</p>` : ''}
+      ${evidence ? html`<p class="gut">Evidence already published. This record cannot be replaced.</p><p class="gut">${evidence.note}</p><p class="proof"><a class="tl" href="${evidence.url}" rel="noopener noreferrer">Evidence</a></p><p class="gut">Outcome known ${time(evidence.knownAt)}. Explanation published ${time(evidence.publishedAt)}.</p>` : html`
+        <p class="gut">This explanation, link and outcome date become public on this Bet. Publish only material intended for everyone.</p>
+        <form method="post" action="/admin/bets/${bet.id}/evidence">${csrfField(ctx)}<div class="gut">
+          <label for="result-note">Public explanation</label><textarea id="result-note" name="note" required maxlength="600">${typed.note || ''}</textarea>
+          <label for="result-url">Public evidence link</label><input id="result-url" type="url" name="url" required maxlength="2048" value="${typed.url || ''}">
+          <label for="result-known">Outcome known (UTC)</label><input id="result-known" type="datetime-local" name="knownAt" required step="1" value="${String(typed.knownAt || '').replace(/(?:\.\d{3})?Z$/, '')}">
+          </div><div class="acts"><button class="primary big" type="submit">Publish evidence</button></div>
+        </form>`}
+      <p class="gut"><a class="tl" href="${pathFor(bet.id)}">View bet</a></p>`, { status, back: pathFor(bet.id) });
+  }
+
+  route('GET', new RegExp(`^/admin/bets/${ID}/evidence$`), async (ctx) => {
+    if (!(await needAdmin(ctx))) return;
+    const bet = await publicBet(db, ctx.params[0]);
+    if (!bet?.settlement_transaction_hash) return notFound(ctx);
+    await evidencePage(ctx, bet);
+  });
+
+  route('POST', new RegExp(`^/admin/bets/${ID}/evidence$`), async (ctx) => {
+    if (!(await needAdmin(ctx))) return;
+    const form = await needPost(ctx);
+    if (!form) return;
+    const typed = Object.fromEntries(['note', 'url', 'knownAt'].map((key) => [key, String(form.get(key) || '')]));
+    let knownAt = typed.knownAt;
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/.test(knownAt)) {
+      const date = new Date(`${knownAt}${knownAt.length === 16 ? ':00' : ''}Z`);
+      if (Number.isFinite(date.getTime()) && date.toISOString().slice(0, knownAt.length) === knownAt) knownAt = date.toISOString();
+    }
+    try {
+      await db.tx(async (tx) => {
+        // Lock before the public read: concurrent approvals share one immutable event.
+        await tx.one('select id from bilateral_bets where id=$1 for update', [ctx.params[0]]);
+        const bet = await readPublicBet(tx, ctx.params[0]);
+        if (!bet?.settlement_transaction_hash) throw new UserError('This public referee settlement is unavailable.', 404);
+        await publishPublicResultEvidence(tx, ctx.user.id, bet, { ...typed, knownAt });
+      });
+    } catch (error) {
+      if (!(error instanceof UserError)) throw error;
+      const bet = await publicBet(db, ctx.params[0]);
+      if (!bet?.settlement_transaction_hash) return notFound(ctx);
+      return evidencePage(ctx, bet, { error, typed, status: error.status });
+    }
+    redirect(ctx.res, `/admin/bets/${ctx.params[0]}/evidence`);
+  });
 
   route('GET', /^\/me\/bets$/, async (ctx) => {
     if (!(await ready(ctx))) return;
@@ -415,7 +475,8 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needPos
     }
     const refundInFold = refundable && !refundPrimary;
     const quietShare = published && !primary
-      ? html`<div class="acts">${betShareLink(config.baseUrl, published, { mine: creator, label: bet.status === 'settled' ? 'Post the result' : 'Post the bet' })}</div>` : '';
+      ? html`<div class="acts">${betShareLink(config.baseUrl, published, { mine: creator, label: bet.status === 'settled' ? 'Post the result' : 'Post the bet' })}
+        ${bet.status === 'settled' && eligible && config.play?.enabled ? html`<div class="two"><a class="tl" href="/bets/new?from=${bet.id}">Make another bet</a></div>` : ''}</div>` : '';
 
     const notices = html`
       ${bet.acceptor_unbound ? html`<p class="notice">Accepted directly by wallet ${bet.acceptor_wallet}. No X identity is linked to that wallet. The proposer can reclaim or withdraw tokens when the contract allows it.</p>` : ''}

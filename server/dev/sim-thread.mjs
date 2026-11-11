@@ -11,7 +11,9 @@ export function personFrom(x, req) {
 }
 
 // `only` is the id of one post: the page then shows that thread alone.
-export function threadPage(x, req, { app, only = null, take = false } = {}) {
+export function threadPage(x, req, { app, only = null, take = false, say = '' } = {}) {
+  // Only a whole bet command is ever typed for the visitor; anything else is dropped.
+  const typed = /^bet (?:0|[1-9]\d*)(?:\.\d{1,6})? (?:yes|no)$/.test(say || '') ? say : '';
   const me = personFrom(x, req);
   const people = [...x.users.values()].filter((u) => !x.botIds.has(u.id));
   const botName = [...x.users.values()].find((u) => x.botIds.has(u.id))?.username || 'bot';
@@ -37,11 +39,12 @@ export function threadPage(x, req, { app, only = null, take = false } = {}) {
   const one = (p, root) => {
     const u = x.users.get(p.author_id);
     const takeOffer = take && p.id === only && x.botIds.has(p.author_id);
+    const command = takeOffer ? 'take' : (typed && p.id === only ? typed : '');
     return `<article id="p${p.id}"${root ? '' : ' class="reply"'}>${picture(u)}<div>
       <p class="who"><b>${esc(u?.name || '')}</b> <span>@${esc(u?.username || p.author_id)}</span>${root && !only ? ` <a href="/?c=${p.id}">Open thread</a>` : ''}</p>
       <p class="text">${words(shown(p))}</p>
-      <details${takeOffer ? ' open' : ''}><summary>Reply</summary><form method="post" action="/post"><input type="hidden" name="reply_to" value="${p.id}">${only ? `<input type="hidden" name="c" value="${esc(only)}">` : ''}
-        <textarea name="text" rows="2" aria-label="Your reply">@${esc(botName)} ${takeOffer ? 'take' : ''}</textarea><button type="submit">Reply</button></form></details></div></article>`;
+      <details${command ? ' open' : ''}><summary>Reply</summary><form method="post" action="/post"><input type="hidden" name="reply_to" value="${p.id}">${only ? `<input type="hidden" name="c" value="${esc(only)}">` : ''}
+        <textarea name="text" rows="2" aria-label="Your reply">@${esc(botName)} ${esc(command)}</textarea><button type="submit">Reply</button></form></details></div></article>`;
   };
   const thread = (p) => `<section>${one(p, true)}${under(p.id).sort((m, n) => (BigInt(m.id) > BigInt(n.id) ? 1 : -1)).map((kid) => one(kid, false)).join('')}</section>`;
   const size = x.posts.size;
@@ -78,7 +81,7 @@ details form { display: grid; gap: 8px; margin-top: 8px; }
 </style>
 <main>
 <header><h1>${only ? '<a href="/" aria-label="All posts">←</a> ' : ''}Simulated X</h1>
-  <form method="get" action="/as">${only ? `<input type="hidden" name="c" value="${esc(only)}">` : ''}${take ? '<input type="hidden" name="take" value="1">' : ''}<label for="as">Posting as</label>
+  <form method="get" action="/as">${only ? `<input type="hidden" name="c" value="${esc(only)}">` : ''}${take ? '<input type="hidden" name="take" value="1">' : ''}${typed ? `<input type="hidden" name="say" value="${esc(typed)}">` : ''}<label for="as">Posting as</label>
     <select id="as" name="id" onchange="this.form.submit()">${people.map((u) => `<option value="${u.id}"${u.id === me ? ' selected' : ''}>@${esc(u.username)}</option>`).join('')}</select>
     <noscript><button type="submit">Switch</button></noscript></form>
   <p>A local stand-in for X, with test accounts. Nothing here reaches x.com. <a href="${esc(app)}" style="color: inherit">Open Stated</a></p></header>

@@ -183,6 +183,44 @@ test('public settlement proof requires a matching referee event and publication'
   assert.match(page.text, /<b>Came true<\/b>/);
   assert.doesNotMatch(page.text, /private\.example\.org\/evidence|private fixture note|Paid to your account/);
 
+  const evidencePath = `/admin/bets/${valid.id}/evidence`;
+  const admin = await s.signIn(s.fakeX.addUser('900', 'result_reviewer'));
+  assert.equal((await admin.get(evidencePath)).status, 200, 'reviewer can deliberately publish new public evidence');
+  assert.equal((await s.db.one(`select count(*)::int as n from bilateral_bet_events where kind='public_result_evidence'`)).n, 0,
+    'reading the approval form publishes nothing');
+  assert.equal((await s.browser().get(evidencePath)).status, 404);
+  const owner = await s.signIn(s.fakeX.addUser('81001', 'public_creator'));
+  assert.equal((await owner.get(evidencePath)).status, 404, 'being a bettor does not grant reviewer access');
+  assert.equal((await admin.request('POST', evidencePath, { form: { note: 'Unapproved' } })).status, 403);
+  const input = { note: 'The official result confirms this claim. <script>alert(1)</script>',
+    url: 'https://example.org/public-outcome', knownAt: new Date(Date.now() - 3600000).toISOString() };
+  for (const bad of [{ url: 'javascript:alert(1)' }, { note: 'x'.repeat(601) },
+    { knownAt: new Date(Date.now() + 3600000).toISOString() }]) {
+    const rejected = await admin.submit(evidencePath, { ...input, ...bad });
+    assert.equal(rejected.status, 400);
+    assert.equal((await publicBet(s.db, valid.id)).result_evidence, undefined);
+  }
+  const publishedEvidence = await admin.submit(evidencePath, input);
+  assert.equal(publishedEvidence.status, 200);
+  const evidenced = await publicBet(s.db, valid.id);
+  assert.equal(evidenced.result_evidence.note, input.note);
+  assert.equal(evidenced.result_evidence.url, input.url);
+  assert.equal(evidenced.result_evidence.knownAt, input.knownAt);
+  assert.ok(evidenced.result_evidence.publishedAt);
+  const publicEvidencePage = await s.browser().get(`/bets/${valid.id}`);
+  assert.match(publicEvidencePage.text, /Stated settled this Bet Yes/);
+  assert.match(publicEvidencePage.text, /href="https:\/\/example\.org\/public-outcome"[^>]*>Evidence<\/a>/);
+  assert.match(publicEvidencePage.text, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.doesNotMatch(publicEvidencePage.text, /<script>alert|private fixture note|private\.example\.org/);
+  await Promise.all([admin.submit(evidencePath, { ...input, note: 'Replacement A' }),
+    admin.submit(evidencePath, { ...input, note: 'Replacement B' })]);
+  assert.equal((await publicBet(s.db, valid.id)).result_evidence.note, input.note,
+    'replays cannot replace the first approved explanation');
+  assert.equal((await s.db.one(`select count(*)::int as n from bilateral_bet_events
+    where bet_id=$1 and kind='public_result_evidence'`, [valid.id])).n, 1);
+  await s.db.query(`update bilateral_bet_proposals set note='changed private note' where bet_id=$1`, [valid.id]);
+  assert.equal((await publicBet(s.db, valid.id)).result_evidence.note, input.note);
+
   const privateWinner = await seedSettlement({ outcome: 'no' });
   const privatePage = await s.browser().get(`/bets/${privateWinner.id}`);
   assert.match(privatePage.text, /<b>Did not come true<\/b>/);
@@ -208,6 +246,7 @@ test('public settlement proof requires a matching referee event and publication'
     assert.equal(result.status, 'settled', label);
     assert.equal(Boolean(result.settlement_transaction_hash), false, label);
     assert.doesNotMatch((await s.browser().get(`/bets/${bet.id}`)).text, /Verify settlement/, label);
+    assert.equal((await admin.get(`/admin/bets/${bet.id}/evidence`)).status, 404, label);
   }
 
   const unpublished = await seedSettlement({ publish: false });
