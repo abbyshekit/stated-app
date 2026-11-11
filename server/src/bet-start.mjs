@@ -99,7 +99,7 @@ export function registerBetStartRoutes({ route, db, config, layout, send, redire
             <input type="url" id="bet-link" name="link" value="${link}" required maxlength="300" autocomplete="off" inputmode="url" placeholder="https://x.com/name/status/123">
           </div>
           ${error ? html`<p class="err" role="alert">${error}</p>` : ''}
-          <div class="acts"><button class="${rows.length ? 'big' : 'primary big'}" type="submit">Use this post</button></div>
+          <div class="acts paste"><button class="${rows.length ? 'big' : 'primary big'}" type="submit">Use this post</button></div>
         </form>
       `, { status: error ? 400 : 200 });
     }

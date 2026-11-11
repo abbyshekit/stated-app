@@ -517,4 +517,5 @@ form:not(:has(input[name="side"]:checked)) .send { opacity: 0.45; }
 .seg.quiet label { font-size: 14px; font-weight: 500; }
 .seg.quiet input:checked + label { font-weight: 600; border-width: 1px; }
 .tl.unread { font-size: 14px; overflow-wrap: anywhere; }
-
+/* The paste button appears once the field holds a link. */
+form:not(:has(#bet-link:valid)) .acts.paste { display: none; }
