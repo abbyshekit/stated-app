@@ -1,0 +1,23 @@
+{
+  "ranAt": "2026-11-11T04:56:23.278Z",
+  "network": "testnet",
+  "account": "feecheck-8a553a.stated-film-261111.testnet",
+  "treasury": "stated-film-261111.testnet",
+  "startYocto": "50000000000000000000000",
+  "create": "2JD6aArpMBCHu4B92VEWL5GxtETKfVL8ntxTAFDoGiHF",
+  "oldRegistrationMinimumYocto": "108070000000000000000000",
+  "newRegistrationMinimumYocto": "38070000000000000000000",
+  "wrap": "D8PJEhh1uzQgvEaL9udM7PduH7vcHWPqWZLv9DJYMp3i",
+  "wrapCalls": {
+    "storage_deposit": {
+      "hash": "EeJSWRni1ZfMancmoLG3Ze7k2oZXVuu2h52S1pCvUYXN",
+      "gas": "30000000000000"
+    },
+    "near_withdraw": {
+      "hash": "AsgpKEWNuHcXCpUFUxPgpWJGU36FtK4fpFxjze6wyP8G",
+      "gas": "30000000000000"
+    }
+  },
+  "wrappedAfterYocto": "0",
+  "drain": "F9Kz9e4UuYy765CzkKygaPB2uk6EzJNAZXaJLAHSoU8x"
+}

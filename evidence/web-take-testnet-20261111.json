@@ -1,0 +1,18 @@
+{
+  "network": "testnet",
+  "x": "simulated",
+  "treasury": "weblink-4b8885.stated-film-261111.testnet",
+  "contract": "escrow.stated-play-52ee8531f8.testnet",
+  "ranAt": "2026-11-11T05:07:46.643Z",
+  "treasuryCreation": "3McUbjCqJVa31xVhNsxmq5gWgRLpXxByEaqyw5hDCBBX",
+  "bet": "0f46ff37-e294-4865-b307-79cb7c0c9f76",
+  "acceptance": "5UQ3B2rM271szy8w86xCyHP77DRv3iRgGdqyeaxh3Uo6",
+  "acceptanceFinality": "FINAL",
+  "winner": "carol_4b8885.weblink-4b8885.stated-film-261111.testnet",
+  "payout": "FbxPUcd7vm6GGCpv5fvjJWh1P8dcvadYZqzfqpRXE9uh",
+  "payoutFinality": "FINAL",
+  "payoutYocto": "200000000000000000000000",
+  "transferReceipt": "G8TkchcLKybAy8iTM8GGw6Zn8Ju5WeTBzNnKK3E2zbYU",
+  "remainingCreditYocto": "0",
+  "recovered": "hEhc7MGe3g3jvDoN1Bfu8weVvCWYye57JrxgeZ3C2Ta"
+}

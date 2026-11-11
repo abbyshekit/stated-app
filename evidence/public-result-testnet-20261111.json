@@ -1,0 +1,92 @@
+{
+  "verifiedAt": "2026-11-11T11:47:37.983Z",
+  "network": "testnet",
+  "contract": "escrow.stated-play-52ee8531f8.testnet",
+  "contractVersion": 2,
+  "betId": "974e248c-efac-4a18-81d2-840e435e9870",
+  "accounts": {
+    "creator": "oskar_a0ac09.stated-play-2942e9e501.testnet",
+    "acceptor": "lena_a0ac09.stated-play-2942e9e501.testnet",
+    "referee": "referee.stated-play-2942e9e501.testnet"
+  },
+  "x": "simulated locally; no live X calls",
+  "replies": [
+    "0.2 test NEAR says this does not happen by 28 Feb 2027. To take the other side, reply here with \"@statedbot take\".",
+    "It’s on. 0.4 test NEAR is held on NEAR testnet until 28 Feb 2027. @oskar_a0ac09 says no; @lena_a0ac09 says yes.",
+    "It happened. @lena_a0ac09 wins the 0.4 test NEAR pot."
+  ],
+  "transactions": [
+    {
+      "method": "create_bet",
+      "signer": "oskar_a0ac09.stated-play-2942e9e501.testnet",
+      "hash": "F9g7Ax5VedRFtMTkBE6SiS82DLbX55KUCVQdZzySKsFa"
+    },
+    {
+      "method": "accept_bet",
+      "signer": "lena_a0ac09.stated-play-2942e9e501.testnet",
+      "hash": "ELE5okVeZPheLYoPfSu8yaBr3pspDXeF4B5TY4dJUinB"
+    },
+    {
+      "method": "withdraw",
+      "signer": "lena_a0ac09.stated-play-2942e9e501.testnet",
+      "hash": "568g1aeaHfRU1WirwccMFLLrhcvnWDDhKPnzDzXQtB21"
+    },
+    {
+      "method": "referee_resolve",
+      "signer": "referee.stated-play-2942e9e501.testnet",
+      "hash": "5C8vv5XsoQRuPKmgqcyduZ41iGabPd1cQtMxXXe2hQxh"
+    }
+  ],
+  "finalState": {
+    "id": "974e248c-efac-4a18-81d2-840e435e9870",
+    "terms_hash": "7ccfdff22148b9bb43aa6c1706a949cccfc434329b96dcf44be46ad966b251e1",
+    "creator_binding_hash": "2e6f0454fa7e3fc8a8b73436179e9e33ff3fb85d82467f1e2f3bcec3745124bf",
+    "acceptor_binding_hash": "8c780f7145e5770e8f954e638471c52ae1a13618c5ae908dabf6234dd4dc469c",
+    "creator": "oskar_a0ac09.stated-play-2942e9e501.testnet",
+    "acceptor": "lena_a0ac09.stated-play-2942e9e501.testnet",
+    "invited_account": null,
+    "creator_side": "no",
+    "stake_yocto": "200000000000000000000000",
+    "accept_by_ns": "1795002427468000000",
+    "resolve_at_ns": "1803859199000000000",
+    "status": "settled",
+    "proposal": null,
+    "referee": "referee.stated-play-2942e9e501.testnet",
+    "resolution": {
+      "outcome": "yes",
+      "method": "referee",
+      "resolved_at_ns": "1794397647418380926"
+    }
+  },
+  "steps": [
+    {
+      "name": "“bet 0.2 no” funded an offer from the handle’s account",
+      "at": "2026-11-11T11:47:16.817Z",
+      "betId": "974e248c-efac-4a18-81d2-840e435e9870",
+      "account": "oskar_a0ac09.stated-play-2942e9e501.testnet",
+      "referee": "referee.stated-play-2942e9e501.testnet"
+    },
+    {
+      "name": "“take” matched the stake",
+      "at": "2026-11-11T11:47:25.732Z",
+      "account": "lena_a0ac09.stated-play-2942e9e501.testnet"
+    },
+    {
+      "name": "The referee settled from the recorded Result and the winner was paid",
+      "at": "2026-11-11T11:47:37.750Z",
+      "resolution": {
+        "outcome": "yes",
+        "method": "referee",
+        "resolved_at_ns": "1794397647418380926"
+      },
+      "winnerGainYocto": "399593950865634700000000"
+    },
+    {
+      "name": "The signed-out Result links to the exact finalized settlement",
+      "at": "2026-11-11T11:47:37.934Z",
+      "settlementUrl": "https://testnet.nearblocks.io/txns/5C8vv5XsoQRuPKmgqcyduZ41iGabPd1cQtMxXXe2hQxh",
+      "betId": "974e248c-efac-4a18-81d2-840e435e9870",
+      "outcome": "yes"
+    }
+  ]
+}

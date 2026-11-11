@@ -1,0 +1,59 @@
+# Try Stated on one machine: the real server, worker and pages against a SIMULATED X.
+# No X account, API key or NEAR wallet is needed to look around. Nothing here contacts x.com.
+#
+#   docker compose up --build
+#   open http://127.0.0.1:4310          Stated, seeded with labelled test fixtures
+#   open http://127.0.0.1:4311          the simulated X, to post and tag the bot
+#
+# Both ports are published on this machine's loopback only. `docker compose down -v` removes the data.
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: stated
+      POSTGRES_PASSWORD: stated-local-demo
+      POSTGRES_DB: stated
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stated -d stated"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - demo-db:/var/lib/postgresql/data
+  demo:
+    build: .
+    command: ["node", "server/dev/demo-container.mjs"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://stated:stated-local-demo@db:5432/stated
+      SIM_BIND: 0.0.0.0
+      SIM_X_STATE: /data/simulated-x.json
+      PORT: "4310"
+      # The version 2 escrow on NEAR testnet. Its account has no access keys, so its code cannot change.
+      STATED_NEAR_CONTRACT: stated-escrow-52081551be.testnet
+      # Bets from replies: testnet accounts named after handles. On first start the stack asks the
+      # testnet faucet for its own treasury, so no key or wallet is needed. Needs outbound network.
+      STATED_PLAY: "1"
+      STATED_PLAY_AUTOPROVISION: "1"
+      STATED_PLAY_TREASURY: "${STATED_DEMO_TESTNET_TREASURY:-}"
+      STATED_PLAY_TREASURY_KEY: "${STATED_DEMO_TESTNET_TREASURY_KEY:-}"
+      # A demo settles as soon as the Result is recorded. A public deployment waits ten minutes by default.
+      STATED_PLAY_SETTLE_DELAY_SECONDS: "0"
+      # A Bet's page quotes its stake from other chains through NEAR Intents (dry runs; nothing is charged).
+      STATED_INTENTS_QUOTES: "1"
+      STATED_TOKEN_KEY: local-demo-key-that-only-seals-test-accounts
+    ports:
+      - "127.0.0.1:4310:4310"
+      - "127.0.0.1:4311:4311"
+    volumes:
+      - demo-x:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4310/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+volumes:
+  demo-db:
+  demo-x:

@@ -1,0 +1,9 @@
+node_modules/
+output/
+/out/
+.playwright-cli/
+.review/
+.env
+.env.*
+!.env.example
+contracts/**/target/

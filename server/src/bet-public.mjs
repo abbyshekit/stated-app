@@ -1,0 +1,290 @@
+// INTEGRATION: Explicit Bet publication is independent of profile/save visibility.
+// near-bets.mjs must set near_verified_at after finalized synchronization. Reads
+// expose stored snapshots only; handlers must sync again before any deposit.
+import { baseDecode } from 'near-api-js';
+import { isAccount } from './near-network.mjs';
+import { idOf, UserError } from './store.mjs';
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const HASH = /^[a-f0-9]{64}$/;
+const STATUSES = new Set(['offered', 'accepted', 'proposed', 'disputed', 'settled', 'cancelled', 'expired', 'refunded']);
+const OUTCOMES = new Set(['yes', 'no', 'void']);
+const STALE_AFTER_MS = 5 * 60 * 1000;
+
+// No sources, saves, annotations, proposal notes or request metadata are read.
+const SELECT = `select b.id, b.creator_user_id, b.acceptor_user_id, b.invited_user_id,
+  b.claim, b.criteria, b.evidence_source_url, b.creator_side, b.stake_yocto,
+  b.accept_by, b.resolve_at, b.created_at, b.accepted_at, b.settled_at,
+  b.creator_wallet, b.acceptor_wallet, b.invited_wallet, b.terms_hash, b.referee_wallet,
+  b.chain_state, b.near_height, b.near_verified_at,
+  p.published_at, creator.x_username as creator_username,
+  acceptor.x_username as acceptor_username, clock_timestamp() as read_at,
+  exists (select 1 from bilateral_near_requests r
+    where r.bet_id=b.id and r.method='create_bet' and r.user_id=b.creator_user_id
+      and r.wallet_account=b.chain_state->>'creator'
+      and r.binding_hash=b.chain_state->>'creator_binding_hash') as creator_bound,
+  exists (select 1 from bilateral_near_requests r
+    where r.bet_id=b.id and r.method='accept_bet' and r.user_id=b.acceptor_user_id
+      and r.wallet_account=b.chain_state->>'acceptor'
+      and r.binding_hash=b.chain_state->>'acceptor_binding_hash') as acceptor_bound,
+  exists (select 1 from bilateral_bet_public_consents c
+    where c.bet_id=b.id and c.user_id=b.acceptor_user_id) as acceptor_consented,
+  (select count(*)::text from bilateral_bet_follows f where f.bet_id=b.id) as follower_count
+  from bilateral_bets b
+  join bilateral_bet_publications p on p.bet_id=b.id and p.creator_user_id=b.creator_user_id
+  join users creator on creator.id=b.creator_user_id
+  left join users acceptor on acceptor.id=b.acceptor_user_id`;
+
+function reference(id) {
+  if (typeof id !== 'string' || !UUID.test(id)) throw new UserError('Use a valid bet reference.');
+  return id.toLowerCase();
+}
+
+function actorId(user) {
+  if (!user) throw new UserError('Sign in with X to continue.', 401);
+  if (user.kind !== 'person' || !user.x_user_id) throw new UserError('Use a personal X account.', 403);
+  return BigInt(idOf(user.id)).toString();
+}
+
+async function actor(tx, user, { setup = false } = {}) {
+  const id = actorId(user);
+  const row = await tx.one('select id, kind, x_user_id, setup_completed_at from users where id=$1 for share', [id]);
+  if (!row || row.kind !== 'person' || row.x_user_id !== user.x_user_id) {
+    throw new UserError('Sign in with X again to continue.', 401);
+  }
+  if (setup && !row.setup_completed_at) throw new UserError('Complete account setup before publishing or joining a bet.', 403);
+  return id;
+}
+
+function timestamp(value) {
+  if (value == null) return null;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+}
+
+function nanoseconds(value) {
+  const iso = timestamp(value);
+  return iso ? (BigInt(new Date(iso).getTime()) * 1000000n).toString() : null;
+}
+
+function snapshotVerified(row) {
+  const chain = row.chain_state;
+  if (!chain || typeof chain !== 'object' || Array.isArray(chain)
+    || !STATUSES.has(chain.status) || !row.creator_bound
+    || !/^\d+$/.test(String(row.near_height || '')) || BigInt(row.near_height) < 1n
+    || !isAccount(chain.creator || '') || !HASH.test(chain.creator_binding_hash || '')
+    || chain.creator !== row.creator_wallet || chain.id !== row.id
+    || chain.terms_hash !== row.terms_hash || chain.stake_yocto !== row.stake_yocto
+    || chain.creator_side !== row.creator_side || chain.accept_by_ns !== nanoseconds(row.accept_by)
+    || chain.resolve_at_ns !== nanoseconds(row.resolve_at)
+    || (chain.invited_account || null) !== (row.invited_wallet || null)
+    || (chain.referee || null) !== (row.referee_wallet || null)) return false;
+  const accepted = ['accepted', 'proposed', 'disputed', 'settled', 'refunded'].includes(chain.status);
+  if (accepted && !chain.acceptor) return false;
+  if (chain.acceptor && (!isAccount(chain.acceptor) || !HASH.test(chain.acceptor_binding_hash || '')
+    || chain.acceptor !== row.acceptor_wallet || chain.acceptor === chain.creator
+    || (row.invited_wallet && chain.acceptor !== row.invited_wallet))) return false;
+  if (chain.status === 'proposed' && !chain.proposal) return false;
+  if (chain.status === 'settled' && !chain.proposal && !chain.resolution) return false;
+  if (chain.resolution && (!OUTCOMES.has(chain.resolution.outcome)
+    || !['agreement', 'unanswered', 'referee'].includes(chain.resolution.method))) return false;
+  if (chain.proposal && (!OUTCOMES.has(chain.proposal.outcome)
+    || ![chain.creator, chain.acceptor].includes(chain.proposal.proposer)
+    || !/^\d{1,20}$/.test(String(chain.proposal.revision || ''))
+    || BigInt(chain.proposal.revision) < 1n || BigInt(chain.proposal.revision) > 18446744073709551615n)) return false;
+  return true;
+}
+
+function view(row) {
+  const verified = snapshotVerified(row);
+  const chain = verified ? row.chain_state : null;
+  const checked = verified ? timestamp(row.near_verified_at) : null;
+  const now = new Date(row.read_at).getTime();
+  const age = checked ? now - new Date(checked).getTime() : null;
+  const identityBound = verified && row.acceptor_bound && row.acceptor_consented
+    && String(row.acceptor_user_id) !== String(row.creator_user_id)
+    && (!row.invited_user_id || String(row.invited_user_id) === String(row.acceptor_user_id));
+  return {
+    id: row.id,
+    claim: row.claim,
+    criteria: row.criteria,
+    evidence_source_url: row.evidence_source_url,
+    creator_side: row.creator_side,
+    stake_yocto: row.stake_yocto,
+    accept_by: timestamp(row.accept_by),
+    resolve_at: timestamp(row.resolve_at),
+    created_at: timestamp(row.created_at),
+    published_at: timestamp(row.published_at),
+    creator_username: verified ? row.creator_username : null,
+    creator_wallet: chain?.creator || null,
+    acceptor_username: identityBound ? row.acceptor_username : null,
+    acceptor_wallet: chain?.acceptor || null,
+    snapshot_status: chain?.status || null,
+    status: chain?.status || 'unverified',
+    funded: verified,
+    chain_verification: verified ? 'finalized_snapshot' : 'unverified',
+    chain_freshness: !verified ? 'unverified' : age == null || age < 0 ? 'unknown' : age > STALE_AFTER_MS ? 'stale' : 'recent',
+    last_verified_at: checked,
+    verified_height: verified ? String(row.near_height) : null,
+    outcome: chain?.status === 'settled' ? (chain.resolution?.outcome || chain.proposal?.outcome || null) : null,
+    settled_by: chain?.status === 'settled' ? (chain.resolution?.method || 'agreement') : null,
+    referee_wallet: chain?.referee || null,
+    proposed_outcome: ['proposed', 'disputed'].includes(chain?.status) ? chain.proposal?.outcome || null : null,
+    accepted_at: verified && chain.acceptor ? timestamp(row.accepted_at) : null,
+    settled_at: chain?.status === 'settled' ? timestamp(row.settled_at) : null,
+    follower_count: String(row.follower_count || '0'),
+  };
+}
+
+async function readPublic(tx, id) {
+  const row = await tx.one(`${SELECT} where b.id=$1 and p.withdrawn_at is null for share of b,p`, [id]);
+  if (!row) return null;
+  const bet = view(row);
+  if (bet.settled_by !== 'referee' || !['yes', 'no'].includes(bet.outcome)) return bet;
+
+  // This call resolves one Bet. A wallet withdrawal may combine credit from several Bets.
+  const proof = await tx.one(`select detail->>'transactionHash' as hash from bilateral_bet_events
+    where bet_id=$1 and actor_user_id=$2 and kind='referee_resolved'
+      and detail->>'outcome'=$3 and detail->>'referee'=$4
+    order by id desc limit 1`, [id, row.creator_user_id, bet.outcome, bet.referee_wallet]);
+  const hash = proof?.hash;
+  if (hash && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(hash) && baseDecode(hash).length === 32) {
+    bet.settlement_transaction_hash = hash;
+  }
+  return bet;
+}
+
+export async function publicBet(db, id) {
+  const ref = reference(id);
+  return db.tx((tx) => readPublic(tx, ref));
+}
+
+export async function recentPublicBets(db, limit = 20) {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new UserError('Choose a result count from 1 to 100.');
+  return db.tx(async (tx) => {
+    const rows = await tx.many(`${SELECT} where p.withdrawn_at is null
+      order by p.published_at desc, b.id desc limit $1 for share of b,p`, [limit]);
+    return rows.map(view);
+  });
+}
+
+export async function nextOpenPublicBet(db, viewerId = null) {
+  return db.tx(async (tx) => {
+    const rows = await tx.many(`${SELECT}
+      where p.withdrawn_at is null and b.status='offered' and b.accept_by>clock_timestamp()
+        and b.invited_user_id is null and b.invited_wallet is null
+        and ($1::bigint is null or b.creator_user_id<>$1)
+      order by p.published_at desc, b.id desc limit 20 for share of b,p`, [viewerId]);
+    return rows.map(view).find((bet) => bet.status === 'offered') || null;
+  });
+}
+
+// The caller must already authorize the source save. The returned projection
+// contains only deliberately published Bet data, never the private relation.
+export async function publicBetsForSave(db, saveId) {
+  const id = idOf(saveId);
+  return db.tx(async (tx) => {
+    const rows = await tx.many(`${SELECT} where (b.source_save_id=$1 or (b.referee_wallet is not null and b.source_save_id in (
+          select other.id from saves mine join saves other on other.statement_id = mine.statement_id where mine.id=$1))) and p.withdrawn_at is null
+      order by (b.status='offered' and b.accept_by>clock_timestamp()) desc, p.published_at desc
+      limit 10 for share of b,p`, [id]);
+    return rows.map(view);
+  });
+}
+
+// List pages already authorize each source save. Batch their first published
+// Bet in one read instead of opening a transaction per prediction row.
+export async function firstPublicBetsForSaves(db, saveIds) {
+  if (!Array.isArray(saveIds) || saveIds.length > 24) throw new UserError('Choose at most 24 predictions.');
+  const ids = [...new Set(saveIds.map(idOf))];
+  if (!ids.length) return new Map();
+  return db.tx(async (tx) => {
+    const rows = await tx.many(`select selected.save_id, picked.*
+      from unnest($1::bigint[]) as selected(save_id)
+      cross join lateral (${SELECT}
+        where (b.source_save_id=selected.save_id or (b.referee_wallet is not null and b.source_save_id in (
+          select other.id from saves mine join saves other on other.statement_id = mine.statement_id where mine.id=selected.save_id))) and p.withdrawn_at is null
+        order by (b.status='offered' and b.accept_by>clock_timestamp()) desc, p.published_at desc, b.id desc
+        limit 1 for share of b,p) picked`, [ids]);
+    return new Map(rows.map(row => [String(row.save_id), view(row)]));
+  });
+}
+
+// Calling this function represents explicit consent to the immutable Bet terms
+// and creator identity. The POST handler must require that consent and CSRF.
+export async function publishBet(db, user, id) {
+  const ref = reference(id);
+  return db.tx(async (tx) => {
+    const owner = await actor(tx, user, { setup: true });
+    const bet = await tx.one(`select b.*,
+      exists (select 1 from bilateral_near_requests r where r.bet_id=b.id
+        and r.method='create_bet' and r.user_id=b.creator_user_id
+        and r.wallet_account=b.chain_state->>'creator'
+        and r.binding_hash=b.chain_state->>'creator_binding_hash') as creator_bound
+      from bilateral_bets b where b.id=$1 for update of b`, [ref]);
+    if (!bet || String(bet.creator_user_id) !== owner) throw new UserError('Only the creator can publish this bet.', 404);
+    if (!snapshotVerified(bet) || !timestamp(bet.near_verified_at)) {
+      throw new UserError('Verify the finalized creator deposit before publishing this bet.', 409);
+    }
+    await tx.query(`insert into bilateral_bet_publications (bet_id,creator_user_id,published_at)
+      values ($1,$2,clock_timestamp()) on conflict (bet_id) do update
+      set withdrawn_at=null, published_at=case when bilateral_bet_publications.withdrawn_at is null
+        then bilateral_bet_publications.published_at else excluded.published_at end`, [ref, owner]);
+    return readPublic(tx, ref);
+  });
+}
+
+export async function withdrawBetPublication(db, user, id) {
+  const ref = reference(id);
+  return db.tx(async (tx) => {
+    const owner = await actor(tx, user);
+    const bet = await tx.one('select creator_user_id from bilateral_bets where id=$1 for update', [ref]);
+    if (!bet || String(bet.creator_user_id) !== owner) throw new UserError('Only the creator can withdraw this publication.', 404);
+    await tx.query(`update bilateral_bet_publications set withdrawn_at=coalesce(withdrawn_at,clock_timestamp())
+      where bet_id=$1 and creator_user_id=$2`, [ref, owner]);
+    return { id: ref, published: false };
+  });
+}
+
+export async function followPublicBet(db, user, id) {
+  const ref = reference(id);
+  return db.tx(async (tx) => {
+    const follower = await actor(tx, user);
+    const bet = await readPublic(tx, ref);
+    if (!bet) throw new UserError('This public bet is unavailable.', 404);
+    await tx.query(`insert into bilateral_bet_follows (bet_id,user_id) values ($1,$2)
+      on conflict (bet_id,user_id) do nothing`, [ref, follower]);
+    return { id: ref, following: true };
+  });
+}
+
+// A pending join can consent before its wallet transaction completes. Public
+// reads reveal a handle only if finalized acceptance binds this exact user.
+export async function consentToPublicBet(db, user, id) {
+  const ref = reference(id);
+  return db.tx(async (tx) => {
+    const joiner = await actor(tx, user, { setup: true });
+    const row = await tx.one(`${SELECT} where b.id=$1 and p.withdrawn_at is null for share of b,p`, [ref]);
+    if (!row) throw new UserError('This public bet is unavailable.', 404);
+    const pending = snapshotVerified(row) && row.chain_state.status === 'offered'
+      && new Date(row.accept_by).getTime() > new Date(row.read_at).getTime()
+      && (!row.invited_user_id || String(row.invited_user_id) === joiner);
+    const accepted = row.acceptor_bound && String(row.acceptor_user_id) === joiner && snapshotVerified(row);
+    if (String(row.creator_user_id) === joiner || (!pending && !accepted)) {
+      throw new UserError('Only an eligible joining participant can publish their X identity.', 403);
+    }
+    await tx.query(`insert into bilateral_bet_public_consents (bet_id,user_id) values ($1,$2)
+      on conflict (bet_id,user_id) do nothing`, [ref, joiner]);
+    return { id: ref, consented: true };
+  });
+}
+
+export async function followsFor(db, user) {
+  return db.tx(async (tx) => {
+    const follower = await actor(tx, user);
+    const rows = await tx.many(`${SELECT} join bilateral_bet_follows follow
+      on follow.bet_id=b.id and follow.user_id=$1 where p.withdrawn_at is null
+      order by follow.created_at desc, b.id desc limit 100 for share of b,p`, [follower]);
+    return rows.map(view);
+  });
+}

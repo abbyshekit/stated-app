@@ -1,0 +1,20 @@
+{
+  "verifiedAt": "2026-11-11T05:50:14.788Z",
+  "network": "testnet",
+  "x": "simulated in a fresh Docker stack",
+  "treasury": "judge-10ed6f.stated-price-a5f50aebc2.testnet",
+  "treasuryCreation": "GXuWdq2a2JEihrdLMTdG1Lnn3nU9yuT61qqkLWXXnCSH",
+  "treasuryFundingYocto": "4000000000000000000000000",
+  "faucetProvisioningRecords": 0,
+  "contract": "stated-escrow-52081551be.testnet",
+  "contractVersion": 2,
+  "bet": "e0c2139d-e22f-455a-b0d1-2fd9ca326c1c",
+  "offer": "5oYcsrHVoDrw8D6fNVrERDuMkfGFioN7jvfnN8jSLzBk",
+  "acceptance": "9p7iVGrrvNjsKPSgfFQQCyBYcQziwcGNsKsW9etjf1Y3",
+  "winner": "sim_carol.judge-10ed6f.stated-price-a5f50aebc2.testnet",
+  "payout": "5wjBtpbVTFb1XnbU5EMsfbNhnHLZM64Byw1k1VTqnrGq",
+  "payoutFinality": "FINAL",
+  "transferReceipt": "6KYaTi9DnAx3o9bE4YCU1wAsdydxBcrSVuPdck4MgE7h",
+  "payoutYocto": "400000000000000000000000",
+  "remainingCreditYocto": "0"
+}

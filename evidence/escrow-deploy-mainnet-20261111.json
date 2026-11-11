@@ -1,0 +1,17 @@
+{
+  "deployedAt": "2026-11-11T04:13:53.257Z",
+  "network": "mainnet",
+  "contract": "escrow.statedforecast.near",
+  "paidBy": "statedforecast.near",
+  "transaction": "A14qzLc2KbfMP1rkwM5Kd35boRiLUvmXRwCExMvqnv1a",
+  "transactionUrl": "https://nearblocks.io/txns/A14qzLc2KbfMP1rkwM5Kd35boRiLUvmXRwCExMvqnv1a",
+  "contractUrl": "https://nearblocks.io/address/escrow.statedforecast.near",
+  "wasmBytes": 166447,
+  "wasmSha256": "57fb29aa0c444a1ce2463be3d1bbddb277348521920b586cd48b548a9f113d6a",
+  "sentYocto": "1864470000000000000000000",
+  "checks": {
+    "codeMatchesTheBuild": true,
+    "accessKeys": 0,
+    "version": 2
+  }
+}

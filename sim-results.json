@@ -1,0 +1,258 @@
+{
+  "generatedAt": "2026-11-06T03:38:28.638Z",
+  "model": {
+    "agents": 100,
+    "questions": 16,
+    "seeds": 30,
+    "readWeight": 0.5,
+    "reminderCatch": 0.4,
+    "noteSharpness": 4,
+    "quitScale": 0.85,
+    "conversion": 0.3,
+    "bragShare": 0.22,
+    "quietShare": 0.03,
+    "cardBase": 0.05,
+    "cardExtreme": 0.14,
+    "receiptShare": 0.09
+  },
+  "assumptions": [
+    "Writing quality is drawn independently of forecasting skill.",
+    "Quit chance after a miss rises with ego and with how far the call was on the wrong side, and falls as status rises.",
+    "Being read adds status. It does not lower the status of people who were not read.",
+    "The reminder multiplies the quit hazard by (1 − reminderCatch). reminderCatch is an assumption, not a measured rate.",
+    "The sealed card is shared before the outcome. The leaderboard arm shares almost only after a clear hit.",
+    "Each share converts to a new participant with probability 0.3. That rate is an assumption.",
+    "Follows attach to a rank. The record arm ranks the note. The other arms rank the public average baseline. Both use the same sharpness, 4, on that percentile.",
+    "Stay-after-miss counts original participants who had a negative baseline and still forecast the next question."
+  ],
+  "seeds": 30,
+  "agents": 100,
+  "questions": 16,
+  "skillBaselineCorr": 0.53,
+  "arms": {
+    "board": {
+      "stayAfterMiss": {
+        "mean": 0.8421,
+        "min": 0.7869,
+        "max": 0.8878,
+        "sd": 0.0245
+      },
+      "writingCorr": {
+        "mean": -0.0354,
+        "min": -0.1891,
+        "max": 0.173,
+        "sd": 0.0862
+      },
+      "skillCorr": {
+        "mean": 0.0033,
+        "min": -0.1554,
+        "max": 0.3071,
+        "sd": 0.1249
+      },
+      "scoreCorr": {
+        "mean": 0.2716,
+        "min": -0.0192,
+        "max": 0.5391,
+        "sd": 0.1316
+      },
+      "sharesPerAgentRound": {
+        "mean": 0.1272,
+        "min": 0.0965,
+        "max": 0.1506,
+        "sd": 0.0107
+      },
+      "arrivalsPerAgentRound": {
+        "mean": 0.0389,
+        "min": 0.0262,
+        "max": 0.0477,
+        "sd": 0.0051
+      },
+      "activeOriginals": {
+        "mean": 36.0333,
+        "min": 23,
+        "max": 53,
+        "sd": 7.4363
+      },
+      "stayOpportunities": 11420
+    },
+    "card": {
+      "stayAfterMiss": {
+        "mean": 0.8421,
+        "min": 0.7869,
+        "max": 0.8878,
+        "sd": 0.0245
+      },
+      "writingCorr": {
+        "mean": -0.0354,
+        "min": -0.1891,
+        "max": 0.173,
+        "sd": 0.0862
+      },
+      "skillCorr": {
+        "mean": 0.0033,
+        "min": -0.1554,
+        "max": 0.3071,
+        "sd": 0.1249
+      },
+      "scoreCorr": {
+        "mean": 0.2716,
+        "min": -0.0192,
+        "max": 0.5391,
+        "sd": 0.1316
+      },
+      "sharesPerAgentRound": {
+        "mean": 0.2695,
+        "min": 0.2402,
+        "max": 0.3026,
+        "sd": 0.0147
+      },
+      "arrivalsPerAgentRound": {
+        "mean": 0.0829,
+        "min": 0.0645,
+        "max": 0.099,
+        "sd": 0.008
+      },
+      "activeOriginals": {
+        "mean": 36.0333,
+        "min": 23,
+        "max": 53,
+        "sd": 7.4363
+      },
+      "stayOpportunities": 11420
+    },
+    "remind": {
+      "stayAfterMiss": {
+        "mean": 0.8992,
+        "min": 0.8663,
+        "max": 0.9392,
+        "sd": 0.0168
+      },
+      "writingCorr": {
+        "mean": -0.0315,
+        "min": -0.2116,
+        "max": 0.1282,
+        "sd": 0.0912
+      },
+      "skillCorr": {
+        "mean": 0.0687,
+        "min": -0.1352,
+        "max": 0.3814,
+        "sd": 0.1302
+      },
+      "scoreCorr": {
+        "mean": 0.3122,
+        "min": 0.0504,
+        "max": 0.6326,
+        "sd": 0.135
+      },
+      "sharesPerAgentRound": {
+        "mean": 0.2702,
+        "min": 0.2428,
+        "max": 0.3072,
+        "sd": 0.0146
+      },
+      "arrivalsPerAgentRound": {
+        "mean": 0.0834,
+        "min": 0.0645,
+        "max": 0.1007,
+        "sd": 0.0089
+      },
+      "activeOriginals": {
+        "mean": 49.9667,
+        "min": 36,
+        "max": 62,
+        "sd": 7.1483
+      },
+      "stayOpportunities": 13354
+    },
+    "record": {
+      "stayAfterMiss": {
+        "mean": 0.9107,
+        "min": 0.8744,
+        "max": 0.9478,
+        "sd": 0.0153
+      },
+      "writingCorr": {
+        "mean": 0.8513,
+        "min": 0.798,
+        "max": 0.9045,
+        "sd": 0.0255
+      },
+      "skillCorr": {
+        "mean": 0.0375,
+        "min": -0.0889,
+        "max": 0.1943,
+        "sd": 0.0695
+      },
+      "scoreCorr": {
+        "mean": 0.0031,
+        "min": -0.293,
+        "max": 0.2125,
+        "sd": 0.1052
+      },
+      "sharesPerAgentRound": {
+        "mean": 0.2704,
+        "min": 0.2461,
+        "max": 0.3059,
+        "sd": 0.0142
+      },
+      "arrivalsPerAgentRound": {
+        "mean": 0.0834,
+        "min": 0.0646,
+        "max": 0.0993,
+        "sd": 0.0088
+      },
+      "activeOriginals": {
+        "mean": 53.5667,
+        "min": 40,
+        "max": 64,
+        "sd": 6.8053
+      },
+      "stayOpportunities": 13783
+    }
+  },
+  "sweepReminder": [
+    {
+      "reminderCatch": 0,
+      "board": 0.8421,
+      "remind": 0.8421
+    },
+    {
+      "reminderCatch": 0.2,
+      "board": 0.8421,
+      "remind": 0.8704
+    },
+    {
+      "reminderCatch": 0.4,
+      "board": 0.8421,
+      "remind": 0.8992
+    },
+    {
+      "reminderCatch": 0.6,
+      "board": 0.8421,
+      "remind": 0.933
+    }
+  ],
+  "sweepReadWeight": [
+    {
+      "readWeight": 0,
+      "stayAfterMiss": 0.8421,
+      "writingCorr": 0.8343
+    },
+    {
+      "readWeight": 0.25,
+      "stayAfterMiss": 0.8493,
+      "writingCorr": 0.8313
+    },
+    {
+      "readWeight": 0.5,
+      "stayAfterMiss": 0.8577,
+      "writingCorr": 0.8344
+    },
+    {
+      "readWeight": 0.75,
+      "stayAfterMiss": 0.8659,
+      "writingCorr": 0.8342
+    }
+  ]
+}

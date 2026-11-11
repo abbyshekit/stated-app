@@ -1,0 +1,15 @@
+{
+  "verifiedAt": "2026-11-11T11:22:18.427Z",
+  "network": "testnet",
+  "provisioning": "default Docker faucet; no supplied treasury",
+  "x": "simulated",
+  "contract": "stated-escrow-52081551be.testnet",
+  "bet": "4bb5394f-f46e-49cd-9fe0-dd04b9aacbd3",
+  "offer": "AHfFaSmqgRpuFJQ8exNVzQtdE8bjBzU9tWCSZaK6GcCU",
+  "acceptance": "AjYy1V63zkByRxPJASQ2Fs9VMix1WhJAa75bj3iLVFb",
+  "winner": "sim_carol.stated-play-9f1a6407fb.testnet",
+  "payout": "8WxLiaoE4daqj7J8359nQMUGBeE328kqTCGFF8HLsz1Y",
+  "payoutFinality": "FINAL",
+  "payoutYocto": "400000000000000000000000",
+  "remainingCreditYocto": "0"
+}

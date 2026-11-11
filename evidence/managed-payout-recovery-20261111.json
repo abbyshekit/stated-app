@@ -1,0 +1,21 @@
+{
+  "verifiedAt": "2026-11-11T14:02:14.158Z",
+  "network": "testnet",
+  "x": "simulated",
+  "endpoint": "https://test.rpc.fastnear.com",
+  "bet": "29107aa8-d2e3-4368-86e4-a60c01d83c79",
+  "contract": "stated-escrow-52081551be.testnet",
+  "winner": "sim_carol.stated-play-9f1a6407fb.testnet",
+  "offer": "35iHLh7Gh5dyEhisySKFxfBUbgUw3kcjBJ8TENBkhTjf",
+  "acceptance": "2RWED24ACHHaK7WLTK9XCKyrQiVAbR5Vq8F3fCPkUHGz",
+  "ruling": "ChfrfuLducC6FBMW7hwu696nHozxUTDVbzQsG9wDEwCw",
+  "payout": "FaKY3iE3Q9yW9ANM9WfQvxdwv2VKb5Sdyz9w76oVYUZb",
+  "payoutFinality": "FINAL",
+  "payoutYocto": "200000000000000000000000",
+  "transferReceipt": "6ayf5c3XfwZWWoWz7VrJjvnjybLpY7jLNxBd9AaLDkN8",
+  "remainingCreditYocto": "0",
+  "intermediateState": "Actual finalized 0.2 test NEAR escrow credit; fixture payout sweep temporarily delayed.",
+  "browserBefore": "Displayed an external-wallet withdrawal form for an app-managed account; the action was not submitted.",
+  "browserAfter": "Pending automatic payout status, no external-wallet form; then Paid to your account with transaction link.",
+  "cleanup": "Fixture delay removed; normal worker completed payout."
+}

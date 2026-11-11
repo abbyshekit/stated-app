@@ -1,0 +1,17 @@
+node_modules
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+.review
+.gstack
+.playwright-cli
+output
+out
+design
+evidence/*
+!evidence/hackathon-demo-20261111.json
+eval
+contracts/**/target
+*.log

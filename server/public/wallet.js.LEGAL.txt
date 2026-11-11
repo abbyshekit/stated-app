@@ -1,0 +1,113 @@
+Bundled license information:
+
+ieee754/index.js:
+  /*! ieee754. BSD-3-Clause License. Feross Aboukhadijeh <https://feross.org/opensource> */
+
+buffer/index.js:
+  /*!
+   * The buffer module from node.js, for the browser.
+   *
+   * @author   Feross Aboukhadijeh <https://feross.org>
+   * @license  MIT
+   */
+
+mustache/mustache.js:
+  /*!
+   * mustache.js - Logic-less {{mustache}} templates with JavaScript
+   * http://github.com/janl/mustache.js
+   */
+
+depd/lib/browser/index.js:
+  /*!
+   * depd
+   * Copyright(c) 2015 Douglas Christopher Wilson
+   * MIT Licensed
+   */
+
+safe-buffer/index.js:
+  /*! safe-buffer. MIT License. Feross Aboukhadijeh <https://feross.org/opensource> */
+
+@scure/base/index.js:
+@scure/base/index.js:
+@scure/base/lib/esm/index.js:
+  /*! scure-base - MIT License (c) 2022 Paul Miller (paulmillr.com) */
+
+@lit/context/lib/context-request-event.js:
+@lit/context/lib/create-context.js:
+@lit/context/lib/controllers/context-consumer.js:
+@lit/context/lib/value-notifier.js:
+@lit/context/lib/controllers/context-provider.js:
+@lit/context/lib/context-root.js:
+@lit/reactive-element/decorators/query-assigned-elements.js:
+lit-html/directives/keyed.js:
+  /**
+   * @license
+   * Copyright 2021 Google LLC
+   * SPDX-License-Identifier: BSD-3-Clause
+   */
+
+@lit/context/lib/decorators/provide.js:
+@lit/reactive-element/reactive-element.js:
+lit-html/lit-html.js:
+lit-element/lit-element.js:
+@lit/reactive-element/decorators/custom-element.js:
+@lit/reactive-element/decorators/property.js:
+@lit/reactive-element/decorators/state.js:
+@lit/reactive-element/decorators/event-options.js:
+@lit/reactive-element/decorators/base.js:
+@lit/reactive-element/decorators/query.js:
+@lit/reactive-element/decorators/query-all.js:
+@lit/reactive-element/decorators/query-async.js:
+@lit/reactive-element/decorators/query-assigned-nodes.js:
+lit-html/directive.js:
+lit-html/directives/unsafe-html.js:
+lit-html/directives/unsafe-svg.js:
+  /**
+   * @license
+   * Copyright 2017 Google LLC
+   * SPDX-License-Identifier: BSD-3-Clause
+   */
+
+@lit/context/lib/decorators/consume.js:
+lit-html/is-server.js:
+  /**
+   * @license
+   * Copyright 2022 Google LLC
+   * SPDX-License-Identifier: BSD-3-Clause
+   */
+
+@lit/reactive-element/css-tag.js:
+  /**
+   * @license
+   * Copyright 2019 Google LLC
+   * SPDX-License-Identifier: BSD-3-Clause
+   */
+
+lit-html/directive-helpers.js:
+  /**
+   * @license
+   * Copyright 2020 Google LLC
+   * SPDX-License-Identifier: BSD-3-Clause
+   */
+
+@noble/hashes/esm/utils.js:
+@noble/hashes/utils.js:
+  /*! noble-hashes - MIT License (c) 2022 Paul Miller (paulmillr.com) */
+
+@noble/curves/esm/abstract/utils.js:
+@noble/curves/esm/abstract/modular.js:
+@noble/curves/esm/abstract/curve.js:
+@noble/curves/esm/abstract/edwards.js:
+@noble/curves/esm/ed25519.js:
+@noble/curves/utils.js:
+@noble/curves/abstract/modular.js:
+@noble/curves/abstract/curve.js:
+@noble/curves/abstract/edwards.js:
+@noble/curves/ed25519.js:
+@noble/curves/utils.js:
+  /*! noble-curves - MIT License (c) 2022 Paul Miller (paulmillr.com) */
+
+@noble/post-quantum/utils.js:
+@noble/post-quantum/_crystals.js:
+@noble/post-quantum/ml-dsa.js:
+  /*! noble-post-quantum - MIT License (c) 2024 Paul Miller (paulmillr.com) */

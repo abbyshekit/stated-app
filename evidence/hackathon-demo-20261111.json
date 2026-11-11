@@ -1,0 +1,47 @@
+{
+  "recordedAt": "2026-11-11T04:23:31.919Z",
+  "recording": {
+    "path": "out/hackathon-demo-20261111/submission-demo.mp4",
+    "sha256": "02ce7ebb5b1210f17365c23f2361fe09308efabbc5afff9da81fd3636f364833",
+    "durationSeconds": 35.333333,
+    "width": 780,
+    "height": 1520,
+    "codec": "H.264",
+    "capturedProductFrames": 28,
+    "visualInspection": "Sampled the prediction, offer, acceptance, result and paid screens, plus both edited title cards."
+  },
+  "environment": {
+    "network": "NEAR testnet",
+    "escrow": "escrow.stated-play-52ee8531f8.testnet",
+    "x": "simulated locally",
+    "prediction": "TEST FIXTURE: Nightjar 2.0 ships before March 1, 2027.",
+    "bet": "678a616f-5d93-4064-a607-997eb0a775de"
+  },
+  "payout": {
+    "winner": "sim_carol.stated-film-261111.testnet",
+    "transaction": "6EqheQnnphHRwfV69821K3CymkL7WQaPyb6Cp6hoQa6Z",
+    "transferReceipt": "3evx1rkAsFNoRVawEpHiCsdNcDVQVmbR7YPuT13PrLCv",
+    "callbackReceipt": "CHiKi8WS3Nakv2BrdfJ6SdPLqkc4UrtCTE7wuR8XiWVh",
+    "deliveredYocto": "400000000000000000000000",
+    "callbackReturnedTrue": true,
+    "winnerCreditYocto": "0",
+    "finalizedCheckBlockHeight": 277165452
+  },
+  "validation": {
+    "appTestsPassed": 354,
+    "contractTestsPassed": 71,
+    "composeConfigurationValid": true,
+    "freshComposeFallback": {
+      "project": "stated-judge-proof-20261111",
+      "testnetAutoProvisioning": false,
+      "healthStatus": 200,
+      "escrowStatus": "degraded",
+      "seededProfileStatus": 200,
+      "localTagCaptured": true,
+      "privateOwnerTerms": true,
+      "explicitOwnerReadReturnedSourceWords": true,
+      "anonymousDetailStatus": 404,
+      "anonymousCardStatus": 404
+    }
+  }
+}

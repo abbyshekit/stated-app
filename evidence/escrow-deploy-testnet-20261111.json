@@ -1,0 +1,17 @@
+{
+  "deployedAt": "2026-11-11T03:50:39.787Z",
+  "network": "testnet",
+  "contract": "escrow.stated-play-52ee8531f8.testnet",
+  "paidBy": "stated-play-52ee8531f8.testnet",
+  "transaction": "FW2YjE2UwnvzQUog2rpJKccxpLz8Ttimyx1DfC9Gqh2L",
+  "transactionUrl": "https://testnet.nearblocks.io/txns/FW2YjE2UwnvzQUog2rpJKccxpLz8Ttimyx1DfC9Gqh2L",
+  "contractUrl": "https://testnet.nearblocks.io/address/escrow.stated-play-52ee8531f8.testnet",
+  "wasmBytes": 166447,
+  "wasmSha256": "57fb29aa0c444a1ce2463be3d1bbddb277348521920b586cd48b548a9f113d6a",
+  "sentYocto": "1864470000000000000000000",
+  "checks": {
+    "codeMatchesTheBuild": true,
+    "accessKeys": 0,
+    "version": 2
+  }
+}

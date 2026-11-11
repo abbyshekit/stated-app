@@ -1,0 +1,136 @@
+import { isNamedAccount, useNetwork } from './near-network.mjs';
+
+export function loadConfig(env = process.env) {
+  const port = Number(env.PORT || 8080);
+  // One process serves one NEAR network; loading a configuration selects it.
+  const near = useNetwork(env.STATED_NEAR_NETWORK === 'mainnet' ? 'mainnet' : 'testnet');
+  const mainnet = near.id === 'mainnet';
+  const baseUrl = String(env.STATED_BASE_URL || `http://localhost:${port}`).replace(/\/$/, '');
+  const list = (value) => String(value || '').split(',').map((s) => s.trim()).filter(Boolean);
+  return {
+    port,
+    baseUrl,
+    databaseUrl: env.DATABASE_URL || '',
+    sessionDays: Number(env.STATED_SESSION_DAYS || 30),
+    tokenKey: env.STATED_TOKEN_KEY || '',
+    adminXIds: list(env.STATED_ADMIN_X_IDS),
+    excludeXIds: list(env.STATED_METRICS_EXCLUDE_X_IDS),
+    secureCookies: baseUrl.startsWith('https://'),
+    nearContract: env.STATED_NEAR_CONTRACT || '',
+    // Testnet unless STATED_NEAR_NETWORK=mainnet. Mainnet moves real NEAR, so it also
+    // needs STATED_MAINNET=real-funds; see assertNetworkConfig.
+    near: { network: near.id, real: near.real, acknowledged: env.STATED_MAINNET === 'real-funds' },
+    // Bets in the replies: accounts named after X handles, signed by this server
+    // until claimed. Needs a version 2 escrow contract. The treasury creates the
+    // accounts; its key comes from the environment, or on testnet only
+    // (STATED_PLAY_AUTOPROVISION=1, for demos) from the faucet at first use.
+    play: {
+      enabled: env.STATED_PLAY === '1' && Boolean(env.STATED_NEAR_CONTRACT),
+      treasury: env.STATED_PLAY_TREASURY || '',
+      treasuryKey: env.STATED_PLAY_TREASURY_KEY || '',
+      autoProvision: env.STATED_PLAY_AUTOPROVISION === '1' && !mainnet,
+      defaultStakeNear: env.STATED_PLAY_DEFAULT_STAKE || '0.1',
+      // What a new account starts with. On testnet, enough for one full-size Bet. On mainnet
+      // it is the operator's own NEAR, so it covers network fees only: a stake is the person's money.
+      startNear: env.STATED_PLAY_START_NEAR || (mainnet ? '0.05' : '1.6'),
+      // On mainnet the treasury never pays for a stake.
+      fundsStakes: !mainnet,
+      // Who may bet with real NEAR: X user ids, or * for anyone. Empty on mainnet means nobody.
+      pilotXIds: list(env.STATED_PILOT_X_IDS),
+      // Ceilings for a public bot. New accounts each cost the treasury; each reply is a paid post.
+      newAccountsPerHour: Number(env.STATED_PLAY_NEW_ACCOUNTS_PER_HOUR || (mainnet ? 10 : 30)),
+      repliesPerDay: Number(env.STATED_PLAY_REPLIES_PER_DAY || 150),
+      // A recorded Result waits this long before the referee acts on it, so a slip can be corrected first.
+      settleDelaySeconds: Number(env.STATED_PLAY_SETTLE_DELAY_SECONDS ?? 600),
+    },
+    // A Bet's page can say what its stake would cost from another chain, as a dry-run quote from NEAR Intents.
+    // On mainnet, STATED_INTENTS_DEPOSITS=1 also lets a person pay NEAR into their account from another
+    // chain: a real quote with a deposit address. NEAR Intents has no testnet, so this is mainnet only.
+    intents: { enabled: env.STATED_INTENTS_QUOTES === '1', deposits: mainnet && env.STATED_INTENTS_DEPOSITS === '1' },
+    x: {
+      apiBase: String(env.X_API_BASE || 'https://api.x.com').replace(/\/$/, ''),
+      authorizeUrl: env.X_AUTHORIZE_URL || 'https://x.com/i/oauth2/authorize',
+      clientId: env.X_CLIENT_ID || '',
+      clientSecret: env.X_CLIENT_SECRET || '',
+      redirectUri: env.X_REDIRECT_URI || `${baseUrl}/callback`,
+      dmEnabled: env.STATED_DM_ENABLED === '1',
+      repliesEnabled: env.STATED_REPLIES === '1',
+      replyLinks: env.STATED_REPLY_LINKS === '1',
+      // 'public-only': X post text is stored only while a public save shows it.
+      // 'all': the earlier behaviour, text stored for every save.
+      textPolicy: env.STATED_X_TEXT_POLICY === 'all' ? 'all' : 'public-only',
+      oembedBase: String(env.X_OEMBED_BASE || 'https://publish.x.com').replace(/\/$/, ''),
+      botUserId: env.X_BOT_USER_ID || '',
+      repliesPerTaggerPerHour: Number(env.STATED_REPLIES_PER_TAGGER_PER_HOUR || 10),
+      privateCheckDays: Number(env.STATED_PRIVATE_CHECK_DAYS ?? 7),
+      complianceBearer: env.X_COMPLIANCE_BEARER || '',
+      mentionsStart: env.STATED_MENTIONS_START === 'all' ? 'all' : 'now',
+    },
+    // A hosted deployment (Railway sets RAILWAY_ENVIRONMENT; anywhere else set
+    // STATED_HOSTED=1) refuses to start on a configuration that would break
+    // sign-in or cookies. See assertHostedConfig.
+    hosted: env.STATED_HOSTED === '1' || Boolean(env.RAILWAY_ENVIRONMENT),
+    worker: {
+      // Mention polling and the X source checks spend money, so the worker
+      // runs only when asked to. The NEAR refresher is separate and free.
+      enabled: env.STATED_WORKER === '1',
+      pollMs: Number(env.STATED_POLL_MS || 60000),
+    },
+    fetch: {
+      allowLoopback: env.STATED_FETCH_ALLOW_LOOPBACK === '1',
+      timeoutMs: Number(env.STATED_FETCH_TIMEOUT_MS || 8000),
+      maxBytes: Number(env.STATED_FETCH_MAX_BYTES || 2_000_000),
+    },
+  };
+}
+
+// What a public deployment cannot run without. Each failure names the setting
+// to fix; the process exits before it listens, so a bad deploy never serves.
+export function assertHostedConfig(config) {
+  if (!config.hosted) return;
+  const problems = [];
+  let origin = null;
+  try { origin = new URL(config.baseUrl); } catch { /* reported below */ }
+  const local = (host) => ['localhost', '127.0.0.1', '[::1]', '0.0.0.0'].includes(host) || host.endsWith('.localhost');
+  if (!origin || origin.protocol !== 'https:' || local(origin.hostname)) {
+    problems.push('STATED_BASE_URL must be the public https origin (links, cookies and form checks are built from it)');
+  }
+  let callback = null;
+  try { callback = new URL(config.x.redirectUri); } catch { /* reported below */ }
+  if (!callback || !origin || callback.origin !== origin.origin || callback.pathname !== '/callback') {
+    problems.push('X_REDIRECT_URI must be STATED_BASE_URL/callback, exactly as registered on the X app');
+  }
+  if (Buffer.byteLength(config.tokenKey) < 32) {
+    problems.push('STATED_TOKEN_KEY must be at least 32 bytes (openssl rand -base64 32) and must not change between deploys');
+  }
+  if (/@(localhost|127\.0\.0\.1)[:/]/.test(config.databaseUrl)) {
+    problems.push('DATABASE_URL points at this machine; use the hosted database');
+  }
+  if (problems.length) throw new Error(`Hosted configuration refused:\n- ${problems.join('\n- ')}`);
+}
+
+// Mainnet moves real NEAR. The process refuses to start on a mainnet
+// configuration that was not asked for in so many words, or that would leave
+// people's keys under a weak seal or their accounts without an owner.
+export function assertNetworkConfig(config) {
+  if (!config.near?.real) return;
+  const problems = [];
+  if (!config.near.acknowledged) problems.push('STATED_MAINNET must be set to real-funds: on mainnet every stake is real NEAR');
+  if (config.nearContract && !isNamedAccount(config.nearContract)) problems.push('STATED_NEAR_CONTRACT must be a .near account on mainnet');
+  if (config.play?.enabled) {
+    if (Buffer.byteLength(config.tokenKey) < 32) problems.push('STATED_TOKEN_KEY must be at least 32 bytes: it seals the keys of accounts that hold real NEAR');
+    if (!config.play.treasury || !config.play.treasuryKey) problems.push('STATED_PLAY_TREASURY and STATED_PLAY_TREASURY_KEY must name a funded .near account: there is no faucet on mainnet');
+    else if (!isNamedAccount(config.play.treasury)) problems.push('STATED_PLAY_TREASURY must be a .near account on mainnet');
+  }
+  if (problems.length) throw new Error(`Mainnet configuration refused:\n- ${problems.join('\n- ')}`);
+}
+
+export function requireConfig(config, keys) {
+  const missing = keys.filter((key) => {
+    const value = key.split('.').reduce((obj, part) => obj?.[part], config);
+    return value === '' || value == null;
+  });
+  if (missing.length) {
+    throw new Error(`Missing configuration: ${missing.join(', ')}`);
+  }
+}

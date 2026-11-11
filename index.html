@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stated · The December desk</title>
+  <meta name="description" content="A public record of calls on the federal funds rate: the sentence, the deadline, and the rule stay put.">
+  <style>
+    :root {
+      --ink: #141612;
+      --panel: #1C221C;
+      --paper: #F3EEE4;
+      --paper-ink: #1B1713;
+      --paper-muted: #5C564C;
+      --text: #E8E4DA;
+      --muted: #C8C2B4;
+      --line: #3C433C;
+      --brass: #C6A15A;
+      --brass-ink: #241C0E;
+      --miss: #F0C2BC;
+      --hit: #C5E0D2;
+      --focus: #E6C98A;
+      --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+      --sans: "Avenir Next", "Segoe UI", sans-serif;
+      --mono: "SF Mono", ui-monospace, "Cascadia Mono", Menlo, monospace;
+      --measure: 40rem;
+    }
+    * { box-sizing: border-box; }
+    html { color-scheme: dark; }
+    body {
+      margin: 0;
+      background: var(--ink);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 1rem;
+      line-height: 1.5;
+    }
+    a { color: var(--text); }
+    a:hover { color: var(--brass); }
+    :focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+    }
+    .skip {
+      position: absolute;
+      left: 0.5rem;
+      top: -3rem;
+      background: var(--brass);
+      color: var(--brass-ink);
+      padding: 0.4rem 0.6rem;
+    }
+    .skip:focus { top: 0.5rem; }
+    .wrap {
+      width: min(var(--measure), calc(100% - 2rem));
+      margin: 0 auto;
+      padding: 1.25rem 0 4rem;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 1rem;
+      flex-wrap: wrap;
+      margin-bottom: 2rem;
+    }
+    .wordmark {
+      font-family: var(--serif);
+      font-size: 1.7rem;
+      text-decoration: none;
+      letter-spacing: -0.02em;
+    }
+    nav { display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; }
+    nav a { text-decoration: none; }
+    nav a[aria-current="page"] { text-decoration: underline; text-underline-offset: 0.25em; }
+    h1 {
+      font-family: var(--serif);
+      font-weight: 500;
+      font-size: 2rem;
+      line-height: 1.2;
+      letter-spacing: -0.02em;
+      margin: 0 0 0.75rem;
+    }
+    h2 {
+      font-family: var(--serif);
+      font-weight: 500;
+      font-size: 1.35rem;
+      margin: 2rem 0 0.6rem;
+    }
+    p { margin: 0 0 0.8rem; }
+    .lede { font-size: 1.05rem; }
+    .quiet, .when, .example {
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 0.78rem;
+    }
+    .claim .quiet { color: var(--paper-muted); }
+    .example { margin-left: 0.4rem; }
+    .claim {
+      background: var(--paper);
+      color: var(--paper-ink);
+      border-top: 4px solid var(--brass);
+      padding: 1.25rem 1.25rem 1.1rem;
+      margin: 0 0 1rem;
+    }
+    .claim h1, .claim h2, .claim p { color: var(--paper-ink); }
+    .claim a { color: var(--paper-ink); }
+    .seal {
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      background: var(--brass);
+      color: var(--brass-ink);
+      display: inline-block;
+      padding: 0.2rem 0.45rem;
+      margin: 0 0 0.85rem;
+    }
+    .claim .sentence,
+    .claim h1.sentence {
+      font-family: var(--serif);
+      font-size: 1.55rem;
+      font-weight: 500;
+      line-height: 1.28;
+      letter-spacing: -0.02em;
+      margin: 0 0 0.9rem;
+    }
+    .figure {
+      font-family: var(--mono);
+      font-size: 2.4rem;
+      line-height: 1;
+      margin: 0;
+    }
+    .figure span {
+      display: block;
+      font-size: 0.75rem;
+      letter-spacing: 0;
+      margin-bottom: 0.3rem;
+    }
+    .claim-link { text-decoration: none; display: block; }
+    .claim-link:hover .sentence { text-decoration: underline; text-underline-offset: 0.12em; }
+    .tape {
+      list-style: none;
+      margin: 0.4rem 0 0;
+      padding: 0 0 0 1rem;
+      border-left: 2px solid var(--brass);
+    }
+    .tape li { padding: 0 0 1.2rem; }
+    .tape-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      align-items: baseline;
+    }
+    .pct { font-family: var(--mono); font-size: 1.05rem; }
+    .note { margin: 0.35rem 0; }
+    dl { margin: 0; }
+    .rule { margin: 0 0 0.85rem; }
+    .rule dt { font-family: var(--mono); font-size: 0.75rem; color: var(--muted); }
+    .rule dd { margin: 0.15rem 0 0; }
+    .mark { font-family: var(--mono); font-size: 0.78rem; }
+    .mark.hit { color: var(--hit); }
+    .mark.miss { color: var(--miss); }
+    .banner {
+      border: 1px solid var(--line);
+      padding: 0.8rem 0.9rem;
+      margin: 0 0 1rem;
+    }
+    .banner p { margin: 0 0 0.6rem; }
+    .row { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    .tweet {
+      white-space: pre-wrap;
+      font-family: var(--sans);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      padding: 0.9rem 1rem;
+      margin: 0.5rem 0;
+    }
+    .xblock .button { margin: 0.2rem 0 1rem; }
+    button, .button {
+      font: inherit;
+      min-height: 44px;
+      padding: 0.45rem 0.75rem;
+      border: 1px solid var(--line);
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+    }
+    button.primary {
+      background: var(--brass);
+      border-color: var(--brass);
+      color: var(--brass-ink);
+    }
+    label { display: block; margin: 1rem 0 0.35rem; }
+    .check label { margin: 0; flex: 1; }
+    button:disabled { opacity: 0.65; cursor: default; }
+    input, textarea {
+      font: inherit;
+      font-size: 1rem;
+      width: 100%;
+      background: var(--panel);
+      color: var(--text);
+      border: 1px solid var(--line);
+      padding: 0.55rem 0.65rem;
+    }
+    input[type="range"] { padding: 0.8rem 0; accent-color: var(--brass); }
+    textarea { min-height: 7.5rem; resize: vertical; }
+    .check { display: flex; gap: 0.6rem; align-items: flex-start; margin: 0.7rem 0; }
+    .check input { width: 1.1rem; height: 1.1rem; margin-top: 0.2rem; flex: none; }
+    .err { color: var(--miss); margin: 0.3rem 0 0; }
+    .people { list-style: none; padding: 0; margin: 0.4rem 0 1.4rem; }
+    .people li { margin: 0.2rem 0; }
+    .scores { list-style: none; padding: 0; margin: 0; }
+    .scores li {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 0.8rem;
+      padding: 0.35rem 0;
+      border-bottom: 1px solid var(--line);
+    }
+    table { width: 100%; border-collapse: collapse; margin: 0.4rem 0 1rem; }
+    th, td { text-align: left; padding: 0.35rem 0.4rem 0.35rem 0; border-bottom: 1px solid var(--line); }
+    th { font-family: var(--mono); font-size: 0.75rem; font-weight: 400; color: var(--muted); }
+    footer { margin-top: 3rem; }
+    footer p { color: var(--muted); font-size: 0.92rem; }
+    @media (max-width: 640px) {
+      h1 { font-size: 1.7rem; }
+      .claim .sentence { font-size: 1.35rem; }
+      .scores li { grid-template-columns: 1fr auto; }
+      .scores .peer { display: none; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      * { scroll-behavior: auto; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+  <div class="wrap" id="app"></div>
+  <script type="module" src="./app.mjs?v=6"></script>
+</body>
+</html>

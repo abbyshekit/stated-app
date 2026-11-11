@@ -1,0 +1,19 @@
+{
+  "verifiedAt": "2026-11-11T11:53:43.730Z",
+  "network": "testnet",
+  "x": "simulated",
+  "browser": "signed out, no wallet",
+  "contract": "stated-escrow-52081551be.testnet",
+  "bet": "c42098a2-f88a-4e6d-8d92-743c3efc7187",
+  "creator": "sim_bob.stated-play-9f1a6407fb.testnet",
+  "winner": "sim_carol.stated-play-9f1a6407fb.testnet",
+  "stakeYocto": "100000000000000000000000",
+  "offer": "HcmJVFAizaZ9Ps6jLnLEJ6ehSHqfJubNCee3UaSQiTnk",
+  "acceptance": "MpbELmLo59Jy3PanH9GC8n1bTgjkSMUq9VgJZZx7sRC",
+  "payout": "5UAWMNdGojJudGuwYTZmLsau2VVzXgi9vMVXNJBgsd5E",
+  "payoutYocto": "200000000000000000000000",
+  "payoutFinality": "FINAL",
+  "transferReceipt": "J5R6cWp2AjhakLQn5nFmxqAinRBQr2psED3WhVHDWSUp",
+  "remainingCreditYocto": "0",
+  "refereeOutcome": "yes"
+}

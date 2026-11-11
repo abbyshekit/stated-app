@@ -1,0 +1,149 @@
+{
+  "subject": "U.S. macroeconomic and market forecasts with near deadlines: the Fed's decisions and path, inflation, growth, oil and stock-index targets. Dated AI milestones are a second lane.",
+  "why": "Chosen in eval/SUBJECT.md from the pilot census: macro forecasts state a measurable quantity and a date, 83% are checkable as written, and the first ones resolve at the 9 December 2026 FOMC meeting. Each pick was read against the article; the speaker given is the reviewer's attribution. Survey shares are recorded as the survey's expectation, not as a probability.",
+  "reviewedAt": "2026-11-06",
+  "realRecordsOnly": true,
+  "outcomeSources": {
+    "fomc-2026-09-16": "https://www.federalreserve.gov/newsevents/pressreleases/monetary20260916a.htm"
+  },
+  "skipped": [
+    { "url": "https://www.nabe.com/NABE/NABE/Surveys/Outlook_Surveys/October_2026_Outlook_Survey_Summary.aspx", "why": "The extractor offers the panel's forecasts as one 692-character quoted paragraph holding at least five forecasts. A desk record holds one claim, so this source waits for the extractor to split quoted paragraphs." }
+  ],
+  "articles": [
+    {
+      "lane": "macro",
+      "url": "https://www.cnbc.com/2026/10/27/federal-reserve-rate-hike-timing-expectations.html",
+      "picks": [
+        {
+          "match": "76% anticipate a rate hike at its next meeting in December",
+          "speaker": "CNBC Fed Survey respondents",
+          "quoted": true,
+          "terms": { "deadline": "2026-12-09", "note": "Tracks the December call: a hike at the FOMC meeting ending 9 December 2026, expected by 76% of respondents (a share, not a probability). The sentence's other call, a pause in October, already came true: the FOMC held at 3.75% to 4% on 28 October 2026." }
+        },
+        {
+          "match": "entering a recession in the next year at 26%",
+          "speaker": "CNBC Fed Survey respondents",
+          "quoted": true,
+          "terms": { "deadline": "2027-10-27", "note": "Twelve months from the 27 October 2026 survey." }
+        },
+        {
+          "match": "$88 a barrel six months from now",
+          "speaker": "CNBC Fed Survey respondents",
+          "quoted": true,
+          "terms": { "deadline": "2027-04-27", "note": "Six months from the 27 October 2026 survey. The U.S. benchmark is WTI." }
+        },
+        {
+          "match": "remain steady at 4.2% through the remainder of the year",
+          "speaker": "CNBC Fed Survey respondents",
+          "quoted": true,
+          "terms": { "deadline": "2026-12-31", "note": "Tracks the 4.2% through December 2026, published by the Bureau of Labor Statistics in January 2027. The 4.4% for 2027 is a separate call." }
+        }
+      ]
+    },
+    {
+      "lane": "macro",
+      "url": "https://www.jpmorgan.com/insights/global-research/economy/fed-rate-cuts",
+      "picks": [
+        {
+          "match": "We continue to expect a hike at the December FOMC meeting",
+          "speaker": "Michael Feroli",
+          "quoted": true,
+          "terms": { "deadline": "2026-12-09", "note": "J.P. Morgan's chief U.S. economist. The December FOMC meeting ends on 9 December 2026." }
+        }
+      ]
+    },
+    {
+      "lane": "macro",
+      "url": "https://oilprice.com/Latest-Energy-News/World-News/Goldman-Sachs-Raises-Brent-Oil-Price-Forecast-to-105.html",
+      "picks": [
+        {
+          "match": "average $105 in December",
+          "speaker": "Goldman Sachs commodity analysts",
+          "quoted": true,
+          "terms": { "deadline": "2026-12-31", "note": "Brent's average price over December 2026." }
+        },
+        {
+          "match": "expect Brent crude to average $88 per barrel",
+          "speaker": "Goldman Sachs commodity analysts",
+          "quoted": true,
+          "terms": { "deadline": "2027-12-31", "note": "Brent's average price over 2027." }
+        },
+        {
+          "match": "end 2026 at $105 per barrel",
+          "speaker": "ANZ commodity analysts",
+          "quoted": true,
+          "terms": { "deadline": "2026-12-31" }
+        },
+        {
+          "match": "UBS sees the benchmark at $110 per barrel",
+          "speaker": "UBS",
+          "quoted": true,
+          "terms": { "deadline": "2026-12-31" }
+        }
+      ]
+    },
+    {
+      "lane": "macro",
+      "url": "https://www.cnbc.com/2026/06/16/kevin-warshs-fed-is-not-expected-to-make-any-change-to-rates-for-a-while-according-to-cnbc-fed-survey.html",
+      "picks": [
+        {
+          "match": "no rate change at this meeting or any meeting through 2027",
+          "speaker": "CNBC Fed Survey respondents",
+          "quoted": true,
+          "backfill": true,
+          "outcome": { "result": "no", "source": "fomc-2026-09-16", "knownOn": "2026-09-16", "note": "The FOMC raised the target range by a quarter point, to 3.75% to 4%, on 16 September 2026." }
+        }
+      ]
+    },
+    {
+      "lane": "ai",
+      "url": "https://www.techtimes.com/articles/329362/20261022/hassabis-cuts-agi-window-two-three-years-while-safety-isnt-ready.htm",
+      "picks": [
+        {
+          "match": "now expects artificial general intelligence to arrive within two to three years",
+          "speaker": "Demis Hassabis",
+          "quoted": true,
+          "terms": { "deadline": "2029-10-22", "note": "“Within two to three years” of the 22 October 2026 report; the later bound. Whether it came true depends on his own test for AGI." }
+        },
+        { "match": "who has predicted AGI by 2026 or 2027", "speaker": "Dario Amodei", "quoted": true }
+      ]
+    },
+    {
+      "lane": "ai",
+      "url": "https://nnutshell.com/agi-could-land-in-2027-and-cyber-risk-is-already-here/",
+      "picks": [
+        {
+          "match": "unusually bold prediction: AGI in 2027",
+          "speaker": "Nathan Benaich",
+          "quoted": true,
+          "terms": { "deadline": "2027-12-31", "note": "Stated as “AGI in 2027”. The “roughly 10 years” in the sentence is how long he has written the State of AI Report, not a deadline." }
+        }
+      ]
+    },
+    {
+      "lane": "ai",
+      "url": "https://finance.yahoo.com/technology/ai/articles/elon-musk-warns-ai-could-123000706.html",
+      "picks": [
+        {
+          "match": "could outsmart any individual by the end of 2026",
+          "speaker": "Elon Musk",
+          "quoted": true,
+          "terms": { "deadline": "2027-12-31", "note": "Stated as “by the end of 2026, or 2027 at the latest”. The later date is the one he committed to." }
+        },
+        {
+          "match": "exceed the combined intelligence of all humans in roughly five years",
+          "speaker": "Elon Musk",
+          "quoted": true,
+          "terms": { "deadline": "2031-07-31", "note": "“Roughly five years” from a July 2026 interview with The Economist, not from the article's date." }
+        }
+      ]
+    },
+    {
+      "lane": "ai",
+      "url": "https://agitracker.io/blog/agi-always-four-years-away/",
+      "picks": [
+        { "match": "gave a 50% chance of human-level machine intelligence by 2042", "speaker": "ESPAI 2024 survey of 1,580 AI researchers", "quoted": true }
+      ]
+    }
+  ]
+}

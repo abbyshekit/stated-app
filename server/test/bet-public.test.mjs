@@ -1,0 +1,318 @@
+// INTEGRATION: Public bet reads and writes use real Postgres and production modules.
+// NEAR state below is a labelled database fixture, not a live connector check.
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { after, before, beforeEach, test } from 'node:test';
+import { createBet } from '../src/bets.mjs';
+import {
+  consentToPublicBet, followPublicBet, followsFor, publicBet,
+  publishBet, recentPublicBets, withdrawBetPublication,
+} from '../src/bet-public.mjs';
+import { completeSetup, signInFromX } from '../src/store.mjs';
+import { startStack } from './support/app.mjs';
+import { resetDb } from './support/pg.mjs';
+
+let s;
+let creator;
+let other;
+let follower;
+
+const ns = (value) => (BigInt(new Date(value).getTime()) * 1000000n).toString();
+const binding = () => randomUUID().replaceAll('-', '').padEnd(64, 'a').slice(0, 64);
+
+async function makeUser(id, username, setup = true) {
+  const user = await signInFromX(s.db, { id, username });
+  return setup ? completeSetup(s.db, user, { profileVisibility: 'private' }) : user;
+}
+
+async function makeBet(owner = creator, { refereeAccount } = {}) {
+  return createBet(s.db, owner, {
+    requestId: randomUUID(), claim: 'Will the event occur?', criteria: 'Official result',
+    evidenceSourceUrl: 'https://example.org/result', creatorSide: 'yes', stakeNear: '0.1', refereeAccount,
+    acceptBy: new Date(Date.now() + 86400000).toISOString(),
+    resolveAt: new Date(Date.now() + 172800000).toISOString(),
+  });
+}
+
+// Creates only the persisted evidence consumed by bet-public.mjs. It does not
+// call NEAR or assert that any live escrow connector was exercised.
+async function storeFinalizedSnapshot(bet, { status = 'offered', acceptor = null, acceptedUser = null, ageMs = 0 } = {}) {
+  const creatorBinding = binding();
+  const acceptorBinding = acceptor ? binding() : null;
+  const proposal = status === 'settled'
+    ? { outcome: 'yes', proposer: 'creator.testnet', revision: '1' }
+    : null;
+  const chain = {
+    id: bet.id,
+    terms_hash: bet.terms_hash,
+    stake_yocto: bet.stake_yocto,
+    creator_side: bet.creator_side,
+    accept_by_ns: ns(bet.accept_by),
+    resolve_at_ns: ns(bet.resolve_at),
+    invited_account: bet.invited_wallet,
+    referee: bet.referee_wallet,
+    creator: 'creator.testnet',
+    creator_binding_hash: creatorBinding,
+    status,
+    acceptor,
+    ...(acceptorBinding ? { acceptor_binding_hash: acceptorBinding } : {}),
+    proposal,
+  };
+  const creatorId = String(creator.id);
+  await s.db.query(`insert into bilateral_near_requests
+    (id,bet_id,user_id,wallet_account,method,args,binding_hash,metadata)
+    values ($1,$2,$3,'creator.testnet','create_bet','{}',$4,'{"fixture":"synthetic"}')`,
+  [randomUUID(), bet.id, creatorId, creatorBinding]);
+  if (acceptor && acceptedUser) {
+    await s.db.query(`insert into bilateral_near_requests
+      (id,bet_id,user_id,wallet_account,method,args,binding_hash,metadata)
+      values ($1,$2,$3,$4,'accept_bet','{}',$5,'{"fixture":"synthetic"}')`,
+    [randomUUID(), bet.id, String(acceptedUser.id), acceptor, acceptorBinding]);
+  }
+  await s.db.query(`update bilateral_bets set chain_state=$2, creator_wallet='creator.testnet',
+    acceptor_wallet=$3, acceptor_user_id=$4, status=$5, near_height=321,
+    near_verified_at=clock_timestamp() - ($6::text || ' milliseconds')::interval,
+    accepted_at=case when $3::text is null then null else clock_timestamp() end,
+    settled_at=case when $5='settled' then clock_timestamp() else null end,
+    outcome=case when $5='settled' then 'yes' else null end
+    where id=$1`, [bet.id, chain, acceptor, acceptedUser ? String(acceptedUser.id) : null, status, ageMs]);
+  await s.db.query(`insert into bilateral_bet_proposals
+    (id,bet_id,revision,proposer_user_id,outcome,evidence_url,note)
+    values ($1,$2,1,$3,'yes','https://private.example.org/evidence','private fixture note')`,
+  [randomUUID(), bet.id, creatorId]);
+  return chain;
+}
+
+before(async () => { s = await startStack(); });
+
+beforeEach(async () => {
+  await resetDb(s.db);
+  creator = await makeUser('81001', 'public_creator');
+  other = await makeUser('81002', 'public_other');
+  follower = await makeUser('81003', 'public_follower', false);
+});
+
+after(async () => { if (s) await s.close(); });
+
+test('unfunded and wrong-creator bets cannot be published', async () => {
+  const bet = await makeBet();
+  await assert.rejects(publishBet(s.db, creator, bet.id), (err) => err.status === 409);
+  await storeFinalizedSnapshot(bet);
+  await assert.rejects(publishBet(s.db, other, bet.id), (err) => err.status === 404);
+  assert.equal(await publicBet(s.db, bet.id), null);
+});
+
+test('anonymous reads are empty until explicit publication consent', async () => {
+  const bet = await makeBet();
+  await storeFinalizedSnapshot(bet);
+  assert.equal(await publicBet(s.db, bet.id), null);
+  assert.deepEqual(await recentPublicBets(s.db), []);
+});
+
+test('private-profile creator can publish a narrow projection without private account data', async () => {
+  const bet = await makeBet();
+  await storeFinalizedSnapshot(bet);
+  await s.db.query(`update users set profile_visibility='private' where id=$1`, [String(creator.id)]);
+  const published = await publishBet(s.db, creator, bet.id);
+  assert.equal(published.id, bet.id);
+  assert.equal(published.funded, true);
+  assert.equal(published.creator_username, creator.x_username);
+  for (const field of ['terms_salt', 'source_save_id', 'metadata', 'notes', 'events', 'proposals', 'saves']) {
+    assert.equal(Object.hasOwn(published, field), false, `${field} must not be in the public projection`);
+  }
+  assert.equal((await s.db.one('select profile_visibility from users where id=$1', [String(creator.id)])).profile_visibility, 'private');
+});
+
+test('public identity requires a bound acceptance and separate consent', async () => {
+  const bet = await makeBet();
+  await storeFinalizedSnapshot(bet, { status: 'accepted', acceptor: 'joiner.testnet' });
+  await publishBet(s.db, creator, bet.id);
+  assert.equal((await publicBet(s.db, bet.id)).acceptor_username, null, 'a wallet without an X binding has no username');
+  await assert.rejects(consentToPublicBet(s.db, other, bet.id), (err) => err.status === 403);
+
+  const boundBet = await makeBet();
+  await storeFinalizedSnapshot(boundBet, { status: 'accepted', acceptor: 'joiner.testnet', acceptedUser: other });
+  await publishBet(s.db, creator, boundBet.id);
+  assert.equal((await publicBet(s.db, boundBet.id)).acceptor_username, null, 'binding alone is not identity consent');
+  await consentToPublicBet(s.db, other, boundBet.id);
+  assert.equal((await publicBet(s.db, boundBet.id)).acceptor_username, other.x_username);
+});
+
+test('settled and refunded public bets remain readable from finalized snapshots', async () => {
+  for (const status of ['settled', 'refunded']) {
+    const bet = await makeBet();
+    await storeFinalizedSnapshot(bet, { status, acceptor: 'joiner.testnet' });
+    await publishBet(s.db, creator, bet.id);
+    const result = await publicBet(s.db, bet.id);
+    assert.equal(result.status, status);
+    assert.equal(result.chain_verification, 'finalized_snapshot');
+    assert.equal(result.funded, true);
+  }
+});
+
+test('public settlement proof requires a matching referee event and publication', async () => {
+  const hash = '11111111111111111111111111111111'; // Base58 encoding of 32 zero bytes
+  const refereeAccount = 'referee.testnet';
+  const seedSettlement = async ({ outcome = 'yes', method = 'referee', event = true,
+    eventHash = hash, eventOutcome = outcome, eventReferee = refereeAccount, actor = creator,
+    publish = true } = {}) => {
+    const bet = await makeBet(creator, { refereeAccount });
+    const chain = await storeFinalizedSnapshot(bet, {
+      status: 'accepted', acceptor: 'joiner.testnet', acceptedUser: other,
+    });
+    if (publish) await publishBet(s.db, creator, bet.id);
+    chain.status = 'settled';
+    chain.resolution = { outcome, method };
+    await s.db.query(`update bilateral_bets set chain_state=$2, status='settled',
+      outcome=$3, settled_at=clock_timestamp() where id=$1`, [bet.id, chain, outcome]);
+    if (event) {
+      await s.db.query(`insert into bilateral_bet_events (bet_id, actor_user_id, kind, detail)
+        values ($1,$2,'referee_resolved',$3)`, [bet.id, String(actor.id), {
+        outcome: eventOutcome, referee: eventReferee, transactionHash: eventHash,
+      }]);
+    }
+    return bet;
+  };
+
+  const valid = await seedSettlement();
+  const projection = await publicBet(s.db, valid.id);
+  assert.equal(projection.settlement_transaction_hash, hash);
+  const page = await s.browser().get(`/bets/${valid.id}`);
+  assert.equal(page.status, 200);
+  assert.match(page.text, new RegExp(`<a[^>]+href="https://testnet\\.nearblocks\\.io/txns/${hash}"[^>]*>Verify settlement</a>`));
+  assert.match(page.text, /<b>Came true<\/b>/);
+  assert.doesNotMatch(page.text, /private\.example\.org\/evidence|private fixture note|Paid to your account/);
+
+  const privateWinner = await seedSettlement({ outcome: 'no' });
+  const privatePage = await s.browser().get(`/bets/${privateWinner.id}`);
+  assert.match(privatePage.text, /<b>Did not come true<\/b>/);
+  const shareText = (response) => new URL(response.text.match(/href="(https:\/\/x\.com\/intent\/post\?[^"]+)"/)[1]
+    .replaceAll('&amp;', '&')).searchParams.get('text');
+  assert.equal(shareText(privatePage), 'Result: No. The no side won 0.2 test NEAR.');
+  await consentToPublicBet(s.db, other, privateWinner.id);
+  assert.equal(shareText(await s.browser().get(`/bets/${privateWinner.id}`)),
+    'Result: No. @public_other won 0.2 test NEAR.');
+
+  const invalidCases = [
+    ['agreement resolution', { method: 'agreement' }],
+    ['missing event', { event: false }],
+    ['mismatched event outcome', { eventOutcome: 'no' }],
+    ['mismatched referee', { eventReferee: 'another.testnet' }],
+    ['mismatched actor', { actor: other }],
+    ['invalid transaction hash', { eventHash: '1'.repeat(33) }],
+    ['void resolution', { outcome: 'void' }],
+  ];
+  for (const [label, options] of invalidCases) {
+    const bet = await seedSettlement(options);
+    const result = await publicBet(s.db, bet.id);
+    assert.equal(result.status, 'settled', label);
+    assert.equal(Boolean(result.settlement_transaction_hash), false, label);
+    assert.doesNotMatch((await s.browser().get(`/bets/${bet.id}`)).text, /Verify settlement/, label);
+  }
+
+  const unpublished = await seedSettlement({ publish: false });
+  assert.equal(await publicBet(s.db, unpublished.id), null);
+  const cardPath = `${s.base}/share/bets/${valid.id}.png`;
+  assert.equal((await fetch(cardPath)).status, 200);
+  await withdrawBetPublication(s.db, creator, valid.id);
+  assert.equal(await publicBet(s.db, valid.id), null);
+  assert.equal((await fetch(cardPath)).status, 404);
+});
+
+test('a taken bet offers Follow and a closed bet links to a takeable offer', async () => {
+  const bet = await makeBet();
+  await storeFinalizedSnapshot(bet, { status: 'accepted', acceptor: 'joiner.testnet', acceptedUser: other });
+  await publishBet(s.db, creator, bet.id);
+  const path = `/bets/${bet.id}`;
+  const anonymous = await s.browser().get(`${path}?done=following`);
+  assert.match(anonymous.text, /Follow the result/);
+  assert.doesNotMatch(anonymous.text, /Updates will appear in your Inbox/);
+  const followerBrowser = await s.signIn(s.fakeX.addUser('81003', 'public_follower'));
+  const confirmation = await followerBrowser.get(`${path}?follow=1`);
+  assert.match(confirmation.text, /<button class="primary big" type="submit">Follow the result<\/button>/);
+  await followerBrowser.submit(`${path}/follow`, {}, { from: `${path}?follow=1` });
+  await followerBrowser.submit(`${path}/follow`, {}, { from: path });
+  const followed = await followerBrowser.get(path);
+  assert.match(followed.text, /Updates will appear in your Inbox/);
+  assert.doesNotMatch(followed.text, /Follow the result/);
+  assert.equal((await publicBet(s.db, bet.id)).follower_count, '1');
+
+  const closed = await makeBet();
+  await storeFinalizedSnapshot(closed, { status: 'settled', acceptor: 'joiner.testnet' });
+  await publishBet(s.db, creator, closed.id);
+  const offer = await makeBet();
+  await storeFinalizedSnapshot(offer);
+  await publishBet(s.db, creator, offer.id);
+  const result = await s.browser().get(`/bets/${closed.id}`);
+  assert.match(result.text, new RegExp(`<a class="pill solid big" href="/bets/${offer.id}">Take another bet</a>`));
+});
+
+test('a signed-in person can follow without setup or a wallet, with one follower count', async () => {
+  const bet = await makeBet();
+  await storeFinalizedSnapshot(bet);
+  await publishBet(s.db, creator, bet.id);
+  await assert.rejects(followPublicBet(s.db, null, bet.id), (err) => err.status === 401);
+  await followPublicBet(s.db, follower, bet.id);
+  await followPublicBet(s.db, follower, bet.id);
+  assert.equal((await publicBet(s.db, bet.id)).follower_count, '1');
+  assert.equal((await followsFor(s.db, follower)).length, 1);
+});
+
+test('withdrawal removes public, discovery and follow reads while preserving the bet row', async () => {
+  const bet = await makeBet();
+  await storeFinalizedSnapshot(bet);
+  await publishBet(s.db, creator, bet.id);
+  await followPublicBet(s.db, follower, bet.id);
+  await withdrawBetPublication(s.db, creator, bet.id);
+  assert.equal(await publicBet(s.db, bet.id), null);
+  assert.equal((await recentPublicBets(s.db)).some((row) => row.id === bet.id), false);
+  assert.equal((await followsFor(s.db, follower)).some((row) => row.id === bet.id), false);
+  assert.equal((await s.db.one('select id from bilateral_bets where id=$1', [bet.id])).id, bet.id);
+});
+
+test('old verification timestamps are labelled stale and invalid references are rejected', async () => {
+  const bet = await makeBet();
+  await storeFinalizedSnapshot(bet, { ageMs: 6 * 60 * 1000 });
+  await publishBet(s.db, creator, bet.id);
+  assert.equal((await publicBet(s.db, bet.id)).chain_freshness, 'stale');
+  await assert.rejects(publicBet(s.db, 'not-a-uuid'), (err) => err.status === 400);
+  await assert.rejects(recentPublicBets(s.db, 0), (err) => err.status === 400);
+});
+
+test('public Bet HTML and PNG share the publication gate, including an already-rendered card', async () => {
+  const bet = await makeBet();
+  await storeFinalizedSnapshot(bet);
+  const imageUrl = `${s.base}/share/bets/${bet.id}.png`;
+  assert.equal((await fetch(imageUrl)).status, 404);
+  await publishBet(s.db, creator, bet.id);
+  const page = await s.browser().get(`/bets/${bet.id}`);
+  assert.equal(page.status, 200);
+  assert.match(page.text, /summary_large_image/);
+  assert.ok(page.text.includes(`/share/bets/${bet.id}.png`));
+  const image = await fetch(imageUrl);
+  assert.equal(image.status, 200);
+  assert.equal(image.headers.get('cache-control'), 'no-store');
+  assert.equal(image.headers.get('content-type'), 'image/png');
+  const png = Buffer.from(await image.arrayBuffer());
+  assert.equal(png.subarray(1, 4).toString(), 'PNG');
+  assert.equal(png.readUInt32BE(16), 1200);
+  assert.equal(png.readUInt32BE(20), 630);
+  await withdrawBetPublication(s.db, creator, bet.id);
+  assert.equal((await fetch(imageUrl)).status, 404, 'cached bytes cannot bypass current publication authorization');
+});
+
+test('an already-rendered Bet card changes when acceptance closes', async () => {
+  const bet = await makeBet();
+  await storeFinalizedSnapshot(bet);
+  await publishBet(s.db, creator, bet.id);
+  const realNow = Date.now;
+  let clock = new Date(bet.accept_by).getTime() - 1000;
+  Date.now = () => clock;
+  try {
+    const url = `${s.base}/share/bets/${bet.id}.png`;
+    const before = Buffer.from(await (await fetch(url)).arrayBuffer());
+    clock = new Date(bet.accept_by).getTime() + 1000;
+    const after = Buffer.from(await (await fetch(url)).arrayBuffer());
+    assert.notDeepEqual(after, before, 'expired card cannot reuse the cached open-seat image');
+  } finally { Date.now = realNow; }
+});

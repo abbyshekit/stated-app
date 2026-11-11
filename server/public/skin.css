@@ -1,0 +1,500 @@
+/* INTEGRATION: Marked design; imported only after canonical auth/wallet reconciliation checks. */
+/* Stated, "Marked". Loaded after stated.css, which it re-points and restyles.
+   The post is the object and the result is a mark on its words: a highlighter where a
+   prediction came true, a line through it where it did not. Yellow appears only where a
+   prediction came true. One typeface, the system sans. */
+
+:root {
+  --ground: #FFFFFF;
+  --ink: #0F1419;
+  --dim: #536471;
+  --line: #E6EBEE;
+  --lift: #EFF3F4;
+  --sel: #F0F3F4;
+  --err: #C4281C;
+  --mark: #FFE45C;
+  --on-mark: #0F1419;
+  --mark-ring: #E0B000;
+  --x: #1D9BF0;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace; /* token-lint: allow */
+
+  /* The older sheet's names, pointed at the palette above. */
+  --bg: var(--ground); /* token-lint: allow */
+  --panel: var(--ground); /* token-lint: allow */
+  --panel-2: var(--lift); /* token-lint: allow */
+  --text: var(--ink); /* token-lint: allow */
+  --muted: var(--dim); /* token-lint: allow */
+  --gold: var(--ink); /* token-lint: allow */
+  --gold-ink: var(--ground); /* token-lint: allow */
+  --cyan: var(--ink); /* token-lint: allow */
+  --paper: var(--ground); /* token-lint: allow */
+  --paper-ink: var(--ink); /* token-lint: allow */
+  --paper-muted: var(--dim); /* token-lint: allow */
+  --hit: var(--ink); /* token-lint: allow */
+  --miss: var(--ink); /* token-lint: allow */
+  --hit-on-paper: var(--ink); /* token-lint: allow */
+  --miss-on-paper: var(--ink); /* token-lint: allow */
+  --focus: var(--x); /* token-lint: allow */
+  --serif: var(--sans); /* token-lint: allow */
+  --measure: 600px; /* token-lint: allow */
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground: #000000;
+    --ink: #E7E9EA;
+    --dim: #8B98A5;
+    --line: #2F3336;
+    --lift: #16181C;
+    --sel: #1D2024;
+    --err: #FF7A6B;
+    --mark-ring: var(--mark);
+  }
+}
+
+[hidden] { display: none !important; }
+html { color-scheme: light dark; }
+body { font-family: var(--sans); font-size: 15px; line-height: 1.4; -webkit-font-smoothing: antialiased; }
+a { color: inherit; text-decoration: underline; text-decoration-color: var(--dim); text-underline-offset: 3px; }
+a:hover { color: inherit; text-decoration-color: currentColor; }
+:focus-visible { outline: 2px solid var(--x); outline-offset: 2px; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.grow { flex: 1; }
+
+/* One column, the width of a timeline. */
+.wrap { width: min(600px, 100%); margin: 0 auto; padding: 0 0 72px; min-height: 100vh; }
+@media (min-width: 640px) {
+  .wrap { border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
+}
+main { display: block; }
+main.pad { padding: 4px 16px 0; }
+main.pad > :first-child { margin-top: 0; }
+
+/* Top: the name and your face. */
+header { display: flex; align-items: center; flex-wrap: nowrap; gap: 12px; height: 60px; padding: 0 16px; margin: 0; }
+.wordmark { font-family: var(--sans); font-weight: 800; font-size: 22px; letter-spacing: -0.04em; line-height: 1; color: var(--ink); text-decoration: none; display: inline-flex; align-items: center; min-height: 44px; }
+.back { font-size: 22px; line-height: 1; width: 44px; height: 44px; display: grid; place-items: center; margin-left: -12px; text-decoration: none; color: var(--ink); border-radius: 50%; }
+.face { border-radius: 50%; object-fit: cover; flex: none; background: var(--lift); color: var(--ink); display: inline-grid; place-items: center; width: 40px; height: 40px; font-weight: 700; font-size: 16px; text-transform: uppercase; }
+.face.lg { width: 44px; height: 44px; }
+.face.sm { width: 22px; height: 22px; font-size: 11px; }
+.face.xs { width: 36px; height: 36px; font-size: 14px; }
+.face.seat-face { width: 64px; height: 64px; font-size: 24px; }
+details.me { position: relative; margin-right: -4px; }
+details.me > summary { list-style: none; width: 44px; height: 44px; display: grid; place-items: center; position: relative; cursor: pointer; padding: 0; color: inherit; border-radius: 50%; }
+details.me > summary::-webkit-details-marker { display: none; }
+details.me > summary .dot { position: absolute; right: 2px; top: 2px; width: 10px; height: 10px; border-radius: 50%; background: var(--ink); border: 2px solid var(--ground); }
+details.me nav { position: absolute; right: 0; top: 50px; z-index: 5; min-width: 232px; background: var(--ground); border: 1px solid var(--line); border-radius: 16px; display: grid; gap: 0; padding: 8px 0; }
+details.me nav a, details.me nav button.link { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 44px; padding: 0 16px; font-size: 16px; font-weight: 700; color: var(--ink); text-decoration: none; background: none; border: 0; border-radius: 0; }
+details.me nav a[aria-current="page"] { background: var(--sel); }
+details.me nav .handle { color: var(--dim); padding: 8px 16px 6px; font-size: 14px; }
+details.me nav .n { color: var(--dim); font-weight: 400; font-size: 14px; }
+details.me nav .sub { border-top: 1px solid var(--line); margin-top: 6px; padding-top: 6px; display: grid; }
+details.me nav .sub a { font-weight: 400; }
+details.me nav form { display: block; border-top: 1px solid var(--line); margin: 6px 0 0; padding-top: 6px; }
+details.me nav button.link { font-weight: 400; }
+footer { margin-top: 0; padding: 8px 16px 16px; border-top: 1px solid var(--line); font-size: 14px; color: var(--dim); display: grid; gap: 4px; }
+footer p { margin: 8px 0 0; }
+footer nav { display: flex; gap: 0 24px; }
+footer nav a { display: inline-flex; align-items: center; min-height: 44px; color: inherit; }
+
+/* Buttons. One filled button per screen; the rest are outlines or underlined words. */
+button, .button, .btn, .pill { font-family: var(--sans); font-size: 15px; font-weight: 700; line-height: 1; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 20px; border-radius: 999px; border: 1px solid var(--dim); background: transparent; color: var(--ink); text-decoration: none; white-space: nowrap; cursor: pointer; }
+button.primary, .button.primary, .btn, .pill.solid { background: var(--ink); color: var(--ground); border-color: var(--ink); }
+.btn.ghost, .button.ghost { background: transparent; color: var(--ink); border-color: var(--dim); }
+.pill.big, .big { min-height: 54px; font-size: 17px; width: 100%; border-radius: 16px; }
+.pill svg, .btn svg, .button svg, .xmark { width: 18px; height: 18px; fill: currentColor; flex: none; }
+button.link, .tl, button.tl { font-family: var(--sans); font-size: 15px; font-weight: 400; display: inline-flex; align-items: center; min-height: 44px; padding: 0; border: 0; border-radius: 0; background: none; color: var(--ink); text-decoration: underline; text-decoration-color: var(--dim); text-underline-offset: 3px; cursor: pointer; }
+.tl.center { justify-content: center; }
+@media (prefers-reduced-motion: no-preference) {
+  button, .button, .btn, .pill { transition: transform 100ms ease-out, background-color 120ms ease-out; }
+  button:active, .button:active, .btn:active, .pill:active { transform: scale(0.97); }
+}
+
+/* Two tabs, the way a timeline has them. */
+.tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin: 0; border-bottom: 1px solid var(--line); }
+.tabs a { height: 52px; display: grid; place-items: center; padding: 0; color: var(--dim); font-weight: 500; position: relative; text-decoration: none; border: 0; }
+.tabs a[aria-current="page"] { color: var(--ink); font-weight: 700; border: 0; text-decoration: none; }
+.tabs a[aria-current="page"]::after { content: ""; position: absolute; bottom: 0; height: 4px; width: 56px; border-radius: 4px; background: var(--ink); }
+
+/* A row: the post as it looked, then when we find out. */
+.posts { list-style: none; margin: 0; padding: 0; }
+.prow { position: relative; display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 0 12px; padding: 14px 16px 16px; border-bottom: 1px solid var(--line); }
+.pwho { display: flex; flex-wrap: wrap; gap: 0 5px; align-items: center; white-space: nowrap; margin: 0 0 3px; min-width: 0; }
+.pwho b { font-weight: 700; flex: 0 1 auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.pwho span { color: var(--dim); flex: 0 0 auto; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.said { margin: 0; font-size: 16px; line-height: 1.5; overflow-wrap: anywhere; }
+.said a { color: inherit; text-decoration: none; }
+.prow .said a::after { content: ""; position: absolute; inset: 0; }
+.meta { margin: 8px 0 0; color: var(--dim); font-size: 14px; line-height: 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; }
+.meta a, .meta form, .meta button { position: relative; z-index: 1; }
+.meta a { color: inherit; }
+.meta.bet { margin-top: 6px; gap: 2px 8px; flex-wrap: nowrap; align-items: flex-start; }
+.meta.bet > :not(.stack) { min-width: 0; }
+.meta.bet a { white-space: nowrap; }
+.meta b { color: var(--ink); font-weight: 700; }
+.prow.note .meta .stack .face:first-child { margin-left: -2px; }
+.meta a { padding: 12px 0; margin: -12px 0; }
+label.check { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; align-items: center; min-height: 44px; font-weight: 400; font-size: 15px; }
+.meta.bet a { color: var(--ink); }
+.meta .todo { color: var(--ink); }
+.stack { display: flex; flex: none; }
+.stack .face { width: 22px; height: 22px; font-size: 11px; border: 2px solid var(--ground); margin-left: -7px; box-sizing: content-box; }
+.stack .face:first-child { margin-left: -2px; }
+.empty, .blank { padding: 40px 32px 8px; text-align: center; font-size: 17px; line-height: 1.4; margin: 0; text-wrap: balance; }
+.blank b { font-weight: 700; }
+
+/* The marks. Came true: a highlighter bar over the words, line by line. Did not: a line through them. */
+.hl { background: var(--mark); color: var(--on-mark); padding: 0.24em 0.16em; margin: 0 -0.16em; border-radius: 2px; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.post .hl { padding: 0.19em 0.14em; margin: 0 -0.14em; }
+.struck { text-decoration: line-through; text-decoration-thickness: 2px; text-decoration-color: var(--dim); }
+@media (prefers-reduced-motion: no-preference) {
+  .hl.sweep { background: linear-gradient(var(--mark), var(--mark)) no-repeat 0 0 / 0% 100%; color: inherit; animation: sweep 480ms cubic-bezier(0.22, 1, 0.36, 1) 250ms forwards; }
+  @keyframes sweep { to { background-size: 100% 100%; color: var(--on-mark); } }
+}
+
+/* One post, full size: the words are the largest thing on the page. */
+.post { padding: 10px 16px 0; }
+.post .head { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 0 12px; align-items: center; margin-bottom: 14px; }
+.post .head .face { width: 44px; height: 44px; grid-row: span 2; }
+.post .head b { font-size: 16px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.post .head span { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.post .said { font-size: 28px; line-height: 1.42; letter-spacing: -0.015em; }
+.post .aside { margin: 10px 0 0; color: var(--dim); font-size: 14px; }
+.post .links { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
+.when { display: flex; justify-content: space-between; align-items: center; gap: 12px; min-height: 48px; padding: 0 16px; margin-top: 8px; border-bottom: 1px solid var(--line); color: var(--dim); font-size: 15px; }
+.when b { color: var(--ink); font-weight: 600; }
+.verdict { display: flex; align-items: baseline; gap: 12px; padding: 16px 16px 0; margin: 0; }
+.verdict b { font-size: 36px; font-weight: 700; letter-spacing: -0.02em; line-height: 1; }
+.verdict.yes b { color: var(--mark); }
+.verdict span { color: var(--dim); font-size: 15px; }
+.verdict .tl { font-size: 15px; color: var(--dim); min-height: 36px; align-self: center; }
+@media (prefers-color-scheme: light) {
+  .verdict.yes b { color: var(--ink); }
+}
+.proof { display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; padding: 4px 16px 12px; margin: 0; border-bottom: 1px solid var(--line); font-size: 15px; min-height: 0; }
+.proof:empty { padding: 6px 0; }
+
+/* Two people. One seat may be open. */
+.lead { margin: 0; padding: 18px 16px 0; font-size: 17px; font-weight: 700; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 2px 12px; }
+.lead span { font-size: 14px; font-weight: 400; color: var(--dim); white-space: nowrap; }
+.versus { padding: 18px 16px 4px; display: grid; grid-template-columns: 1fr 150px 1fr; align-items: start; text-align: center; }
+.seat { display: grid; justify-items: center; gap: 4px; min-width: 0; text-decoration: none; color: inherit; }
+.seat .face, .seat .open { width: 64px; height: 64px; border-radius: 50%; margin-bottom: 4px; font-size: 24px; }
+.seat .open { border: 1.5px solid var(--dim); }
+.seat b { font-size: 16px; max-width: 100%; white-space: normal; overflow-wrap: anywhere; word-break: break-all; text-wrap: balance; text-overflow: clip; }
+.seat span { color: var(--dim); font-size: 14px; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+/* The winner's ring. The marker yellow is faint as a thin line on white, so the ring takes a deeper one there. */
+.seat.won .face { outline: 3px solid var(--mark-ring); outline-offset: 3px; }
+.versus.no .seat.won .face, .versus.agreed .seat.won .face { outline-color: var(--ink); }
+.seat.lost b { color: var(--dim); }
+.pot { align-self: start; padding-top: 12px; }
+.pot b { font-size: 28px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; display: block; font-variant-numeric: tabular-nums; }
+.pot small { color: var(--dim); font-size: 14px; display: block; white-space: nowrap; margin-top: 2px; }
+.stakes { margin: 0; padding: 14px 16px 0; text-align: center; font-size: 15px; text-wrap: balance; }
+.stakes.left { text-align: left; padding-top: 6px; color: var(--dim); text-wrap: pretty; }
+.acts { padding: 16px 16px 8px; display: grid; gap: 2px; margin: 0; }
+.acts form { margin: 0; display: grid; }
+.acts.line { border-bottom: 1px solid var(--line); padding-bottom: 16px; }
+.acts .two { display: flex; flex-wrap: wrap; justify-content: center; gap: 0 28px; }
+.mini { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 0 12px; padding: 6px 16px 16px; border-bottom: 1px solid var(--line); }
+.mini .said { font-size: 17px; line-height: 1.4; }
+.prop { margin: 0; padding: 6px 16px 16px; font-size: 22px; line-height: 1.36; letter-spacing: -0.01em; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.stepper { display: flex; justify-content: center; gap: 16px; margin-top: 10px; }
+.stepper .step { width: 44px; height: 44px; min-height: 44px; padding: 0; border-radius: 50%; border: 1px solid var(--dim); display: grid; place-items: center; font-size: 22px; font-weight: 400; line-height: 1; flex: none; }
+.seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; border: 1px solid var(--line); border-radius: 999px; padding: 3px; background: var(--lift); margin: 0 16px; }
+.seg { margin-top: 12px; }
+.seg input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.seg label { display: grid; place-items: center; min-height: 44px; margin: 0; border-radius: 999px; border: 2px solid transparent; font-size: 15px; font-weight: 700; color: var(--dim); cursor: pointer; }
+.seg input:checked + label { background: var(--ground); color: var(--ink); border-color: var(--ink); }
+.seg input:focus-visible + label { outline: 2px solid var(--x); outline-offset: 2px; }
+@media (max-width: 340px) {
+  .versus { grid-template-columns: 1fr 112px 1fr; }
+  .post .said { font-size: 22px; line-height: 1.36; }
+  .post .said.mid { font-size: 20px; }
+  .post .said.long { font-size: 18px; }
+}
+
+/* Yours: paste a link, answer one question. */
+.paste { margin: 14px 16px 4px; min-height: 54px; border-radius: 16px; background: var(--lift); display: flex; align-items: center; gap: 10px; padding: 0 5px 0 16px; border: 1.5px solid var(--lift); }
+.paste input[type="url"], .paste input[type="search"], .paste input[type="text"] { flex: 1; min-width: 0; width: auto; border: 0; background: none; padding: 0; min-height: 44px; font-size: 16px; color: var(--ink); border-radius: 0; }
+.paste input:focus-visible { outline: 0; }
+.paste:focus-within { border-color: var(--ink); }
+.paste.bad { border-color: var(--err); }
+.paste button { border-radius: 11px; }
+.err { margin: 8px 32px 14px; font-size: 15px; color: var(--err); }
+form > .err { margin: 12px 16px 0; }
+.record { margin: 0; padding: 14px 16px; border-bottom: 1px solid var(--line); font-size: 15px; font-weight: 600; }
+.record a { font-weight: 400; color: var(--dim); margin-left: 8px; }
+.ask { position: relative; z-index: 1; display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.ask > span { flex-basis: 100%; }
+.ask form { margin: 0; }
+
+/* Folds, notices, forms: the parts people open rarely. */
+.notice { margin: 12px 16px 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; font-size: 15px; }
+.notice[role="alert"] { border: 0; border-left: 2px solid var(--err); border-radius: 0; padding-left: 12px; color: var(--err); }
+.notice.go { display: grid; gap: 10px; border-color: var(--ink); }
+.notice.go p { margin: 0; font-weight: 600; }
+.notice.go small { display: block; font-weight: 400; color: var(--dim); font-size: 14px; margin-top: 2px; }
+.banner { border: 1px solid var(--line); border-radius: 12px; background: none; padding: 12px 14px; margin: 0 0 12px; }
+main:not(.pad) > .banner { margin: 12px 16px 0; }
+main:not(.pad) > .notice { margin-bottom: 4px; }
+.banner.error, .banner.red { border-color: var(--err); color: var(--err); }
+.banner p:last-child { margin-bottom: 0; }
+.folds { margin: 24px 0 0; border-top: 1px solid var(--line); }
+.posts + .folds { margin-top: 0; border-top: 0; }
+details.fold { border-bottom: 1px solid var(--line); margin: 0; padding: 0 16px; }
+details.fold > summary { min-height: 52px; display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 16px; font-weight: 400; color: var(--ink); list-style: none; cursor: pointer; padding: 0; }
+details.fold > summary::-webkit-details-marker { display: none; }
+details.fold > summary::after { content: "+"; font-size: 20px; line-height: 1; color: var(--dim); }
+details.fold[open] > summary::after { content: "−"; }
+details.fold > summary small { font-size: 14px; color: var(--dim); margin-left: auto; }
+details.fold > :not(summary) { margin-bottom: 14px; }
+.wallet-requests { padding: 0 16px; }
+.wallet-requests > details.fold { padding: 0; }
+.wallet-requests > details.fold > summary + * { margin-top: 8px; }
+details > summary { color: var(--ink); }
+h1 { font-family: var(--sans); font-size: 22px; font-weight: 700; line-height: 1.2; letter-spacing: -0.02em; margin: 0 0 8px; }
+h2 { font-family: var(--sans); font-size: 17px; font-weight: 700; line-height: 1.3; margin: 28px 0 8px; }
+h3 { font-size: 15px; font-weight: 700; margin: 18px 0 6px; }
+main:not(.pad) > h2 { padding: 0 16px 10px; margin: 28px 0 0; border-bottom: 1px solid var(--line); }
+.prow.note { grid-template-columns: minmax(0, 1fr); color: var(--ink); font-size: 15px; }
+.prow.note .meta form { margin-left: auto; }
+.inbox .prow.note p.meta { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+details.fold h2 { font-size: 15px; margin: 18px 0 6px; padding: 0; border: 0; }
+details.fold details.fold { padding: 0; border-bottom: 0; border-top: 1px solid var(--line); }
+.who-head { padding-bottom: 6px; }
+.prow.note .meta .tl { min-height: 32px; color: var(--ink); }
+h2.lead { border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-top: 28px; }
+form > .acts, form > .lead, form > .stakes, form > .prop { margin-left: 0; margin-right: 0; }
+.proof .tl { min-height: 44px; }
+.prow.note .said { font-size: 16px; }
+.hero + .posts, .hero + .blank { border-top: 1px solid var(--line); }
+p { margin: 0 0 12px; }
+.lede { font-size: 17px; color: var(--dim); }
+.quiet, .note { color: var(--dim); font-size: 14px; line-height: 1.45; }
+label { display: block; font-size: 14px; font-weight: 600; margin: 14px 0 6px; }
+form > label:first-of-type { margin-top: 0; }
+input[type="text"], input[type="url"], input[type="date"], input[type="datetime-local"], input[type="number"], input[type="search"], textarea, select { font-family: var(--sans); font-size: 16px; width: 100%; min-height: 44px; background: var(--lift); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+textarea { min-height: 96px; }
+fieldset { border: 0; padding: 0; margin: 20px 0 0; min-width: 0; }
+legend { padding: 0; font-size: 15px; font-weight: 700; margin-bottom: 4px; }
+input[type="radio"], input[type="checkbox"] { accent-color: var(--ink); width: 20px; height: 20px; }
+.choice label { font-weight: 400; font-size: 15px; }
+.owner { background: none; border: 0; padding: 0; margin: 0; }
+.history { border-left: 1px solid var(--line); padding-left: 14px; }
+.history p { font-size: 15px; }
+table { font-size: 14px; }
+.bet-terms { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 14px; margin: 0; font-size: 14px; }
+.bet-terms dt { color: var(--dim); }
+.bet-terms dd { margin: 0; overflow-wrap: anywhere; }
+.terms dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 14px; margin: 0; font-size: 14px; }
+.terms dt { color: var(--dim); }
+.terms dd { margin: 0; }
+
+/* Signed out. */
+.hero { padding: 12px 16px 14px; }
+.hero h1 { margin: 0; font-size: 28px; font-weight: 600; line-height: 1.15; letter-spacing: -0.02em; }
+.hero p { margin: 6px 0 0; font-size: 17px; line-height: 1.4; color: var(--dim); }
+.hero p b { color: var(--ink); font-weight: 600; }
+.pitch { margin: 0; padding: 14px 16px 2px; font-size: 17px; line-height: 1.4; }
+.pitch b { font-weight: 700; }
+.signbox .pitch { padding: 0; }
+.dates { padding: 0 16px; }
+.dates .lead { padding: 14px 0 0; }
+.dates .err { margin: 6px 0 4px; }
+input.bad { border-color: var(--err); }
+/* Long posts: the words step down so the action stays in reach, and lists show the first lines. */
+.post .said.mid { font-size: 24px; line-height: 1.4; }
+.post .said.long { font-size: 20px; line-height: 1.42; letter-spacing: -0.01em; }
+.prow .said { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; padding: 0 4px; margin: 0 -4px; }
+.prow.note .said { -webkit-line-clamp: 3; }
+.took { display: flex; align-items: center; gap: 10px; margin: 0; padding: 12px 16px 4px; font-size: 15px; }
+.took .face { width: 32px; height: 32px; font-size: 13px; }
+.took .face + .face { margin-left: -18px; margin-right: 2px; }
+.signbox { padding: 8px 16px 0; display: grid; gap: 14px; }
+.signbox h1 { font-size: 28px; font-weight: 600; margin: 0; }
+
+/* Marked reskin refinements. Keep these scoped to the selected page structures. */
+.meta.bet a {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+.err {
+  margin: 8px 0 14px;
+  padding-left: 10px;
+  border-left: 2px solid var(--err);
+  border-radius: 0;
+}
+.banner.error,
+.banner.red {
+  border: 0;
+  border-left: 2px solid var(--err);
+  border-radius: 0;
+  padding-left: 12px;
+  color: var(--err);
+}
+.stakes.left { color: var(--ink); }
+input.bad,
+.paste.bad {
+  border-color: var(--line);
+}
+input.bad[aria-invalid="true"],
+.paste:has(input[aria-invalid="true"]) {
+  border-color: var(--err);
+}
+.versus { grid-template-columns: minmax(0, 1fr) minmax(88px, 150px) minmax(0, 1fr); }
+@media (max-width: 420px) {
+  .versus { grid-template-columns: minmax(0, 1fr) 72px minmax(0, 1fr); padding-left: 12px; padding-right: 12px; }
+  .seat .face, .seat .open { width: 56px; height: 56px; }
+  .pot b { font-size: 24px; }
+  .pot small { white-space: normal; overflow-wrap: anywhere; text-wrap: balance; }
+}
+.wallet-debit { margin: 0; padding: 18px 16px 0; font-size: 17px; font-weight: 700; overflow-wrap: anywhere; }
+
+/* Server-rendered custom date controls: compact at 375px and keyboard accessible. */
+.date-field { min-width: 0; margin: 16px 0 0; padding: 0; border: 0; }
+.date-field legend { margin-bottom: 8px; }
+.date-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.date-part { min-width: 0; }
+.date-part {
+  margin: 0 0 4px;
+  color: var(--dim);
+  font-size: 13px;
+  font-weight: 400;
+}
+.date-part select {
+  min-width: 0;
+  padding: 8px;
+  border-radius: 0;
+}
+.time-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(88px, 1fr);
+  gap: 8px;
+  margin-top: 8px;
+}
+.date-hint { margin: 8px 0 0; color: var(--ink); font-size: 14px; line-height: 1.45; }
+.date-field [aria-invalid="true"] { border-color: var(--err); }
+.date-field :focus-visible { outline: 2px solid var(--x); outline-offset: 2px; }
+.source-author .head b,
+.source-author .head span { white-space: normal; overflow-wrap: anywhere; overflow: visible; text-overflow: clip; }
+.source-author > p { margin: 0 0 8px; }
+.source-author .head { margin-bottom: 0; }
+
+/* A NEAR account name is one long word: it may break anywhere. */
+.acct { overflow-wrap: anywhere; }
+/* The post above a Bet: its author, then a quiet link to it on X at the end of the row. */
+.source-author .head .src { margin-left: auto; color: var(--dim); font-size: 14px; font-weight: 400; white-space: nowrap; }
+.prop .hl { padding: 0.16em 0.14em; margin: 0 -0.14em; }
+
+/* A row's bet line: the two names stay together, and the stake drops to its own line before either is squeezed. */
+.meta.bet { flex-wrap: wrap; }
+.meta.bet > span:last-child { white-space: nowrap; }
+
+/* The link to the post sits level with the name, on the right, never under the picture. */
+.source-author .head { grid-template-columns: 44px minmax(0, 1fr) auto; }
+.source-author .head > span:not(.face) { grid-column: 2; grid-row: 2; }
+.source-author .head .src { grid-column: 3; grid-row: 1 / span 2; align-self: center; margin-left: 12px; }
+/* A handle wraps in full. It breaks after an underscore before it breaks anywhere else. */
+.seat b { white-space: normal; word-break: normal; overflow-wrap: anywhere; overflow: visible; text-overflow: clip; text-wrap: wrap; }
+@media (max-width: 420px) { .seat b { font-size: 15px; } }
+@media (max-width: 340px) { .seat b { min-height: 3em; } }
+
+/* The reply that makes a bet, set as the thing to type. */
+.say { margin: 4px 0 0; padding: 0 16px 6px; font-size: 24px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; overflow-wrap: anywhere; }
+/* A long name wraps on the post's own page. It is never cut. */
+.post .head b { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+.source-author .head .src { display: inline-flex; align-items: center; min-height: 44px; }
+.fold form.takekey { display: grid; gap: 8px; padding: 0 0 4px; }
+
+/* The home page's dare: the open bet sits with the post it is on. */
+.dare { padding: 14px 16px 4px; }
+.dare .meta.bet { margin: 0; font-size: 16px; line-height: 24px; color: var(--ink); align-items: center; }
+.fold form.takekey .err { margin: 0; }
+.pitch.own { padding: 6px 16px 18px; border-bottom: 1px solid var(--line); font-size: 15px; color: var(--dim); }
+.pitch.own b { color: var(--ink); }
+
+/* Wide screens: the post on the left, what is riding on it on the right. Below 1080 the wrapper is not there at all. */
+.pri { display: contents; }
+@media (min-width: 1080px) {
+  .wrap.two { width: min(1080px, 100%); }
+  .wrap.two > main { display: grid; grid-template-columns: minmax(0, 56fr) minmax(0, 44fr); grid-template-rows: repeat(30, auto) 1fr; align-content: start; }
+  .wrap.two > main > .pri { display: block; grid-column: 1; grid-row: 1 / -1; border-right: 1px solid var(--line); padding-bottom: 40px; }
+  .wrap.two > main > :not(.pri) { grid-column: 2; }
+  .wrap.two .pri .post { padding-top: 18px; }
+  .wrap.two .pri .post .said { font-size: 36px; line-height: 1.2; letter-spacing: -0.02em; }
+  .wrap.two .pri .post .said.mid { font-size: 28px; line-height: 1.3; }
+  .wrap.two .pri .post .said.long { font-size: 22px; line-height: 1.4; }
+  .wrap.two .pri .prop { font-size: 32px; line-height: 1.25; letter-spacing: -0.02em; border-bottom: 0; padding-top: 10px; }
+  .wrap.two .pri .pitch.own { border-bottom: 0; }
+}
+
+/* Paying a stake from another chain: one sentence, then the choice of token. */
+.payline { margin: 0 0 12px; font-size: 16px; }
+.payfrom { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.payfrom label { margin: 0; }
+.payfrom select { flex: 1 1 180px; width: auto; }
+
+/* A token's logo, with its chain's logo set into the corner. Some marks are drawn in white on nothing,
+   so each sits on a dark disc: unseen on a dark page, and what keeps the mark visible on a light one. */
+:root { --logo-back: #0F1114; }
+.tok { position: relative; display: inline-block; flex: none; width: 32px; height: 32px; }
+.tok img { display: block; width: 100%; height: 100%; border-radius: 50%; background: var(--logo-back); }
+.tok .on { position: absolute; right: -6px; bottom: -6px; width: 52%; height: 52%; border: 2px solid var(--ground); background: var(--ground); }
+.tok.lg { width: 48px; height: 48px; }
+.tok.md { width: 30px; height: 30px; margin-right: 12px; }
+.tok.sm { width: 20px; height: 20px; margin-right: 8px; vertical-align: -4px; }
+/* At this size a corner mark is a speck; the sentence beside it names the chain. */
+.tok.sm .on { display: none; }
+.payhead { margin: 0; padding: 14px 16px 0; line-height: 0; }
+.payhead + .hero { padding-top: 12px; }
+/* Paying NEAR into an account from another chain */
+:root { --qr-paper: #FFFFFF; --qr-ink: #000000; }
+/* The address as a code to scan: dark on light whatever the theme, since that is what scanners read. */
+.qr { display: block; width: 184px; height: 184px; margin: 4px 16px 14px; border-radius: 10px; }
+.qr-paper { fill: var(--qr-paper); }
+.qr-ink { fill: var(--qr-ink); }
+.fold form.takekey .cost { margin: 0; font-size: 15px; text-wrap: pretty; display: flex; align-items: flex-start; gap: 8px; }
+.fold form.takekey .cost .tok { margin: 1px 0 0; }
+.fold form.takekey .err.whole { margin-top: 14px; }
+.copies.apart { margin-top: 14px; }
+.copies { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0 16px 6px; }
+.copies button { min-height: 44px; }
+.gut a { display: inline-block; padding: 12px 0; }
+/* The price is in the sentence once the section is open. */
+details#pay[open] > summary small { display: none; }
+/* The address: blocks of four to check by eye, selected whole on one tap. */
+.payto { margin: 2px 0 0; padding: 0 16px 10px; font-size: 19px; font-weight: 400; line-height: 1.6; user-select: all; -webkit-user-select: all; overflow-wrap: anywhere; }
+.payto i, .acct i { font-style: normal; margin-right: 0.38em; display: inline-block; }
+.acct i { margin-right: 0.25em; }
+.payto i:last-child, .acct i:last-child { margin-right: 0; }
+.payto::selection, .payto i::selection, .sel::selection { background: var(--ink); color: var(--ground); }
+h1.send span { display: block; font-weight: 400; }
+h1.send .sel { font-weight: inherit; user-select: all; -webkit-user-select: all; }
+.lead.timeleft { padding-top: 6px; font-size: 21px; justify-content: flex-start; gap: 0 8px; }
+.lead.timeleft span { font-size: 17px; }
+.stakes.left { text-wrap: pretty; }
+/* A line of text or a link set in from the page's edge. (Not .pad: that is the layout's own class on main.) */
+.gut { margin: 10px 0 0; padding: 0 16px; }
+.pays { list-style: none; margin: 16px 16px 0; padding: 0; border-top: 1px solid var(--line); }
+.pays.past { margin: 0; border-top: 0; }
+.pays li { border-top: 1px solid var(--line); }
+.pays a { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 0 14px; min-height: 60px; padding: 8px 0; color: inherit; text-decoration: none; }
+.pays .tok { grid-column: 1; grid-row: 1 / span 2; }
+.pays b { grid-column: 2; }
+.pays a::after { content: '›'; grid-column: 3; grid-row: 1 / span 2; color: var(--dim); font-size: 22px; }
+.pays li:first-child { border-top: 0; }
+.pays b { font-weight: 400; }
+/* The balance is the wallet's one large figure. */
+.lead.bal { font-size: 30px; letter-spacing: -0.02em; line-height: 1.15; padding-top: 16px; justify-content: flex-start; align-items: center; gap: 0; }
+.lead.bal > span:last-child { margin-left: auto; }
+.pays a > span:last-child { color: var(--dim); font-size: 14px; grid-column: 2; }
+.fold form.takekey button { margin-top: 10px; }

@@ -1,0 +1,32 @@
+{
+  "name": "stated",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.9"
+  },
+  "scripts": {
+    "build:wallet": "node scripts/build-wallet.mjs",
+    "start": "node --env-file-if-exists=.env server/src/main.mjs",
+    "cli": "node --env-file-if-exists=.env server/src/cli.mjs",
+    "migrate": "node --env-file-if-exists=.env server/src/cli.mjs migrate",
+    "demo": "node server/dev/simulated-x.mjs",
+    "test": "node --test --test-concurrency=1 score.test.mjs domain.test.mjs xpost.test.mjs sim.test.mjs server/test/*.test.mjs",
+    "test:server": "node --test --test-concurrency=1 server/test/*.test.mjs"
+  },
+  "dependencies": {
+    "@meteorwallet/sdk": "3.24.1",
+    "@near-js/keystores": "2.2.5",
+    "@near-js/transactions": "2.2.5",
+    "@resvg/resvg-js": "2.6.2",
+    "buffer": "6.0.3",
+    "decimal.js": "^10.6.0",
+    "near-api-js": "^7.4.0",
+    "pg": "^8.13.1",
+    "qrcode-generator": "1.5.2",
+    "util": "0.12.5"
+  },
+  "devDependencies": {
+    "esbuild": "0.27.2"
+  }
+}

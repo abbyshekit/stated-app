@@ -1,0 +1,103 @@
+{
+  "verifiedAt": "2026-11-10T17:44:49.472Z",
+  "network": "testnet",
+  "contract": "stated-escrow-52081551be.testnet",
+  "contractVersion": 2,
+  "betId": "46de064b-3f33-4b1b-ba89-c960beb52976",
+  "accounts": {
+    "creator": "oskar_a06dac.stated-play-f98a778055.testnet",
+    "acceptor": "lena_a06dac.stated-play-f98a778055.testnet",
+    "referee": "referee.stated-play-f98a778055.testnet"
+  },
+  "x": "simulated locally; no live X calls",
+  "replies": [
+    "0.2 test NEAR says this does not happen by 28 Feb 2027. To take the other side, reply to this post with \"@statedbot take\".",
+    "It\u2019s on. 0.4 test NEAR is held on NEAR testnet until 28 Feb 2027. @oskar_a06dac says no; @lena_a06dac says yes.",
+    "It happened. @lena_a06dac takes 0.4 test NEAR from @oskar_a06dac."
+  ],
+  "transactions": [
+    {
+      "method": "create_bet",
+      "signer": "oskar_a06dac.stated-play-f98a778055.testnet",
+      "hash": "5EWe3sfxkBz7Ta2jG7YNGbxK9LghNeW2XRg4cK5xYsXb"
+    },
+    {
+      "method": "accept_bet",
+      "signer": "lena_a06dac.stated-play-f98a778055.testnet",
+      "hash": "6TAwrmdMYesgU6Y8yx2YLgk7gypdSXtwpxxmJ8gqDi6Q"
+    },
+    {
+      "method": "withdraw",
+      "signer": "lena_a06dac.stated-play-f98a778055.testnet",
+      "hash": "75G6yegSq3rKsb3ChxMBFDAH7iBk2KCQwAjZN6ZW2wrR"
+    },
+    {
+      "method": "referee_resolve",
+      "signer": "referee.stated-play-f98a778055.testnet",
+      "hash": "A5ZVuBPEvhMBmKpNwVdhYjpFGB9mPDjv6uaJXTAzSWEm"
+    }
+  ],
+  "finalState": {
+    "id": "46de064b-3f33-4b1b-ba89-c960beb52976",
+    "terms_hash": "51149616ce9755b7ff6c5baaa2a4b779fa881764fef5eb2bb626d93596cf844f",
+    "creator_binding_hash": "f1bc107a94084d0b4ced8be3ae9b436fff6842f302ff512061b815b6f0534de1",
+    "acceptor_binding_hash": "bb694e9639ba2d2a29226a0a69be22f94a21c1000639bc2b70f1bc7f0977194e",
+    "creator": "oskar_a06dac.stated-play-f98a778055.testnet",
+    "acceptor": "lena_a06dac.stated-play-f98a778055.testnet",
+    "invited_account": null,
+    "creator_side": "no",
+    "stake_yocto": "200000000000000000000000",
+    "accept_by_ns": "1794937460167000000",
+    "resolve_at_ns": "1803859199000000000",
+    "status": "settled",
+    "proposal": null,
+    "referee": "referee.stated-play-f98a778055.testnet",
+    "resolution": {
+      "outcome": "yes",
+      "method": "referee",
+      "resolved_at_ns": "1794332680063836764"
+    }
+  },
+  "steps": [
+    {
+      "name": "\u201cbet 0.2 no\u201d funded an offer from the handle\u2019s account",
+      "at": "2026-11-10T17:44:29.081Z",
+      "betId": "46de064b-3f33-4b1b-ba89-c960beb52976",
+      "account": "oskar_a06dac.stated-play-f98a778055.testnet",
+      "referee": "referee.stated-play-f98a778055.testnet"
+    },
+    {
+      "name": "\u201ctake\u201d matched the stake",
+      "at": "2026-11-10T17:44:38.284Z",
+      "account": "lena_a06dac.stated-play-f98a778055.testnet"
+    },
+    {
+      "name": "The referee settled from the recorded Result and the winner was paid",
+      "at": "2026-11-10T17:44:49.424Z",
+      "resolution": {
+        "outcome": "yes",
+        "method": "referee",
+        "resolved_at_ns": "1794332680063836764"
+      },
+      "winnerGainYocto": "399594627816304300000000"
+    }
+  ],
+  "contractDeployment": {
+    "contract": "stated-escrow-52081551be.testnet",
+    "deployTransaction": "EMwNFgiyq2ShWgW7NLTdMgY1kjFgfw4NKHHJ8STPuuKh",
+    "wasmSha256": "a1182e5ccc543058d1ae4121e7d4361f17822583f455dcc5140e3e092e20a2d5",
+    "accessKeysAfterLock": 0,
+    "note": "Deployed and locked by this script in the run just before this one; that run stopped at a key check that read the chain one block early. The key list was then read as empty and this run used the contract."
+  },
+  "supersededContracts": [
+    {
+      "contract": "stated-escrow-02feeb68ba.testnet",
+      "why": "Version 2 before the review fix: a participant could let an unanswered result stand on a Bet that names a referee. Locked; do not use."
+    },
+    {
+      "contract": "stated-escrow-e6232c861c.testnet",
+      "why": "First version 2 deployment; deploy key discarded but never removed on chain. Do not use."
+    }
+  ],
+  "rpc": "https://test.rpc.fastnear.com"
+}

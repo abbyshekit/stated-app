@@ -1,0 +1,74 @@
+/* INTEGRATION: Load after stated.css and certificate.css for live Bet pages. */
+/* DESIGN.md: hidden steps must remain absent despite the button display rules. */
+[hidden] { display: none !important; }
+
+@font-face { font-family: "Archivo"; src: url("/static/fonts/Archivo-latin.woff2") format("woff2"); font-style: normal; font-weight: 400 800; font-stretch: 75% 100%; font-display: swap; } /* token-lint: allow */
+
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+
+.wrap { width: min(960px, calc(100% - 32px)); }
+.bet-layout { display: grid; gap: 24px; align-items: start; }
+.bet-layout > *, .bet-rail > *, .bet-actions > *, .bet-actions form,
+.bet-form, .bet-review, .public-bet-list, .wallet-review, .state-note,
+.share-preview, .bet-summary, .bet-result { min-width: 0; }
+.bet-layout .claim.cert { margin: 0; }
+.prediction-history { margin-top: 24px; max-width: 600px; }
+.prediction-layout .note { margin: 0; }
+.prediction-layout .note.mono { overflow-wrap: anywhere; }
+.claim.cert .sentence { font-size: 17px; line-height: 1.4; }
+.bet-rail { display: grid; gap: 16px; align-content: start; border-top: 3px solid var(--c-ink); padding-top: 14px; }
+.bet-rail .standing { margin: 0; font: 600 18px/1.25 var(--c-display); letter-spacing: -0.02em; }
+.bet-actions { display: grid; gap: 8px; }
+.bet-actions form { display: grid; gap: 8px; margin: 0; }
+.bet-actions .btn, .bet-actions .button, .bet-actions button { width: 100%; }
+.bet-rail > a, .bet-actions > a { min-height: 44px; display: flex; align-items: center; }
+.bet-rail details.terms { margin: 0; padding: 0; }
+.bet-rail details.terms > summary { cursor: pointer; }
+
+.stub .line .name, .stub .line .sign {
+  font: 600 15px/1.3 var(--c-display);
+  letter-spacing: -0.01em;
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+.stub .line { align-items: flex-end; }
+.stub .side { font: 600 11px/1.3 var(--c-display); }
+.stub .amt { font: 400 13px/1.4 var(--c-display); overflow-wrap: anywhere; }
+.stubs .ptag { width: max-content; max-width: calc(100% - 16px); white-space: normal; text-align: center; line-height: 1.2; }
+.cert.inv .due, .cert.inv .xpost .n .h, .claim.cert.inv .xpost .quiet,
+.cert.inv .term dt, .claim.cert.inv .quiet, .cert.inv .stub .side,
+.cert.inv .stub .amt { opacity: 0.85; }
+.cert.inv .stub:not(.won) .line .name { opacity: 0.85; }
+
+button, .button, button.primary, .button.primary, .btn { font-weight: 600; }
+.btn, button.primary, .button.primary { line-height: 1.2; }
+.bet-layout button, .bet-layout .button, .bet-layout .btn,
+.bet-layout input, .bet-layout select, .bet-layout summary { min-height: 44px; }
+.bet-layout :is(a, p, span, dd, dt, label, code, pre),
+.bet-form :is(a, p, span, dd, dt, label, code, pre),
+.bet-review :is(a, p, span, dd, dt, label, code, pre),
+.public-bet-list :is(a, p, span, dd, dt, label, code, pre),
+.wallet-review :is(a, p, span, dd, dt, label, code, pre),
+.state-note, .share-preview, .bet-summary, .bet-result { overflow-wrap: anywhere; }
+.bet-layout pre, .bet-review pre, .wallet-review pre, .share-preview pre { white-space: pre-wrap; }
+.bet-layout input, .bet-layout select, .bet-layout textarea,
+.bet-form input, .bet-form select, .bet-form textarea { max-width: 100%; }
+.bet-layout :is(time, .amt), .bet-form, .bet-review, .bet-summary,
+.bet-result, .wallet-review { font-variant-numeric: tabular-nums; }
+.bet-layout :focus-visible, .bet-form :focus-visible, .bet-review :focus-visible,
+.wallet-review :focus-visible, .public-bet-list :focus-visible {
+  outline: 2px solid var(--c-xblue);
+  outline-offset: 2px;
+}
+
+@media (min-width: 900px) {
+  .wrap { width: min(960px, calc(100% - 48px)); }
+  .bet-layout { grid-template-columns: minmax(0, 600px) minmax(0, 1fr); gap: 48px; }
+  .claim.cert .sentence { font-size: 20px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bet-layout *, .bet-form *, .bet-review *, .wallet-review * { transition: none; animation: none; transform: none; }
+  .stubs .ptag { transform: translateX(-50%); }
+}
