@@ -1,6 +1,14 @@
 # Stated
 
-Stated turns a reply under a prediction into a two-person bet. One bettor offers a stake, the other matches it, and a NEAR escrow contract pays the winner after Stated’s referee records the result. You can also tag the bot to track a prediction without offering a bet. The judge demo uses simulated X and real NEAR testnet.
+Stated turns a reply under a prediction into a two-person bet. One bettor offers a stake, the other matches it, and a NEAR escrow contract pays the winner after Stated’s referee records the result. You can also tag the bot to track a prediction without offering a bet. The hosted app uses real X and NEAR testnet; the local Docker walkthrough uses simulated X.
+
+## Try the hosted app
+
+Open [Stated](https://stated-production.up.railway.app/) or inspect the [completed test bet](https://stated-production.up.railway.app/bets/c171de89-f223-4309-886e-180ad69af092) without signing in. Two operator-controlled X identities completed this test on 11 November 2026. Each staked 0.1 test NEAR; the winner received 0.2 test NEAR. These tokens have no monetary value.
+
+The [original prediction](https://x.com/ChainAbstracted/status/2120590042074665286) led to a [bet command](https://x.com/ChainAbstracted/status/2120590352880951797), a [bot offer](https://x.com/statedforecast/status/2120590654430650560), web acceptance and a [match reply](https://x.com/statedforecast/status/2120597844256305438). A reviewer recorded No from the specified Coinbase candle. After the ten-minute correction delay, the worker settled, withdrew the winnings and published the [result](https://x.com/statedforecast/status/2120598097608987019).
+
+Verify the [referee transaction](https://testnet.nearblocks.io/txns/4Gix2npAw4PGEfCDTnifCByGagz4FZdG5mArTtA6kazt) separately from the [completed payout](https://testnet.nearblocks.io/txns/8gqtVGRBxghhqnTveMrjW2X6AW89GUGvV6azmebWMr6B). Public RPC verification confirmed the exact transfer and successful withdrawal callback; settlement alone does not prove delivery. [Public proof record](evidence/hosted-real-x-testnet-20261111.json)
 
 ## Run the judge demo
 
@@ -77,12 +85,12 @@ curl -fsS https://test.rpc.fastnear.com -H 'content-type: application/json' \
 
 ## NEAR HACKATHON notes
 
-The recording evidence records the test run at filming. The release verification ran 393 app tests and 71 contract tests separately. `npm audit --omit=dev` flags four high-severity entries in the Meteor SDK dependency tree. The reply-to-payout demo uses app-managed testnet accounts.
+The recording evidence records the test run at filming. The release verification ran 394 app tests and 71 contract tests separately. `npm audit --omit=dev` flags four high-severity entries in the Meteor SDK dependency tree. The reply-to-payout demo uses app-managed testnet accounts.
 
 - **Development dates.** The first recorded Stated development snapshot is dated 9 November 2026, after the hackathon announcement. It includes the standalone forecasting prototype. The judge walkthrough uses the Node app and its NEAR integration.
 - **NEAR integration.** The escrow contract (Rust, `near-sdk` 5.29.0; version 2 adds the referee and the unanswered-result rule), live dry-run quotes from NEAR Intents for paying a stake from another chain (the mainnet payment path is implemented and unverified), named accounts per X handle with a claim step that swaps keys, wallet signing through the self-hosted Meteor SDK, exact finalized-transaction verification, and a bounded testnet reconciler that keeps Bet pages current without a browser. A full reply-to-settlement run on testnet is recorded in `evidence/reply-bets-testnet-live.json` (`node scripts/reply-bets-live.mjs` repeats it).
 - **Libraries.** The app uses `@meteorwallet/sdk`, `near-api-js`, `@near-js/transactions`, `@near-js/keystores`, `pg`, `@resvg/resvg-js`, `decimal.js`, `qrcode-generator`, `buffer`, and `util`. `esbuild` bundles the wallet script. The typeface in share images is Archivo (SIL Open Font License). Pages use server-rendered HTML and ordinary forms.
-- **Limits.** The judge demo uses simulated X, test NEAR and dry-run Intents quotes. The mainnet pilot is private, and live cross-chain payment and mainnet payout are unverified. The server holds an unclaimed managed account's key. Stated referees reply Bets. A direct Bet without a referee can settle by agreement. [Demo walkthrough](docs/DEMO.md)
+- **Limits.** The local walkthrough uses simulated X. The hosted test uses actual X, test NEAR and operator-controlled participants. Intents quotes are dry runs. The mainnet pilot is private, and live cross-chain payment and mainnet payout are unverified. The server holds an unclaimed managed account's key. Stated referees reply Bets from a human-recorded Result. A direct Bet without a referee can settle by agreement. [Demo walkthrough](docs/DEMO.md)
 
 Predictions can seed a separate bilateral Bet. Participants review their own proposition and terms, then deposit equal native test NEAR stakes into the testnet escrow. The source author participates only if they join. A funded Bet can be deliberately published; visitors can take the opposite side or follow its outcome without a wallet. Public invitations remain readable after acceptance and settlement and have downloadable share cards. Sharing opens X's composer for the user to submit.
 

@@ -11,6 +11,7 @@ export function loadConfig(env = process.env) {
     port,
     baseUrl,
     databaseUrl: env.DATABASE_URL || '',
+    demoBetId: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(env.STATED_DEMO_BET_ID || '') ? env.STATED_DEMO_BET_ID.toLowerCase() : null,
     sessionDays: Number(env.STATED_SESSION_DAYS || 30),
     tokenKey: env.STATED_TOKEN_KEY || '',
     adminXIds: list(env.STATED_ADMIN_X_IDS),

@@ -1,0 +1,42 @@
+{
+  "network": "NEAR testnet",
+  "date": "2026-11-11",
+  "betUrl": "https://stated-production.up.railway.app/bets/c171de89-f223-4309-886e-180ad69af092",
+  "contract": "stated-escrow-52081551be.testnet",
+  "actors": {"creator":"ChainAbstracted","acceptor":"statedforecast","independence":"Both identities are controlled by the operator; this is a functional demonstration."},
+  "social": {
+    "source": "https://x.com/ChainAbstracted/status/2120590042074665286",
+    "command": "https://x.com/ChainAbstracted/status/2120590352880951797",
+    "offer": "https://x.com/statedforecast/status/2120590654430650560",
+    "match": "https://x.com/statedforecast/status/2120597844256305438",
+    "result": "https://x.com/statedforecast/status/2120598097608987019"
+  },
+  "stakeYoctoEach": "100000000000000000000000",
+  "outcome": "no",
+  "evidence": {
+    "url": "https://api.exchange.coinbase.com/products/NEAR-USD/candles?granularity=60&start=2026-11-11T19%3A10%3A00Z&end=2026-11-11T19%3A11%3A00Z",
+    "candleStart": "2026-11-11T19:10:00Z",
+    "openingPriceUsd": "3.689",
+    "thresholdUsd": "4",
+    "rule": "Opening price strictly above the threshold",
+    "resolution": "A human reviewer recorded No; this is not an independent oracle."
+  },
+  "transactions": {
+    "create": "7utYkLQFQmFhMRkeHQx1cEnn6Kxc2Wuarur3pMVTqcCa",
+    "accept": "ECkMkPJVninxBTArwnobwqNxZno84G2WyyEHAibbtWFx",
+    "refereeResolve": "4Gix2npAw4PGEfCDTnifCByGagz4FZdG5mArTtA6kazt",
+    "withdraw": "8gqtVGRBxghhqnTveMrjW2X6AW89GUGvV6azmebWMr6B"
+  },
+  "payout": {
+    "recipient": "statedforecast.stated-play-6cf0876dd7.testnet",
+    "amountYocto": "200000000000000000000000",
+    "transferReceipt": "6ioYov5YMUn2PZM7bR6L5qG4fSQqgVahbQNBj9zbW3Nw",
+    "callbackReceipt": "CeoamLYExvPPDiZfMRG4hvxUVhReKXUK2eEAoQjv92oh",
+    "finalExecutionStatus": "FINAL",
+    "transferSucceeded": true,
+    "withdrawalReturnedTrue": true,
+    "remainingCreditYocto": "0"
+  },
+  "verification": {"providers":["https://test.rpc.fastnear.com","https://rpc.testnet.near.org"],"checkedAt":"2026-11-11T19:24:00Z","scope":"Final referee and withdrawal execution, exact transfer, successful callback and zero participant credits. Creation and acceptance additionally rechecked through FastNear at 19:28 UTC."},
+  "limits": ["Test tokens have no monetary value.","The server signs for unclaimed managed accounts.","This run establishes functionality, not independent adoption or mainnet readiness."]
+}
