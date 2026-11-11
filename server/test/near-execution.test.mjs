@@ -37,11 +37,11 @@ function rpcFor(result, { fail = false } = {}) {
   return { fetchImpl, calls };
 }
 
-test('a matching finalized withdrawal succeeds while polling without a finality wait', async () => {
+test('a matching withdrawal waits for finality before confirming success', async () => {
   const rpc = rpcFor(execution());
   assert.equal((await verifyNearExecution(request, hash, { fetchImpl: rpc.fetchImpl })).status, 'succeeded');
   assert.deepEqual(rpc.calls[0].params, {
-    tx_hash: hash, sender_account_id: request.wallet_account, wait_until: 'NONE',
+    tx_hash: hash, sender_account_id: request.wallet_account, wait_until: 'FINAL',
   });
 });
 

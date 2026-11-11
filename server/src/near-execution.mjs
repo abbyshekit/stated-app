@@ -68,7 +68,7 @@ export async function verifyNearExecution(request, transactionHash, { fetchImpl 
   let result;
   try {
     result = await rpc('tx', {
-      tx_hash: transactionHash, sender_account_id: request.wallet_account, wait_until: 'NONE',
+      tx_hash: transactionHash, sender_account_id: request.wallet_account, wait_until: 'FINAL',
     }, { fetchImpl });
   } catch { return answer('pending', PENDING); }
   if (!result || result.final_execution_status !== 'FINAL') return answer('pending', PENDING);
