@@ -11,6 +11,11 @@ export function loadConfig(env = process.env) {
     port,
     baseUrl,
     databaseUrl: env.DATABASE_URL || '',
+    nearai: {
+      apiKey: env.NEARAI_API_KEY || '',
+      baseUrl: String(env.NEARAI_BASE_URL || 'https://cloud-api.near.ai/v1').replace(/\/$/, ''),
+      model: env.NEARAI_MODEL || 'Qwen/Qwen3.8-27B',
+    },
     demoBetId: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(env.STATED_DEMO_BET_ID || '') ? env.STATED_DEMO_BET_ID.toLowerCase() : null,
     sessionDays: Number(env.STATED_SESSION_DAYS || 30),
     tokenKey: env.STATED_TOKEN_KEY || '',

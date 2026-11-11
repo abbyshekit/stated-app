@@ -90,7 +90,7 @@ export function checkUrl(raw, { allowLoopback = false } = {}) {
   return url;
 }
 
-function requestOnce(url, { allowLoopback, timeoutMs, maxBytes, userAgent }) {
+function requestOnce(url, { allowLoopback, timeoutMs, maxBytes, userAgent, signal }) {
   return new Promise((done, fail) => {
     // `timeout` below is an idle timeout; this one bounds the whole request,
     // so a server that drips bytes cannot hold a worker.
@@ -106,6 +106,7 @@ function requestOnce(url, { allowLoopback, timeoutMs, maxBytes, userAgent }) {
     const lib = url.protocol === 'https:' ? https : http;
     const req = lib.request(url, {
       method: 'GET',
+      signal,
       lookup: guardedLookup(allowLoopback),
       headers: {
         'user-agent': userAgent,
@@ -153,6 +154,7 @@ export async function safeFetch(raw, options = {}) {
     timeoutMs: options.timeoutMs || 8000,
     maxBytes: options.maxBytes || 2_000_000,
     userAgent: options.userAgent || 'StatedBot/0.1',
+    signal: options.signal,
   };
   // X pages are never fetched as web pages, at the first hop or after a
   // redirect: X content comes only through the X API.
@@ -162,6 +164,7 @@ export async function safeFetch(raw, options = {}) {
   };
   let url = notX(checkUrl(raw, opts));
   for (let hop = 0; hop <= 5; hop += 1) {
+    opts.signal?.throwIfAborted();
     const res = await requestOnce(url, opts);
     if (res.status >= 300 && res.status < 400) {
       if (!res.location) throw new UserError('The page redirected without a destination.');

@@ -1,7 +1,7 @@
 // INTEGRATION: the Marked look for Bets; callers supply an authorized Bet projection.
 // The two-seat block itself lives in marked.mjs; these helpers wrap it.
 import { html, raw } from './html.mjs';
-import { betBlock, betLead, betState } from './marked.mjs';
+import { betBlock, betLead, betState, dayMonth } from './marked.mjs';
 import { face } from './certificate.mjs';
 import { formatTestNear } from './near-escrow.mjs';
 import { network, unit } from './near-network.mjs';
@@ -78,12 +78,21 @@ export function betShareLink(baseUrl, bet, { label = null, ghost = false, mine =
 }
 
 // One row per Bet: the wording, then a line of plain facts.
-export function betList(rows, { viewer = null, faces = null } = {}) {
+export function betList(rows, { viewer = null, faces = null, hall = false } = {}) {
   const pic = (username) => face({ url: faces?.get(String(username || '').toLowerCase()) || null, name: username || '?' });
   return html`<ul class="posts">${rows.map((bet) => {
     const status = displayBetStatus(bet);
     const lead = betLead(bet, { viewer }).text;
     const people = [bet.creator_username, bet.acceptor_username].filter(Boolean);
+    if (hall) {
+      const winner = bet.outcome === bet.creator_side ? bet.creator_username : bet.acceptor_username;
+      const phrase = bet.status === 'settled' && ['yes', 'no'].includes(bet.outcome)
+        ? `${winner ? `@${winner}` : `The ${bet.outcome} side`} won ${formatTestNear((BigInt(bet.stake_yocto) * 2n).toString())} ${unit()}`
+        : status === 'Offer expired' ? status : bet.status === 'offered' ? `Open until ${dayMonth(bet.accept_by)}`
+          : ['accepted', 'proposed', 'disputed'].includes(bet.status) ? 'Both sides are in'
+            : BET_STATUS[bet.status];
+      return html`<li class="prow note"><p class="said"><a href="/bets/${bet.id}">${bet.claim}</a></p><p class="meta">${phrase}</p></li>`;
+    }
     return html`<li class="prow note"><p class="said"><a href="/bets/${bet.id}">${bet.claim}</a></p>
       <p class="meta">${people.length ? html`<span class="stack">${people.map(pic)}</span>` : ''}<b>${status === 'Not funded' ? status : lead}</b><span>${formatTestNear(bet.stake_yocto)} ${unit()} each</span></p>
     </li>`;

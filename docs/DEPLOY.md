@@ -19,6 +19,9 @@ One Node service and one PostgreSQL database behind a single HTTPS origin. The i
 | `X_CLIENT_ID`, `X_CLIENT_SECRET` | from the Stated app on console.x.com | The same app the local server uses. |
 | `X_BOT_USER_ID` | the bot's numeric X ID | Stops any other account from being bound as the bot. |
 | `STATED_ADMIN_X_IDS` | the operator's numeric X ID | Who may record outcomes. |
+| `NEARAI_API_KEY` | leave unset to disable checks | Enables the admin-only public Result check. Set as a service secret. |
+| `NEARAI_BASE_URL` | `https://cloud-api.near.ai/v1` | NEAR AI Cloud gateway; credentials are never sent to the evidence site. |
+| `NEARAI_MODEL` | `Qwen/Qwen3.8-27B` | TEE model from the [quickstart](https://docs.near.ai/cloud/quickstart). Use a canonical model ID; aliases are rejected. |
 | `STATED_NEAR_CONTRACT` | `stated-escrow-52081551be.testnet` | The version 2 escrow on testnet; its account has no access keys. Leave empty to host with Bets off. The earlier `stated88cdfc066d7ed705a.testnet` is version 1 and cannot name a referee. |
 | `STATED_PLAY` | `1` to allow Bets from replies | Needs the version 2 contract, the X worker and replies on. |
 | `STATED_PLAY_TREASURY`, `STATED_PLAY_TREASURY_KEY` | a `.testnet` account and its `ed25519:` secret key | Funds new play accounts. Testnet only. Set the key through `--stdin`. `STATED_PLAY_AUTOPROVISION=1` makes one from the faucet instead, which is meant for demos. |
@@ -29,6 +32,10 @@ One Node service and one PostgreSQL database behind a single HTTPS origin. The i
 | `PORT` | set by Railway | Do not set it by hand. |
 
 Secrets go in as service variables through the dashboard or `railway variable set --stdin`, never in a file in the repository.
+
+The evidence page offers **Run enclave check** only after an admin publishes evidence for a public referee Result. Each attempt has a 30-second deadline. The first successful signed check becomes an append-only Bet event; failures store nothing. A check never changes the Result or payout. The request contains public Bet terms and published evidence only.
+
+Checks require an Ed25519 `provider_tee` signature matching one preflight model report. Gateway signatures are rejected. The stored report and verification recipe support a separate hardware review. The built-in verifier checks signed bytes and signer consistency; it reports hardware attestation as unverified. Current [NEAR AI verification guidance](https://docs.near.ai/cloud/verification/cloud-api/response-signatures) also requires DCAP quote verification and measurement policy before treating hardware as verified.
 
 ## First deployment
 

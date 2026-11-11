@@ -9,6 +9,7 @@ import { betDateFields, readBetDate } from './bet-date-fields.mjs';
 import { betSourceHeader, predictionSourceHeader } from './bet-source-view.mjs';
 import { consentToPublicBet, followPublicBet, followsFor, nextOpenPublicBet, publicBet, publishBet, readPublicBet, withdrawBetPublication } from './bet-public.mjs';
 import { publishPublicResultEvidence } from './bet-result-evidence.mjs';
+import { readAttestedCheck, runAttestedCheck, verificationRecipe } from './attested-check.mjs';
 import { betList, betShareLink, betTerms, displayBetStatus } from './bet-view.mjs';
 import { facesByUsername } from './certificate.mjs';
 import { betBlock, betLead, betState, dayMonth } from './marked.mjs';
@@ -195,6 +196,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
         : html`<a class="pill solid big" href="/signin?return=${encodeURIComponent(join)}">${X_MARK}Sign in to bet ${take}</a>`;
     }
     const evidence = bet.result_evidence;
+    const check = config.nearai?.apiKey ? await db.tx((tx) => readAttestedCheck(tx, bet)) : null;
     const proof = bet.settlement_transaction_hash
       ? html`<p class="proof"><b>${evidence ? `Stated settled this Bet ${bet.outcome === 'yes' ? 'Yes' : 'No'}` : bet.outcome === 'yes' ? 'Came true' : 'Did not come true'}</b><a class="tl" href="${transactionLink(bet.settlement_transaction_hash)}" rel="noopener noreferrer">Verify settlement</a></p>`
       : '';
@@ -205,6 +207,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
       ${betBlock(bet, { cameTrue: refereeRuling(bet) === 'yes', viewer: ctx.user, faces: await faces(ctx, bet), joinHref: open && eligible ? join : null })}
       ${proof}
       ${evidence ? html`<p class="gut">${evidence.note}</p><p class="proof"><a class="tl" href="${evidence.url}" rel="noopener noreferrer">Evidence</a></p>` : ''}
+      ${check ? html`<p class="gut">NEAR AI signed second opinion: ${check.model} read the evidence and ${check.verdict.agrees ? 'agrees' : 'disagrees'}. <a class="tl" href="/bets/${bet.id}/attested-check.json">Verify</a></p>` : ''}
       ${bet.settlement_transaction_hash && isAdmin(ctx.user) ? html`<p class="gut"><a class="tl" href="/admin/bets/${bet.id}/evidence">${evidence ? 'View evidence record' : 'Publish evidence'}</a></p>` : ''}
       ${following ? html`<p class="notice" role="status">Following. Updates will appear in your Inbox.</p>` : ''}
       <div class="acts">${primary}<div class="two">${reply}${open ? copyBetLink(bet) : ''}${open && !followPrimary ? follow : next || start ? share : ''}<a class="tl" href="/share/bets/${bet.id}.png" download="stated-bet-${bet.id}.png">Download card</a></div></div>
@@ -216,6 +219,8 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
 
   async function evidencePage(ctx, bet, { error = null, typed = {}, status = 200 } = {}) {
     const evidence = bet.result_evidence;
+    const hasCheck = config.nearai?.apiKey && evidence && await db.one(`select 1 from bilateral_bet_events
+      where bet_id=$1 and kind='attested_check' limit 1`, [bet.id]);
     await show(ctx, 'Public Result evidence', html`
       <div class="hero"><h1>Public Result evidence</h1></div>
       <p class="prop">${bet.claim}</p>
@@ -229,6 +234,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
           <label for="result-known">Outcome known (UTC)</label><input id="result-known" type="datetime-local" name="knownAt" required step="1" value="${String(typed.knownAt || '').replace(/(?:\.\d{3})?Z$/, '')}">
           </div><div class="acts"><button class="primary big" type="submit">Publish evidence</button></div>
         </form>`}
+      ${config.nearai?.apiKey && evidence && !hasCheck ? html`<form method="post" action="/admin/bets/${bet.id}/attested-check">${csrfField(ctx)}<div class="acts"><button class="primary big" type="submit">Run enclave check</button></div></form>` : ''}
       <p class="gut"><a class="tl" href="${pathFor(bet.id)}">View bet</a></p>`, { status, back: pathFor(bet.id) });
   }
 
@@ -237,6 +243,31 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
     const bet = await publicBet(db, ctx.params[0]);
     if (!bet?.settlement_transaction_hash) return notFound(ctx);
     await evidencePage(ctx, bet);
+  });
+
+  route('GET', new RegExp(`^/bets/${ID}/attested-check\\.json$`), async (ctx) => {
+    if (!config.nearai?.apiKey) return notFound(ctx);
+    const bet = await publicBet(db, ctx.params[0]);
+    const check = bet && await db.tx((tx) => readAttestedCheck(tx, bet));
+    if (!check) return notFound(ctx);
+    send(ctx.res, 200, JSON.stringify({ ...check, verificationRecipe }), {
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+    });
+  });
+
+  route('POST', new RegExp(`^/admin/bets/${ID}/attested-check$`), async (ctx) => {
+    if (!(await needAdmin(ctx))) return;
+    if (!(await needPost(ctx))) return;
+    if (!config.nearai?.apiKey) return notFound(ctx);
+    try {
+      await runAttestedCheck(db, config, ctx.params[0], ctx.user.id, { fetchImpl });
+    } catch (error) {
+      if (!(error instanceof UserError)) throw error;
+      const bet = await publicBet(db, ctx.params[0]);
+      if (!bet?.settlement_transaction_hash) return notFound(ctx);
+      return evidencePage(ctx, bet, { error, status: error.status });
+    }
+    redirect(ctx.res, `/admin/bets/${ctx.params[0]}/evidence`);
   });
 
   route('POST', new RegExp(`^/admin/bets/${ID}/evidence$`), async (ctx) => {

@@ -7,3 +7,4 @@ output/
 .env.*
 !.env.example
 contracts/**/target/
+.gstack/

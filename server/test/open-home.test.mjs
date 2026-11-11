@@ -65,7 +65,7 @@ test('selection excludes stale and own offers', async () => {
 test('the creator cannot take their own offer from home', async () => {
   const page = await creatorBrowser.get('/');
   assert.equal(page.status, 200);
-  assert.doesNotMatch(page.text, /Agreed public proposition/);
+  assert.match(page.text, /Agreed public proposition/, 'the published offer remains in the hall');
   assert.doesNotMatch(page.text, new RegExp(`/bets/${bet.id}\\?join=1`));
   assert.doesNotMatch(page.text, /Take no/);
 });
@@ -116,16 +116,16 @@ test('home excludes withdrawn, unverified, expired, invited and incompatible off
   for (const [disable, restore] of cases) {
     await s.db.query(disable, [bet.id]);
     assert.equal(await nextOpenPublicBet(s.db), null, disable);
-    assert.doesNotMatch((await s.browser().get('/')).text, /Agreed public proposition/, disable);
+    assert.doesNotMatch((await s.browser().get('/')).text.split('paid to winners')[0], /Agreed public proposition/, disable);
     await s.db.query(restore, restore.includes('$2') ? [bet.id, bet.accept_by] : [bet.id]);
   }
   const enabled = s.config.play.enabled;
   s.config.play.enabled = false;
-  assert.doesNotMatch((await s.browser().get('/')).text, /Agreed public proposition/);
+  assert.doesNotMatch((await s.browser().get('/')).text.split('paid to winners')[0], /Agreed public proposition/);
   s.config.play.enabled = enabled;
   const real = s.config.near.real;
   s.config.near.real = true;
-  assert.doesNotMatch((await s.browser().get('/')).text, /Agreed public proposition/);
+  assert.doesNotMatch((await s.browser().get('/')).text.split('paid to winners')[0], /Agreed public proposition/);
   s.config.near.real = real;
 });
 

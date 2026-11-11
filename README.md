@@ -37,6 +37,18 @@ The command reads the [completed hosted Bet](https://stated-production.up.railwa
 
 It prints a JSON report. Exit `0` requires both endpoints to pass and agree; exit `1` means evidence did not match, and exit `2` means an endpoint was unavailable. The command corroborates RPC responses; X identities and the human outcome decision remain outside its checks. Both recorded participants were operator-controlled.
 
+## Verify the enclave check
+
+For a public Result with a saved second opinion:
+
+```sh
+node scripts/verify-attested-check.mjs https://your-stated-host.example <bet-id>
+```
+
+Without an API key, the command fetches the public check and verifies its exact-byte SHA-256 hashes and the model's Ed25519 signature. Exit `0` means those checks passed, `1` means a mismatch, and `2` means the endpoint was unavailable.
+
+The JSON report states `hardwareAttestation: "not_verified"`; use the stored preflight reports and verification recipe for the separate [hardware attestation checks](https://docs.near.ai/cloud/verification/cloud-api/model-attestations). A valid signature alone does not authenticate a hardware quote or establish whether the model's opinion is correct.
+
 ## Run the judge demo
 
 No X account, API key or NEAR wallet is needed to browse predictions and try capture. The stack runs the real server, worker and pages against **simulated X** with labelled test accounts and posts. Prediction capture works locally. The reply Bet uses real NEAR testnet and requires outbound RPC access and a funded testnet treasury.

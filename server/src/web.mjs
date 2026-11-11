@@ -12,7 +12,8 @@ const CONTENT_SECURITY_POLICY = "default-src 'self'; style-src 'self'; img-src '
 import { registerWalletRpc } from './near-wallet-rpc.mjs';
 import { registerShareRoutes } from './share-pages.mjs';
 import { betsFor } from './bets.mjs';
-import { publicBet, publicBetsForSave, firstPublicBetsForSaves, nextOpenPublicBet } from './bet-public.mjs';
+import { publicBet, publicBetsForSave, firstPublicBetsForSaves, nextOpenPublicBet, publicBetHall } from './bet-public.mjs';
+import { betList } from './bet-view.mjs';
 import { betBlock, betState, dayMonth, timeLeft } from './marked.mjs';
 import { formatTestNear } from './near-escrow.mjs';
 import { network, unit } from './near-network.mjs';
@@ -844,6 +845,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
 
   route('GET', /^\/$/, async (ctx) => {
     ensureVisitor(ctx);
+    const hall = await publicBetHall(db);
     const bot = await botUsername();
     // One row per statement: the author's own save wins over a follower's.
     const seen = new Map();
@@ -880,6 +882,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
         <p class="pitch own"><a href="/bets/new"><b>Or make your own.</b></a> Reply under any prediction on X: <b>@${bot} bet ${config.play.defaultStakeNear} no</b></p>`
       : html`<div class="acts line">${ctx.user ? html`<a class="pill solid big" href="/me">Your predictions</a>` : html`<a class="pill solid big" href="/signin">${X_MARK}Sign in with X</a>`}</div>`}
       ${showDemo ? html`<p class="pitch">Operator-controlled test on NEAR testnet</p><div class="acts"><a class="pill big" href="/bets/${demo.id}">View test bet</a></div>` : ''}</div>
+      ${hall.total ? html`<p class="pitch">${hall.total} ${hall.total === 1 ? 'bet' : 'bets'}, ${hall.settled} settled, ${formatTestNear(hall.paidYocto)} ${unit()} paid to winners</p>${betList(hall.rows, { hall: true })}` : ''}
       ${rest.length ? fileList(rest, publicRow, faces, betLines) : ''}
     `, { flush: true, signin: Boolean(dareBet || fallback), two: rest.length > 0 }), { headers: refCookie(ctx) });
   });

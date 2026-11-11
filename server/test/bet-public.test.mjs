@@ -6,7 +6,7 @@ import { after, before, beforeEach, test } from 'node:test';
 import { createBet } from '../src/bets.mjs';
 import {
   consentToPublicBet, followPublicBet, followsFor, publicBet,
-  publishBet, recentPublicBets, withdrawBetPublication,
+  publishBet, recentPublicBets, withdrawBetPublication, publicBetHall,
 } from '../src/bet-public.mjs';
 import { completeSetup, signInFromX } from '../src/store.mjs';
 import { startStack } from './support/app.mjs';
@@ -93,6 +93,51 @@ beforeEach(async () => {
 });
 
 after(async () => { if (s) await s.close(); });
+
+test('the hall counts only verified publications, limits rows and distinguishes paid winnings from credit', async () => {
+  const bets = [];
+  for (let i = 0; i < 11; i += 1) {
+    const bet = await makeBet(creator, { refereeAccount: 'referee.testnet' });
+    const chain = await storeFinalizedSnapshot(bet, { status: 'settled', acceptor: 'joiner.testnet', acceptedUser: other });
+    chain.resolution = { outcome: 'yes', method: 'referee' };
+    await s.db.query('update bilateral_bets set chain_state=$2 where id=$1', [bet.id, chain]);
+    if (i !== 10) await publishBet(s.db, creator, bet.id);
+    await s.db.query(`update bilateral_bet_publications set published_at=clock_timestamp()+($2::int * interval '1 second') where bet_id=$1`, [bet.id, i]);
+    bets.push(bet);
+  }
+  await withdrawBetPublication(s.db, creator, bets[9].id);
+  await s.db.query('update bilateral_bets set near_height=null where id=$1', [bets[8].id]);
+  const requestId = randomUUID();
+  await s.db.query(`insert into bilateral_near_requests
+    (id,bet_id,user_id,wallet_account,method,args,metadata,execution_status,transaction_hash,execution_checked_at)
+    values ($1,$2,$3,'creator.testnet','withdraw',$4,'{}','succeeded',$5,clock_timestamp())`,
+  [requestId, bets[0].id, creator.id, { stated_request_id: requestId }, '11111111111111111111111111111111']);
+  let hall = await publicBetHall(s.db);
+  assert.equal(hall.paidYocto, '0', 'a withdrawal without the per-Bet collector marker is not attributed');
+  await s.db.query(`insert into bilateral_bet_events (bet_id,actor_user_id,kind) values ($1,$2,'play_paid_out')`, [bets[0].id, creator.id]);
+  hall = await publicBetHall(s.db);
+  assert.equal(hall.total, 8);
+  assert.equal(hall.settled, 8);
+  assert.equal(hall.paidYocto, '200000000000000000000000');
+  assert.deepEqual(hall.rows.map((row) => row.id), bets.slice(2, 8).reverse().map((bet) => bet.id));
+  for (const browser of [s.browser(), await s.signIn(s.fakeX.addUser('81001', 'public_creator'))]) {
+    const page = await browser.get('/');
+    assert.equal(page.status, 200);
+    assert.match(page.text, /8 bets, 8 settled, 0\.2 test NEAR paid to winners/);
+    assert.match(page.text, /@public_creator won 0\.2 test NEAR/);
+    for (const bet of bets.slice(8)) assert.doesNotMatch(page.text, new RegExp(`/bets/${bet.id}`));
+    assert.doesNotMatch(page.text, /private fixture note|private\.example\.org/);
+  }
+  await s.db.query(`update bilateral_near_requests set execution_status='failed' where id=$1`, [requestId]);
+  assert.equal((await publicBetHall(s.db)).paidYocto, '0');
+});
+
+test('home renders without a hall when no Bet is published', async () => {
+  const page = await s.browser().get('/');
+  assert.equal(page.status, 200);
+  assert.doesNotMatch(page.text, /paid to winners/);
+  assert.deepEqual(await publicBetHall(s.db), { rows: [], total: 0, settled: 0, paidYocto: '0' });
+});
 
 test('unfunded and wrong-creator bets cannot be published', async () => {
   const bet = await makeBet();

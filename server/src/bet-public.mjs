@@ -171,6 +171,37 @@ export async function recentPublicBets(db, limit = 20) {
   });
 }
 
+// DESIGN.md: the hall uses the same allowlisted projection as public Bet pages.
+// Totals cover all current publications, not only the six displayed rows. Credit
+// is not paid: require the collector marker AND the winner's verified withdrawal.
+export async function publicBetHall(db) {
+  return db.tx(async (tx) => {
+    const rows = await tx.many(`${SELECT} where p.withdrawn_at is null
+      order by p.published_at desc, b.id desc`);
+    const paid = await tx.many(`select distinct b.id from bilateral_bets b
+      join bilateral_bet_publications p on p.bet_id=b.id and p.withdrawn_at is null
+      join bilateral_near_requests r on r.bet_id=b.id and r.method='withdraw'
+        and r.execution_status='succeeded' and r.transaction_hash is not null
+        and r.execution_checked_at is not null
+        and r.args->>'stated_request_id'=r.id::text
+        and r.created_at>=b.settled_at
+        and r.user_id=case when b.chain_state->'resolution'->>'outcome'=b.creator_side
+          then b.creator_user_id else b.acceptor_user_id end
+        and r.wallet_account=case when b.chain_state->'resolution'->>'outcome'=b.creator_side
+          then b.creator_wallet else b.acceptor_wallet end
+      where exists (select 1 from bilateral_bet_events e where e.bet_id=b.id
+        and e.actor_user_id=b.creator_user_id and e.kind='play_paid_out')`);
+    const paidIds = new Set(paid.map((row) => row.id));
+    const bets = rows.filter((row) => snapshotVerified(row) && timestamp(row.near_verified_at))
+      .map((row) => ({ ...view(row), payout_completed: paidIds.has(row.id) }));
+    const settled = bets.filter((bet) => bet.status === 'settled');
+    const paidYocto = settled.filter((bet) => bet.payout_completed
+      && bet.settled_by === 'referee' && ['yes', 'no'].includes(bet.outcome))
+      .reduce((sum, bet) => sum + BigInt(bet.stake_yocto) * 2n, 0n);
+    return { rows: bets.slice(0, 6), total: bets.length, settled: settled.length, paidYocto: paidYocto.toString() };
+  });
+}
+
 export async function nextOpenPublicBet(db, viewerId = null) {
   return db.tx(async (tx) => {
     const rows = await tx.many(`${SELECT}
