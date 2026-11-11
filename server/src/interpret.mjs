@@ -153,6 +153,27 @@ function firstDeadline(text, publishedAt) {
   const found = (m, at) => ({ text: m[0].trim(), at });
   let m;
 
+  // Explicit UTC clocks must be consumed with their date, including when invalid.
+  const utcPatterns = [
+    new RegExp(`\\bat\\s+(\\d{1,2}):(\\d{2})\\s+UTC(?:[+-][0-9:]+)?\\s+on\\s+(\\d{1,2})(?:st|nd|rd|th)?\\s+${MONTH_RE}\\.?\\s+(\\d{4})\\b`, 'gi'),
+    new RegExp(`\\b(on|by)\\s+(\\d{1,2})(?:st|nd|rd|th)?\\s+${MONTH_RE}\\.?\\s+(\\d{4})\\s+at\\s+(\\d{1,2}):(\\d{2})\\s+UTC(?:[+-][0-9:]+)?(?![\\w+:-])`, 'gi'),
+  ];
+  const utcDates = utcPatterns.flatMap((re, order) => Array.from(t.matchAll(re), (match) => ({ match, order })))
+    .sort((a, b) => a.match.index - b.match.index);
+  for (const { match, order } of utcDates) {
+    const hour = Number(match[order === 0 ? 1 : 5]);
+    const minute = Number(match[order === 0 ? 2 : 6]);
+    const day = Number(match[order === 0 ? 3 : 2]);
+    const month = monthIndex(match[order === 0 ? 4 : 3]);
+    const year = Number(match[order === 0 ? 5 : 4]);
+    const at = new Date(Date.UTC(year, month, day, hour, minute));
+    const valid = !/UTC[+-]/i.test(match[0]) && hour < 24 && minute < 60 && at.getUTCFullYear() === year
+      && at.getUTCMonth() === month && at.getUTCDate() === day;
+    const isOn = order === 0 || match[1].toLowerCase() === 'on';
+    if (valid && !(isOn && (spoken(t, match.index, match[0].length) || at < pub))) return found(match, at);
+    t = `${t.slice(0, match.index)}${' '.repeat(match[0].length)}${t.slice(match.index + match[0].length)}`;
+  }
+
   // Mask invalid explicit dates so a later, looser rule cannot reinterpret them.
   const datePatterns = [
     new RegExp(`\\b(?:by|before|on|until|through|no later than)\\s+${MONTH_RE}\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s+(\\d{4}))?\\b`, 'gi'),
