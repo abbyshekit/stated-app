@@ -110,7 +110,7 @@ for (const status of ['pending', 'failed']) test(`${status} request message rend
   const message = '<script>alert("wallet")</script>';
   await s.db.query('update bilateral_near_requests set execution_status=$2, execution_message=$3 where id=$1', [funding.requestId, status, message]);
   const page = await creatorBrowser.get(`/bets/${bet.id}`);
-  assert.match(page.text, new RegExp(status, 'i'));
+  assert.match(page.text, status === 'pending' ? /Awaiting wallet return/ : /Transaction failed/);
   assert.match(page.text, /&lt;script&gt;alert/);
   assert.doesNotMatch(page.text, /<script>alert/);
   assert.doesNotMatch(page.text, /transaction (?:completed|succeeded)/i);

@@ -14,7 +14,7 @@ import { betBlock, betLead, betState, dayMonth } from './marked.mjs';
 import { formatTestNear, STORAGE_FEE_YOCTO } from './near-escrow.mjs';
 import { cancelUnfundedBet, prepareNearAction, syncNearBet } from './near-bets.mjs';
 import { syncPendingBetTransactions, verifyBetTransaction, withdrawalView } from './near-execution-state.mjs';
-import { latestWalletRequests, walletRequestHistory } from './near-request-view.mjs';
+import { latestWalletRequests, walletRequestHistory, walletTransactionForm } from './near-request-view.mjs';
 import { ensurePlayAccount, playAccountFor, playAction, shortfall, yocto } from './play.mjs';
 import { queueWebMatchNotice } from './reply-bets.mjs';
 import { MAX_DEPOSIT_NEAR, MIN_DEPOSIT_NEAR } from './funding.mjs';
@@ -332,6 +332,17 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needPos
     const play = config.play?.enabled ? await playAccountFor(db, ctx.user.x_user_id) : null;
     const played = Boolean(play?.ready && !play.claimed_at && play.account_id === (String(bet.creator_user_id) === String(ctx.user.id) ? bet.creator_wallet : bet.acceptor_wallet));
     const depositRequest = requests.find((request) => request.method === (creator ? 'create_bet' : 'accept_bet'));
+    // Recover only this actor's native stake for the phase still awaiting it.
+    // An unclaimed Stated account is server-signed, even before its wallet has
+    // been copied to the Bet by chain synchronization.
+    const managedDeposit = play && !play.claimed_at && play.account_id === depositRequest?.wallet_account;
+    const stakeRequest = !played && !managedDeposit && bet.status === 'offered'
+      && (creator ? !bet.chain_state : bet.chain_state?.status === 'offered' && !bet.chain_state.acceptor)
+      ? depositRequest : null;
+    const pendingDeposit = stakeRequest?.execution_status === 'pending' && stakeRequest.transaction_hash ? stakeRequest : null;
+    const awaitingWallet = stakeRequest?.execution_status === 'pending' && !stakeRequest.transaction_hash;
+    const stakeFailure = stakeRequest?.execution_status === 'failed' ? stakeRequest : null;
+    const walletReturnInstruction = html`<p class="stakes left" role="status">Approval not verified. If you already approved this request, check its transaction before continuing.</p>`;
     const walletAccount = creator ? bet.creator_wallet || '' : bet.acceptor_wallet || '';
     const knownWallet = typed ?? (walletAccount || depositRequest?.wallet_account || await lastWallet(ctx.user));
     const expired = bet.expired;
@@ -362,16 +373,16 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needPos
     if (!eligible && bet.status === 'offered' && !expired && needsStake) {
       primary = html`<p class="stakes">Bets with real NEAR are invite-only for now.</p>`;
     } else if (creator && bet.status === 'offered' && !expired && !bet.chain_state) {
-      primary = html`<p class="stakes">Deposit ${formatTestNear((BigInt(bet.stake_yocto) + BigInt(STORAGE_FEE_YOCTO)).toString())} ${unit()}: your ${formatTestNear(bet.stake_yocto)} stake and a ${formatTestNear(STORAGE_FEE_YOCTO)} storage fee.</p>
-        <div class="acts"><form method="post" action="${pathFor(bet.id)}/fund">${csrfField(ctx)}${walletField(knownWallet)}<button class="primary big" type="submit">Deposit stake</button></form></div>`;
+      primary = html`${awaitingWallet ? walletReturnInstruction : html`<p class="stakes">Deposit ${formatTestNear((BigInt(bet.stake_yocto) + BigInt(STORAGE_FEE_YOCTO)).toString())} ${unit()}: your ${formatTestNear(bet.stake_yocto)} stake and a ${formatTestNear(STORAGE_FEE_YOCTO)} storage fee.</p>`}
+        <div class="acts"><form method="post" action="${pathFor(bet.id)}/fund">${csrfField(ctx)}${walletField(knownWallet)}<button class="${pendingDeposit ? 'big' : 'primary big'}" type="submit">${awaitingWallet ? 'Continue in wallet' : 'Deposit stake'}</button></form></div>`;
     } else if (bet.status === 'offered' && !expired && !creator && bet.chain_state) {
-      const managed = await managedTake(ctx, bet, play, published);
-      const external = html`<p class="stakes">Deposit ${formatTestNear(bet.stake_yocto)} ${unit()} for the opposite side.</p>
+      const managed = pendingDeposit || awaitingWallet || stakeFailure ? null : await managedTake(ctx, bet, play, published);
+      const external = html`${awaitingWallet ? walletReturnInstruction : html`<p class="stakes">Deposit ${formatTestNear(bet.stake_yocto)} ${unit()} for the opposite side.</p>`}
         <div class="acts"><form method="post" action="${pathFor(bet.id)}/accept" id="${managed ? 'accept-wallet' : 'accept'}">
           ${csrfField(ctx)}<input type="hidden" name="termsHash" value="${bet.terms_hash}">
           ${walletField(typed ?? (bet.invited_wallet || knownWallet))}
           ${published ? html`<label class="check"><input type="checkbox" name="publicConsent" value="1" required><span>Show my X name and wallet on this public bet.</span></label>` : ''}
-          <button class="${managed ? 'big' : 'primary big'}" type="submit">Bet ${otherSide(bet)}</button>
+          <button class="${managed || pendingDeposit ? 'big' : 'primary big'}" type="submit">${awaitingWallet ? 'Continue in wallet' : `Bet ${otherSide(bet)}`}</button>
         </form></div>`;
       primary = managed || external;
       if (managed) walletAlternative = fold('Use a NEAR wallet', external, { open: Boolean(failed && typed !== null) });
@@ -394,6 +405,12 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needPos
     } else if (refundable && !canPropose) {
       refundPrimary = true;
       primary = html`<div class="acts">${mutationForm(ctx, bet, 'refund', 'Reclaim stake', { primary: true })}</div>`;
+    }
+    if (pendingDeposit) {
+      walletAlternative = primary ? fold('Use a NEAR wallet', primary) : '';
+      primary = html`<p class="stakes left" role="status">Pending verification. ${pendingDeposit.execution_message || 'Check this transaction before signing again.'}</p>
+        <div class="acts">${walletTransactionForm(pendingDeposit, bet.id, csrfField(ctx), { primary: true })}
+          <a class="tl" href="${transactionLink(pendingDeposit.transaction_hash)}" rel="noopener noreferrer">View transaction</a></div>`;
     }
     const refundInFold = refundable && !refundPrimary;
     const quietShare = published && !primary
@@ -434,7 +451,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needPos
       <p class="prop">${claimWords(bet)}</p>
       ${betBlock(bet, { cameTrue: refereeRuling(bet) === 'yes', viewer: ctx.user, faces: await faces(ctx, bet), joinHref: eligible && bet.status === 'offered' && bet.chain_state && !creator ? '#accept' : null })}
       ${notices}
-      ${failed ? html`<p class="notice" role="alert">${failed.message}</p>` : ''}
+      ${failed || stakeFailure ? html`<p class="notice" role="alert">${failed?.message || stakeFailure.execution_message || 'The stake transaction failed. Retry in your wallet.'}</p>` : ''}
       ${primary}${quietShare}
       <div class="folds">
         ${walletAlternative}
@@ -453,7 +470,8 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needPos
             <label for="dispute-note">Why do you disagree?</label><textarea id="dispute-note" name="note" required maxlength="2000"></textarea>
             <button type="submit">Dispute result</button>
           </form>`, { id: 'dispute' }) : ''}
-        ${played ? '' : walletRequestHistory(requests, bet.id, csrfField(ctx))}
+        ${played ? '' : walletRequestHistory(requests.filter(request => request !== pendingDeposit)
+          .map(request => request === stakeFailure ? { ...request, execution_message: null } : request), bet.id, csrfField(ctx))}
         ${pendingWithdrawal ? fold('Check transaction', html`
           <form method="post" action="${pathFor(bet.id)}/transactions">${csrfField(ctx)}
             <input type="hidden" name="requestId" value="${withdrawal.request.id}">
@@ -535,16 +553,23 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needPos
   route('POST', new RegExp(`^/bets/${ID}/transactions$`), async (ctx) => {
     const form = await needPost(ctx);
     if (!form) return;
+    let returnTo = pathFor(ctx.params[0]);
     try {
       await verifyBetTransaction(db, config, ctx.user, ctx.params[0], {
         requestId: form.get('requestId'), transactionHash: form.get('transactionHash'),
       }, { fetchImpl });
       await syncNearBet(db, config, ctx.user, ctx.params[0], { fetchImpl });
+      const checked = await db.one(`select method,execution_status from bilateral_near_requests
+        where id=$1 and bet_id=$2 and user_id=$3 and metadata->>'contract'=$4`,
+      [form.get('requestId'), ctx.params[0], ctx.user.id, config.nearContract]);
+      // A submitted acceptance has not necessarily bound its X participant yet.
+      // Keep its owner in recovery instead of returning to the public offer.
+      if (checked?.method === 'accept_bet' && ['pending', 'failed'].includes(checked.execution_status)) returnTo += '?join=1';
     } catch (error) {
       if (recoverable(error)) return betPage(ctx, { failed: error });
       throw error;
     }
-    redirect(ctx.res, pathFor(ctx.params[0]));
+    redirect(ctx.res, returnTo);
   });
 
   route('POST', new RegExp(`^/bets/${ID}/take$`), async (ctx) => {

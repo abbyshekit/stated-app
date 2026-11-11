@@ -80,7 +80,9 @@ test('the author confirms and then revises the terms; both versions stay in the 
 test('the author’s private confirmation does not show on someone else’s public copy', async () => {
   const page = await anon.get(`/u/carol/${ids.carol}`);
   assert.equal(page.status, 200);
-  assert.doesNotMatch(page.text, /confirmed by the author|65%|I meant 65/);
+  // An encoded origin ending in port 65 produces "65%2F" without a private probability.
+  const publicHtml = page.text.replaceAll(encodeURIComponent(s.base), encodeURIComponent('http://stated.test'));
+  assert.doesNotMatch(publicHtml, /confirmed by the author|65%|I meant 65/);
   assert.match(page.text, /60%/, 'the reader sees what the post states');
   const api = JSON.parse((await anon.get(`/api/u/carol/${ids.carol}`)).text);
   assert.ok(api.history.every((h) => h.kind !== 'author_terms'));
