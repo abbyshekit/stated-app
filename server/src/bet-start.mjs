@@ -3,6 +3,7 @@
 // Bet itself is made by that reply, exactly as if they had typed it under the
 // post, so this page changes nothing, stores nothing and needs no sign-in.
 import { html } from './html.mjs';
+import { nextOpenPublicBet } from './bet-public.mjs';
 import { X_MARK } from './bet-view.mjs';
 import { face, facesFor } from './certificate.mjs';
 import { statusIdOf } from './intake.mjs';
@@ -84,6 +85,8 @@ export function registerBetStartRoutes({ route, db, config, layout, send, redire
       const rows = open.slice(0, 6);
       const faces = await facesFor(db, rows, ctx.user);
       const lines = rows.length ? await betLinesFor(rows, ctx.user) : null;
+      // A funded offer with an empty seat is the quickest bet there is, so the page points at one.
+      const openBet = await nextOpenPublicBet(db, ctx.user?.id);
       const pick = (row) => {
         const to = `/bets/new?link=${encodeURIComponent(row.source_url)}${fromQuery}`;
         return { link: to };
@@ -101,6 +104,7 @@ export function registerBetStartRoutes({ route, db, config, layout, send, redire
           ${error ? html`<p class="err" role="alert">${error}</p>` : ''}
           <div class="acts paste"><button class="${rows.length ? 'big' : 'primary big'}" type="submit">Use this post</button></div>
         </form>
+        ${openBet?.creator_username ? html`<div class="acts"><div class="two"><a class="tl" href="/bets/${openBet.id}">Or take @${openBet.creator_username}’s open bet</a></div></div>` : ''}
       `, { status: error ? 400 : 200 });
     }
 

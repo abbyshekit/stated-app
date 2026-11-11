@@ -1,0 +1,26 @@
+{
+  "recordedAt": "2026-11-11T23:25:00Z",
+  "what": "A new bet started from a finished one, on the hosted app and real X, without signing in to Stated",
+  "hostedApp": "https://stated-production.up.railway.app",
+  "network": "NEAR testnet",
+  "participants": "One operator-controlled X account (@ChainAbstracted) and the Stated bot (@statedforecast). This is a team demonstration, not independent-user evidence.",
+  "steps": [
+    { "do": "Open the completed test bet signed out", "url": "https://stated-production.up.railway.app/bets/c171de89-f223-4309-886e-180ad69af092", "saw": "One filled action: Make your own bet", "screenshot": "make-a-bet-real-x-20261111/1-result.png" },
+    { "do": "Paste the link to a new dated post and choose Bet no", "post": "https://x.com/ChainAbstracted/status/2120655564543775068", "saw": "The reply drawn under the post: @statedforecast bet 0.1 no", "screenshot": "make-a-bet-real-x-20261111/4-reply-chosen.png" },
+    { "do": "Press Reply on X", "saw": "X's composer opened as a reply to that post with '@statedforecast bet 0.1 no' already typed", "composerUrl": "https://x.com/intent/post?in_reply_to=2120655564543775068&text=%40statedforecast%20bet%200.1%20no", "screenshot": "make-a-bet-real-x-20261111/5-x-composer.png" },
+    { "do": "Send the reply", "reply": "https://x.com/ChainAbstracted/status/2120655863199224121" },
+    { "do": "Wait for the bot", "botOffer": "https://x.com/statedforecast/status/2120656329614430515", "saw": "0.1 test NEAR says this does not happen by 20 Nov 2026. To take the other side, reply here with \"@statedforecast take\".", "screenshot": "make-a-bet-real-x-20261111/6-x-thread.png" },
+    { "do": "Open the hosted home signed out", "saw": "The new post leads the page with '@ChainAbstracted bet no' and a Take yes button", "bet": "https://stated-production.up.railway.app/bets/b29c28c0-4642-4115-b3e9-98512ae4ef07", "screenshot": "make-a-bet-real-x-20261111/7-home-open-offer.png" }
+  ],
+  "linkChecks": {
+    "/bets/b29c28c0-4642-4115-b3e9-98512ae4ef07": "200 text/html",
+    "/share/bets/b29c28c0-4642-4115-b3e9-98512ae4ef07.png": "200 image/png, set as og:image on the bet page",
+    "/bets/new?from=<bet id>": "200, back arrow returns to that bet",
+    "/bets/new?link=<post>&side=no&stake=0.1&go=1": "303 to x.com/intent/tweet with in_reply_to and the typed command"
+  },
+  "limits": [
+    "Both identities are controlled by the operator.",
+    "The offer is open until its deadline; no acceptance, result or payout is claimed for it here. The completed bet linked in the README covers those.",
+    "The page reads no post from X: a pasted link is not checked for a date before the reply is sent, and the bot answers in the thread if the post cannot carry a bet."
+  ]
+}

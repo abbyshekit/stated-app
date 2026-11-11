@@ -77,6 +77,8 @@ test('a settled public bet offers Make a bet as its one filled action, signed ou
   const withOffer = await s.browser().get(`/bets/${closed.id}`);
   assert.match(withOffer.text, new RegExp(`<a class="pill solid big" href="/bets/new\\?from=${closed.id}">Make your own bet</a>`));
   assert.doesNotMatch(withOffer.text, /Take another bet/, 'open offers are listed on the Make a bet page, not here');
+  const start = await s.browser().get('/bets/new');
+  assert.match(start.text, /<a class="tl" href="\/bets\/[0-9a-f-]{36}">Or take @result_creator’s open bet<\/a>/, 'the Make a bet page points at a funded open offer');
   assert.equal(filled(withOffer.text).length, 1);
 });
 

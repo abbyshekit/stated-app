@@ -12,7 +12,7 @@ The [original prediction](https://x.com/ChainAbstracted/status/21205900420746652
 
 Verify the [referee transaction](https://testnet.nearblocks.io/txns/4Gix2npAw4PGEfCDTnifCByGagz4FZdG5mArTtA6kazt) separately from the [completed payout](https://testnet.nearblocks.io/txns/8gqtVGRBxghhqnTveMrjW2X6AW89GUGvV6azmebWMr6B). Public RPC verification confirmed the exact transfer and successful withdrawal callback; settlement alone does not prove delivery. [Public proof record](evidence/hosted-real-x-testnet-20261111.json)
 
-**Start a bet from a finished one.** Open the completed test bet signed out and choose **Make your own bet**. Pick a listed post or paste a link to any post on X, choose a side and a stake, and **Reply on X** opens X's reply composer with the command already typed, for example `@statedforecast bet 0.1 no`. Sending that reply is what makes the offer. The page stores nothing and needs no sign-in or wallet.
+**Start a bet from a finished one.** Open the completed test bet signed out and choose **Make your own bet**. Pick a listed post or paste a link to any post on X, choose a side and a stake, and **Reply on X** opens X's reply composer with the command already typed, for example `@statedforecast bet 0.1 no`. Sending that reply is what makes the offer. The page stores nothing and needs no sign-in or wallet. [Real X run](evidence/make-a-bet-real-x-20261111.json)
 
 ## Verify the hosted payout
 
