@@ -1,6 +1,6 @@
 # Stated design: Marked
 
-The selected direction is Claude Code's Marked design shown at `http://127.0.0.1:4310/`, confirmed on 10 November 2026. It replaces the certificate direction (framed post, tear-off stubs, serial numbers, Archivo and IBM Plex Mono, inverted Result). The reference board is `design/marked/index.html` (generator `design/marked/gen.py`, screenshots `design/marked/shots/`).
+The selected direction is Marked, confirmed on 10 November 2026. It replaces the earlier certificate direction. The implemented styles are in `server/public/skin.css`; Bet presentation lives in `server/src/marked.mjs` and `server/src/bet-view.mjs`.
 
 ## The idea
 
@@ -35,7 +35,7 @@ Yellow means "this prediction came true" and nothing else. It appears on the hig
 | --mark-ring | #E0B000 | --mark |
 | --x | #1D9BF0 | #1D9BF0 |
 
-Every colour goes through a token. `node tools/design-token-lint.mjs` and `node tools/design-tells-lint.mjs` (in `~/openclaw-knowledge/tools/`) must both come back clean on the stylesheet.
+Every colour goes through a token. Preserve the stylesheet tokens and run the repository's regression tests when changing them.
 
 ## Type
 
@@ -88,4 +88,4 @@ Press feedback `scale(0.97)` over 100ms. The highlighter sweep is 480ms, once, o
 
 ## Ship checks
 
-Render at 320, 390 and desktop in both modes and look at every frame, including a long name, a full-length post, the empty states and one error. Run the suite (`npm test`), both lints, and score the screenshots with the `design-critic` agent before showing anyone. Exercise sign-in return, private and public projections, a competing acceptance, a cancelled wallet signature, an unresolved transaction, mutual settlement and refund.
+Render at 320, 390 and desktop in both modes and look at every frame, including a long name, a full-length post, the empty states and one error. Run the suite (`npm test`) and review the screenshots before sharing a change. Exercise sign-in return, private and public projections, a competing acceptance, a cancelled wallet signature, an unresolved transaction, mutual settlement and refund.
