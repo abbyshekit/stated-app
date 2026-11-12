@@ -12,6 +12,18 @@ Bet on anything said on X. A NEAR AI enclave jury decides who won, and a NEAR co
 
 The payout check verifies a recorded test NEAR transfer from two public RPC endpoints. The enclave check verifies the jury's signed second opinion on the same real-X Bet: on 12 November 2026 it printed 14 checks passed, 0 failed, 9 not checked. Read the ruling as a page: https://stated-production.up.railway.app/bets/c171de89-f223-4309-886e-180ad69af092/ruling
 
+## Take a live bet
+
+These are real offers on X, each funded in a NEAR testnet escrow. Open a link with your own X account and post the reply it prepares; Stated makes you a NEAR account and funds your 0.1 test NEAR stake, so no wallet is needed. At the deadline the NEAR AI enclave jury rules and the winner is paid. The offers were posted by the operator's account, @ChainAbstracted; whoever takes the other side is the first person outside the team to bet.
+
+| Decides | The claim | Referee | Take it | Bet page |
+| --- | --- | --- | --- | --- |
+| 17 Nov, after the 13:30 UTC BLS release | US import prices fell in October 2026 | Stated Court DAO | [take on X](https://x.com/intent/tweet?in_reply_to=2120754423999914191&text=%40statedforecast+take) | [open](https://stated-production.up.railway.app/bets/393238b4-34a5-4c27-b54f-01d3d4106c40) |
+| 19 Nov, 18:00 UTC | NEAR above US$3.50 on Coinbase | Stated Court DAO | [take on X](https://x.com/intent/tweet?in_reply_to=2120754677759533081&text=%40statedforecast+take) | [open](https://stated-production.up.railway.app/bets/4c71bdc7-0eab-47e6-88bb-f3fbe9a016a4) |
+| 20 Nov, 20:00 UTC | NEAR above US$5 on Coinbase | Stated's referee account | [take on X](https://x.com/intent/tweet?in_reply_to=2120656329614430515&text=%40statedforecast+take) | [open](https://stated-production.up.railway.app/bets/b29c28c0-4642-4115-b3e9-98512ae4ef07) |
+
+The import-price bet is settled from links: after the release, whoever is right replies `yes <link>` or `no <link>` with the BLS page, or adds it on the bet's page, and the jury reads it. An offer can only be taken until a minute before its deadline.
+
 ## How it works
 
 1. Reply under a post with `@statedforecast bet 0.1 yes`; your reply may supply its own deadline, such as `bet 0.1 yes by 30 nov`.

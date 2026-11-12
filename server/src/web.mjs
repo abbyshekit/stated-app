@@ -258,6 +258,15 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
   async function layout(ctx, title, body, { og = null, kind = 'public', flush = false, back = null, extra = null, signin: headerSignin = true, inboxBadge = true, two = false } = {}) {
     const user = ctx.user;
     const path = ctx.url.pathname;
+    // A public Bet reached from outside the app identifies the site first.
+    if (kind === 'public' && /^\/bets\/[a-f\d-]{36}(?:\/ruling)?$/i.test(path)) {
+      let from = null;
+      try {
+        const referrer = new URL(String(ctx.req.headers.referer || ''));
+        if (referrer.origin === new URL(config.baseUrl).origin) from = referrer.pathname + referrer.search;
+      } catch { /* No same-origin history: show the wordmark. */ }
+      back = from ? back || from : null;
+    }
     const current = (p) => (path === p || (p !== '/' && path.startsWith(`${p}/`)) ? raw('aria-current="page"') : '');
     // Four sections. Predictions owns /me, a save and tracking; Bets owns both bet paths.
     const section = /^\/me\/bets|^\/bets\//.test(path) ? 'bets'
@@ -1607,7 +1616,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
         ${primary}
         <div class="two">
           ${row.status === 'open' && row.available ? html`<a class="tl" href="/me/bets/new?save=${row.save_id}">${bet ? 'Make your own bet' : 'Bet on it'}</a>` : ''}
-          ${sharesFirst ? html`<a class="tl" href="/share/predictions/${row.save_id}.png" download="stated-prediction-${row.save_id}.png">Download card</a>` : shareLink(shareUrl, row, { ghost: true })}
+          ${sharesFirst ? html`<a class="tl" href="/share/predictions/${row.save_id}.png" download="stated-prediction-${row.save_id}.png">Save image</a>` : shareLink(shareUrl, row, { ghost: true })}
         </div>
       </div>
       <section class="folds">

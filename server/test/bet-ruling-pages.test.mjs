@@ -24,7 +24,7 @@ const VERIFIED = [
   'Each enclave’s signing key and this request’s fresh nonce are inside its quote',
   'Each verdict is signed by its enclave’s key',
   'The signed request names this bet and its terms hash',
-  'The evidence text the models read is inside the signed request',
+  'The text the models read is inside the signed request',
 ];
 
 before(async () => {
@@ -120,7 +120,7 @@ test('price ruling shows the post, three models, confidence, window, price and v
   assert.doesNotMatch(response.text, /Private source words|private_author/);
   assert.ok(response.text.includes(`<h2>NEAR AI enclave jury</h2><b>Yes</b><span>${dayMonth(record.decidedAt, { year: true })}</span>`));
   assert.match(response.text, /<ul class="jury-rail">/);
-  assert.equal((response.text.match(/<span>Yes, 95%<\/span>/g) || []).length, MODELS.length);
+  assert.equal((response.text.match(/<span>Yes, 95% sure<\/span>/g) || []).length, MODELS.length);
   assert.match(response.text, /<b>Qwen3\.8 27B<\/b>/);
   const rows = response.text.match(/<li class="prow">[\s\S]*?<\/li>/g);
   for (const model of MODELS) {
@@ -129,8 +129,8 @@ test('price ruling shows the post, three models, confidence, window, price and v
     assert.ok(row.includes('<p>The source confirms the outcome.</p>'));
   }
   assert.ok(response.text.includes('Every model has to agree at 80% or more, or both stakes go back.'));
-  assert.ok(response.text.includes(`Coinbase BTC-USD opened at US$100,000 at ${clock(record.plan.parsed.start)} UTC on ${dayMonth(record.plan.parsed.start)}.`));
-  assert.match(response.text, /Each verdict was signed inside an Intel TDX enclave, and every signature checked out\./);
+  assert.ok(response.text.includes(`Coinbase BTC-USD opened at US$100,000 at ${clock(record.plan.parsed.start)} UTC, ${dayMonth(record.plan.parsed.start)}; the deadline was ${clock(bet.resolve_at)} UTC, ${dayMonth(bet.resolve_at)}.`));
+  assert.match(response.text, /<summary>Check it yourself<\/summary>\s*<p>Each verdict was signed inside an Intel TDX enclave, and every signature checked out\.<\/p>/);
   assert.doesNotMatch(response.text, /<h2>Verified<\/h2>|✓/);
   for (const line of VERIFIED) assert.ok(response.text.includes(`<div>${line}</div>`), `Missing verified check: ${line}`);
   assert.ok(response.text.includes('<p class="quiet">Not checked: enclave measurements against a published list, TCB level and revocation, the GPU’s own attestation.</p>'));
@@ -188,9 +188,13 @@ test('submitted evidence shows its link count and keeps the signed text in the J
   await insertRuling({ source: 'evidence' }, [yes, no]);
   const response = await s.browser().get(path());
   assert.equal(response.status, 200);
-  assert.match(response.text, /From 2 links posted by both sides\./);
+  assert.match(response.text, /<summary>Links, 2<\/summary>/);
   assert.ok(response.text.includes(`href="/bets/${bet.id}/enclave-ruling.json"`));
-  assert.doesNotMatch(response.text, /<script>alert|<summary>Page text<\/summary>|Official report|Public record/);
+  assert.doesNotMatch(response.text, /<script>alert|<summary>Page text<\/summary>/);
+  assert.match(response.text, /Bet yes: <a class="tl" href="https:\/\/news\.example\.org\/report"[^>]*>Official report<\/a> <span class="quiet">news\.example\.org<\/span>/);
+  assert.match(response.text, /Bet no: <a class="tl" href="https:\/\/records\.example\.org\/result"[^>]*>Public record<\/a>/);
+  assert.equal((response.text.match(/<summary>Saved page text<\/summary>/g) || []).length, 2);
+  assert.ok(response.text.includes('&lt;script&gt;alert(&quot;owned&quot;)&lt;/script&gt;'));
   const json = await s.browser().get(`/bets/${bet.id}/enclave-ruling.json`);
   assert.equal(json.status, 200);
   const items = JSON.parse(JSON.parse(json.text).record.evidence.text).items;
@@ -201,11 +205,12 @@ test('submitted evidence shows its link count and keeps the signed text in the J
 
 test('review mode computes agreement from the settled Bet rather than the stored flag', async () => {
   await setChain('settled', 'yes');
-  await insertRuling({ mode: 'review', outcome: 'yes', agrees: false });
+  const record = await insertRuling({ mode: 'review', outcome: 'yes', agrees: false });
   const response = await s.browser().get(path());
   assert.equal(response.status, 200);
   assert.match(response.text, /<h2>NEAR AI enclave jury<\/h2><b>Yes<\/b>/);
-  assert.match(response.text, /<p class="gut quiet">Agrees with the recorded result<\/p>/);
+  const settled = await s.db.one('select settled_at from bilateral_bets where id=$1', [bet.id]);
+  assert.ok(response.text.includes(`<p class="gut quiet">A Stated reviewer recorded Yes on ${dayMonth(settled.settled_at)}. The jury agreed on ${dayMonth(record.decidedAt)}.</p>`));
   assert.doesNotMatch(response.text, /Ruled yes/);
   assert.ok(response.text.includes('A second opinion does not change the payout.'));
   assert.doesNotMatch(response.text, /both stakes go back/, 'a second opinion never moves money');

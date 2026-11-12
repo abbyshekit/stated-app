@@ -78,6 +78,16 @@ The words are the largest thing on a Prediction page. Yes and No sit beside the 
 - **Bet attribution.** Show the permitted source author's face and name separately from the two Bet seats. A public Bet never exposes a private source's identity; an unavailable source falls back to the Bet's proposer attribution.
 - **Winner.** The winner's face carries a ring: yellow on a Prediction that came true (a deeper yellow on a light ground, where the marker yellow is faint as a thin line), ink on a Bet settled by agreement, yellow on a Bet the referee settled Yes. The name is never marked: a filled name reads as a chip.
 
+## The jury
+
+The ruling page starts with the post, marked Yes or struck through for No, then the outcome word. Three jurors show their makers’ logos and their verdicts, such as “Yes, 97% sure”. One reason line beneath them gives the price and deadline, or quotes a model’s reason beside its name and the deadline. Reasons and checks stay in folds. One filled button makes the next bet.
+
+Bettors post links until the window closes. Their page leads with “Links are open” and “Links close in …”, followed by UTC; visitors and bettors open the same “Links, 2” fold. The filled button says “Add a link”. On the links page, paste first, list second, with saved text in “What the jury reads”.
+
+The jury decides the Result. A Stated reviewer can correct it during the ten-minute window before payout. Show “Pays out in …” with UTC, then “Paid to your account” once transferred. The DAO referee line names Stated Court and opens its on-chain record.
+
+Without agreement at the required confidence, show “Undecided” and leave the post unmarked. Once refunded, show the returned stakes with no winner’s ring.
+
 ## Motion
 
 Press feedback `scale(0.97)` over 100ms. The highlighter sweep is 480ms, once, on the page that opens a Result. Nothing else animates. Reduced motion shows the finished state.

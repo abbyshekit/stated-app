@@ -169,10 +169,12 @@ export function registerBetStartRoutes({ route, db, config, layout, send, redire
     if (oembed && fetchedHandle) oembed.username = fetchedHandle;
     const postAuthor = picked?.author_name || oembed?.author || author || 'Post author';
     const postHandle = picked?.author_username || oembed?.username || author;
+    // DESIGN.md: the date stays whole inside the drawn reply.
+    const replyDate = value => dayMonth(value, { year: true }).replaceAll(' ', '\u00a0');
     const previewDate = needsDate ? html`
-      <i class="date-week"> by ${dayMonth(dateFor('week'), { year: true })}</i>
-      <i class="date-month"> by ${dayMonth(dateFor('month'), { year: true })}</i>
-      ${!yearUnavailable ? html`<i class="date-year"> by ${dayMonth(yearEnd, { year: true })}</i>` : ''}
+      <i class="date-week"> by ${replyDate(dateFor('week'))}</i>
+      <i class="date-month"> by ${replyDate(dateFor('month'))}</i>
+      ${!yearUnavailable ? html`<i class="date-year"> by ${replyDate(yearEnd)}</i>` : ''}
       <i class="date-custom"> by the date you pick</i>` : '';
     return page(html`
       <h1 class="visually-hidden">Make a bet</h1>
@@ -189,18 +191,19 @@ export function registerBetStartRoutes({ route, db, config, layout, send, redire
           <p class="meta"><span>Replying to ${postHandle ? `@${postHandle}` : 'that post'}</span></p>
           <p class="said cmd"><b>@${bot}</b> bet ${STAKES.map((value, i) => html`<i class="k${i}">${value}</i>`)} <i class="yes">yes</i><i class="no">no</i><i class="unset">yes or no</i>${needsDate ? previewDate : ''}</p>
         </div></li></ul>
+        <p class="gut quiet">Anyone can take the other side.</p>
         <p class="meta stake-label">Your side</p>
         <div class="seg side-choice" role="radiogroup" aria-label="Your side">
           ${SIDES.map((value) => html`<input type="radio" id="side-${value}" name="side" value="${value}" required${value === side ? ' checked' : ''}><label for="side-${value}">Bet ${value}</label>`)}
         </div>
         <p class="meta stake-label">Stake each, in ${unit()}</p>
-        <div class="seg line" role="radiogroup" aria-label="Stake each, in ${unit()}">
+        <div class="seg side-choice" role="radiogroup" aria-label="Stake each, in ${unit()}">
           ${STAKES.map((value, i) => html`<input type="radio" id="stake-${i}" name="stake" value="${value}"${value === stakeNow ? ' checked' : ''}><label for="stake-${i}">${value}</label>`)}
         </div>
-        ${needsDate ? html`<p class="meta stake-label">Decide by</p><div class="seg line date-presets" role="radiogroup" aria-label="Decide by">
+        ${needsDate ? html`<p class="meta stake-label">Deadline</p><div class="seg side-choice date-presets" role="radiogroup" aria-label="Deadline">
           ${[['week', '1 week'], ['month', '1 month'], ...(!yearUnavailable ? [['year', '31 Dec']] : []), ['custom', 'Other']].map(([value, label]) => html`<input type="radio" id="date-${value}" name="datePreset" value="${value}"${effectivePreset === value ? ' checked' : ''}><label for="date-${value}">${label}</label>`)}
         </div><div class="gut custom-date">
-          <label for="bet-date">Decide by</label>
+          <label for="bet-date">Deadline</label>
           <input type="date" id="bet-date" name="date" value="${date}" min="${minDate}" max="${maxDate}">
         </div>` : ''}
         ${error ? html`<p class="err" role="alert">${error}</p>` : ''}

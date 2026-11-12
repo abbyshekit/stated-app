@@ -296,7 +296,7 @@ test('public settlement proof requires a matching referee event and publication'
   assert.ok(evidenced.result_evidence.publishedAt);
   const publicEvidencePage = await s.browser().get(`/bets/${valid.id}`);
   assert.match(publicEvidencePage.text, /Stated settled this Bet Yes/);
-  assert.match(publicEvidencePage.text, /href="https:\/\/example\.org\/public-outcome"[^>]*>Evidence<\/a>/);
+  assert.match(publicEvidencePage.text, /href="https:\/\/example\.org\/public-outcome"[^>]*>Result source<\/a>/);
   assert.match(publicEvidencePage.text, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.doesNotMatch(publicEvidencePage.text, /<script>alert|private fixture note|private\.example\.org/);
   await Promise.all([admin.submit(evidencePath, { ...input, note: 'Replacement A' }),

@@ -45,14 +45,31 @@ export function betState(bet, now = Date.now()) {
 }
 
 // One line that says where a Bet stands, in the reader's terms.
+// DESIGN.md: the next event leads with time to go; the exact UTC time follows.
+export function nextBetTime(value, now = Date.now()) {
+  const date = new Date(value);
+  const left = date.getTime() - now;
+  const clock = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'UTC', hour: '2-digit', minute: '2-digit',
+  }).format(date);
+  const day = dayMonth(date, { year: date.getUTCFullYear() !== new Date(now).getUTCFullYear() });
+  if (left > 0 && left < 2 * 86400000) {
+    const minutes = left < 3600000;
+    const count = Math.ceil(left / (minutes ? 60000 : 3600000));
+    const unit = minutes ? 'minute' : 'hour';
+    return `in ${count} ${unit}${count === 1 ? '' : 's'}, ${clock} UTC ${day}`;
+  }
+  return `${day}, ${clock} UTC`;
+}
+
 export function betLead(bet, { viewer = null } = {}) {
   const { funded, expired, open, decided } = betState(bet);
   const mine = (username) => Boolean(viewer?.x_username && username && viewer.x_username.toLowerCase() === String(username).toLowerCase());
   const creator = mine(bet.creator_username) ? 'You' : nameOf(bet.creator_username, bet.creator_wallet) || 'The proposer';
   const taker = mine(bet.acceptor_username) ? 'You' : nameOf(bet.acceptor_username, bet.acceptor_wallet);
-  if (open) return { text: creator === 'You' ? 'Your bet is open' : (mine(bet.acceptor_username) ? 'You are in' : `${creator} dares you`), aside: `Open until ${dayMonth(bet.accept_by)}` };
+  if (open) return { text: creator === 'You' ? 'Your bet is open' : (mine(bet.acceptor_username) ? 'You are in' : `${creator} dares you`), aside: `Offer closes ${nextBetTime(bet.accept_by)}` };
   if (bet.status === 'offered' && expired) return { text: 'Nobody took this one', aside: `Closed ${dayMonth(bet.accept_by)}` };
-  if (bet.status === 'offered' && !funded) return { text: 'Not funded yet', aside: `Open until ${dayMonth(bet.accept_by)}` };
+  if (bet.status === 'offered' && !funded) return { text: 'Not funded yet', aside: `Offer closes ${nextBetTime(bet.accept_by)}` };
   if (bet.status === 'accepted') return { text: 'Both sides are in', aside: `Result after ${dayMonth(bet.resolve_at)}` };
   if (bet.status === 'proposed') return { text: 'A result is proposed', aside: 'Both must agree' };
   if (bet.status === 'disputed') return { text: 'The result is disputed', aside: 'Both must agree' };

@@ -149,7 +149,7 @@ test('private linked Bet identifies its source separately and public Bet withhol
   const publicPage = await s.browser().get(`/bets/${bet.id}`);
   assert.equal(publicPage.status, 200);
   assert.doesNotMatch(publicPage.text, /private_source_author/);
-  assert.match(publicPage.text, /<b>Offered by bet_owner<\/b>/);
+  assert.match(publicPage.text, /Offered by <b>bet_owner<\/b>/, "only the name is bold");
   assert.match(privatePage.text, /data-source-author|Source prediction by/i);
   assert.match(privatePage.text, /private_source_author/);
   assert.match(privatePage.text, /class="face/);

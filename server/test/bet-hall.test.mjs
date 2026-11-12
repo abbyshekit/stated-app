@@ -53,7 +53,7 @@ test('an empty hall has no fabricated totals and plain statuses follow snapshots
   assert.deepEqual(await publicBetHall(database([])), { rows: [], total: 0, settled: 0, paidYocto: '0', wonYocto: '0' });
   const hall = await publicBetHall(database([storedBet(), storedBet('accepted')]));
   const html = String(betList(hall.rows, { hall: true }));
-  assert.match(html, /Open until 20 Nov/);
+  assert.match(html, /Offer closes (?:in \d+ (?:minutes?|hours?), \d{2}:\d{2} UTC 20 Nov|20 Nov(?: \d{4})?, \d{2}:\d{2} UTC)/);
   assert.match(html, /Both sides are in/);
   assert.equal(hall.paidYocto, '0');
   const expired = storedBet();
@@ -61,5 +61,5 @@ test('an empty hall has no fabricated totals and plain statuses follow snapshots
   expired.chain_state.accept_by_ns = (BigInt(Date.parse(expired.accept_by)) * 1000000n).toString();
   const expiredHall = await publicBetHall(database([expired]));
   assert.match(String(betList(expiredHall.rows, { hall: true })), /Offer expired/);
-  assert.doesNotMatch(String(betList(expiredHall.rows, { hall: true })), /Open until/);
+  assert.doesNotMatch(String(betList(expiredHall.rows, { hall: true })), /Offer closes/);
 });

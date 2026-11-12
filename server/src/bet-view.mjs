@@ -1,7 +1,9 @@
 // INTEGRATION: the Marked look for Bets; callers supply an authorized Bet projection.
 // The two-seat block itself lives in marked.mjs; these helpers wrap it.
 import { html, raw } from './html.mjs';
-import { betBlock as markedBetBlock, betLead, betState, dayMonth } from './marked.mjs';
+import { betBlock as markedBetBlock, betLead, betState, dayMonth, nextBetTime } from './marked.mjs';
+
+export { nextBetTime };
 import { face } from './certificate.mjs';
 import { formatTestNear } from './near-escrow.mjs';
 import { network, unit } from './near-network.mjs';
@@ -14,6 +16,7 @@ export const BET_STATUS = {
 export const betTime = (value) => new Intl.DateTimeFormat('en-GB', {
   timeZone: 'UTC', dateStyle: 'medium', timeStyle: 'short',
 }).format(new Date(value)) + ' UTC';
+
 
 // DESIGN.md: the Result marks the words, on both the Bet and its ruling page.
 export function markedClaim(claim, outcome) {
@@ -34,6 +37,10 @@ export function betBlock(bet, options = {}) {
     && (bet.settled_by || bet.chain_state?.resolution?.method) === 'referee';
   const head = options.lead === false ? null : options.heading
     || (refereeVoid ? { text: betLead(bet, options).text, aside: 'Stakes returned' } : betLead(bet, options));
+  if (head && !options.heading) {
+    if (betState(bet).open || (bet.status === 'offered' && !betState(bet).expired)) head.aside = `Offer closes ${nextBetTime(bet.accept_by)}`;
+    else if (bet.status === 'accepted') head.aside = `Result ${nextBetTime(bet.resolve_at)}`;
+  }
   // The shared Marked seats also serve Prediction pages. Keep this Bet-only label here.
   // DESIGN.md: Bet handles stay whole; only names over twelve characters step down.
   const seats = raw(String(markedBetBlock(bet, { ...options, lead: false }))
@@ -41,9 +48,10 @@ export function betBlock(bet, options = {}) {
       const handle = name.replaceAll('<wbr>', '');
       return `<b${handle.length > 13 ? ' class="long-handle"' : ''}>${handle}</b>`;
     }));
-  const body = betState(bet).decided
-    ? raw(String(seats).replace(/<\/small><small>(?:won|credited)<\/small>/, ' pot</small>')) : seats;
   const ruling = ['accepted', 'proposed', 'disputed'].includes(bet.status) && ['yes', 'no'].includes(options.ruling) ? options.ruling : null;
+  const pot = bet.status === 'settled' || ruling;
+  const body = pot ? raw(String(seats).replace(/<div class="pot">[\s\S]*?<\/div>/,
+    String(html`<div class="pot"><b>${formatTestNear((BigInt(bet.stake_yocto) * 2n).toString())}</b><small>${unit()} pot</small></div>`))) : seats;
   return html`${head ? html`<p class="lead">${head.text}${head.aside ? html`<span>${head.aside}</span>` : ''}</p>` : ''}<div class="bet-seats"${ruling ? html` data-ruling="${ruling}"` : ''}>${body}</div>`;
 }
 
@@ -61,12 +69,12 @@ export function betCertificate(bet, { joinHref = null, viewer = null, faces = nu
 export function betTerms(bet, { extra = '', open = false, title = 'Terms', juryReview = false } = {}) {
   return html`<details class="fold"${open ? ' open' : ''}><summary>${title}</summary><dl class="bet-terms">
     <dt>Counts as yes</dt><dd>${bet.criteria}</dd>
-    <dt>Evidence source</dt><dd><a href="${bet.evidence_source_url}" rel="noopener noreferrer">${bet.evidence_source_url}</a></dd>
+    <dt>Link source</dt><dd><a href="${bet.evidence_source_url}" rel="noopener noreferrer">${bet.evidence_source_url}</a></dd>
     <dt>Stake each</dt><dd>${formatTestNear(bet.stake_yocto)} ${unit()}</dd>
     <dt>${network().real ? 'Real NEAR' : 'Test tokens'}</dt><dd>${network().real ? 'Stakes use real NEAR.' : 'Test NEAR has no monetary value.'} Any settlement or refund creates withdrawal credit; transfer needs a separate withdrawal.</dd>
-    <dt>Accept before</dt><dd>${betTime(bet.accept_by)}</dd>
-    <dt>Result after</dt><dd>${betTime(bet.resolve_at)}</dd>
-    <dt>Stake back from</dt><dd>${betTime(new Date(new Date(bet.resolve_at).getTime() + 7 * 86400000))}</dd>
+    <dt>Accept before</dt><dd>${nextBetTime(bet.accept_by)}</dd>
+    <dt>Result after</dt><dd>${nextBetTime(bet.resolve_at)}</dd>
+    <dt>Stake back from</dt><dd>${nextBetTime(new Date(new Date(bet.resolve_at).getTime() + 7 * 86400000))}</dd>
     <dt>Settlement</dt><dd>${bet.referee_wallet
       ? html`Stated’s recorded Result for the post decides, and the referee account <span class="mono">${bet.referee_wallet}</span> carries it to the contract. The referee can only choose yes, no or void between the two sides; it cannot take the stakes. With no Result, each side takes its stake back after that date.`
       : 'Both must agree on the result. A result the other side leaves unanswered for two days stands. Without agreement, each can take their stake back after that date.'}${juryReview ? ' A reviewer can correct a ruling before it pays out.' : ''}</dd>
@@ -114,7 +122,7 @@ export function betList(rows, { viewer = null, faces = null, hall = false } = {}
       const winner = bet.outcome === bet.creator_side ? bet.creator_username : bet.acceptor_username;
       const phrase = bet.status === 'settled' && ['yes', 'no'].includes(bet.outcome)
         ? `${winner ? `@${winner}` : `The ${bet.outcome} side`} won ${formatTestNear((BigInt(bet.stake_yocto) * 2n).toString())} ${unit()}`
-        : status === 'Offer expired' ? status : bet.status === 'offered' ? `Open until ${dayMonth(bet.accept_by)}`
+        : status === 'Offer expired' ? status : bet.status === 'offered' ? `Offer closes ${nextBetTime(bet.accept_by)}`
           : ['accepted', 'proposed', 'disputed'].includes(bet.status) ? 'Both sides are in'
             : bet.status === 'settled' && bet.outcome === 'void' ? 'Called off'
             : BET_STATUS[bet.status];

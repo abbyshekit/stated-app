@@ -44,7 +44,7 @@ test('betState: open needs funding and an unexpired offer; decided needs an agre
 
 test('betLead speaks to the reader: a dare to a visitor, a status to the person who made it', () => {
   assert.equal(betLead(bet()).text, '@priya dares you');
-  assert.match(betLead(bet()).aside, /^Open until \d{1,2} \w{3}$/);
+  assert.match(betLead(bet()).aside, /^Offer closes (?:in \d+ (?:minutes?|hours?), \d{2}:\d{2} UTC \d{1,2} \w{3}|\d{1,2} \w{3}(?: \d{4})?, \d{2}:\d{2} UTC)$/);
   assert.equal(betLead(bet(), { viewer: { x_username: 'Priya' } }).text, 'Your bet is open');
   assert.equal(betLead(bet({ funded: false })).text, 'Not funded yet');
   assert.equal(betLead(bet({ accept_by: past() })).text, 'Nobody took this one');
@@ -96,12 +96,15 @@ test('betBlock: an agreed result rings the winner in ink; only a Prediction that
   for (const ruling of ['yes', 'no']) {
     const pending = bet({ status: 'accepted', acceptor_username: 'oskar' });
     assert.ok(text(betBlock(pending, { ruling })).includes(`<div class="bet-seats" data-ruling="${ruling}">`));
+    for (const x_username of ['priya', 'oskar']) {
+      assert.match(text(betBlock(pending, { ruling, viewer: { x_username } })), /<b>0\.2<\/b><small>test NEAR pot<\/small>/);
+    }
     assert.doesNotMatch(text(betBlock(pending)), /data-ruling=/);
     assert.doesNotMatch(text(betBlock(bet(), { ruling })), /data-ruling=/);
   }
   const called = text(betBlock(bet({ status: 'settled', outcome: 'void', acceptor_username: 'oskar' })));
   assert.doesNotMatch(called, /seat won|seat lost/);
-  assert.match(called, /<small>escrow closed<\/small>/);
+  assert.match(called, /<b>0\.2<\/b><small>test NEAR pot<\/small>/);
   assert.match(called, /<span>Agreed void<\/span>/);
   assert.doesNotMatch(called, /Stakes returned|<small>returned<\/small>/);
   for (const method of [{ settled_by: 'referee' }, { chain_state: { resolution: { method: 'referee' } } }]) {

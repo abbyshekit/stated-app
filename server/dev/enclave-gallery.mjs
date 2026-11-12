@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { randomBytes, randomUUID, sign } from 'node:crypto';
 import { sha256 } from '../src/attested-signature.mjs';
 import { publishBet } from '../src/bet-public.mjs';
-import { submittedEvidence, verdictInput, verifyEnclaveRecord } from '../src/enclave-ruling.mjs';
+import { candleEvidence, submittedEvidence, verdictInput, verifyEnclaveRecord } from '../src/enclave-ruling.mjs';
 import { evidenceFor } from '../src/bet-evidence.mjs';
 import { parseTestNear } from '../src/near-escrow.mjs';
 import { setSaveVisibility } from '../src/store.mjs';
@@ -32,13 +32,24 @@ function bindFixtureEvidence(record, rows) {
   // The shared fixture's fixed evidence ID does not name these gallery rows.
   // Re-sign the synthetic jury requests so Verify covers what the page displays.
   record.evidence = submittedEvidence(rows, record.evidence.closesAt);
-  for (const verdict of record.verdicts) {
+  signFixtureEvidence(record);
+}
+
+function signFixtureEvidence(record) {
+  for (const [index, verdict] of record.verdicts.entries()) {
     const request = JSON.parse(Buffer.from(verdict.requestBody, 'base64').toString('utf8'));
     const { now } = JSON.parse(request.messages[1].content);
     request.messages[1].content = verdictInput(record.material, now, record.jury, record.evidence.text, record.mode);
     const bytes = Buffer.from(JSON.stringify(request));
     verdict.requestBody = bytes.toString('base64');
     verdict.requestHash = sha256(bytes);
+    verdict.parsed.confidence = [0.97, 0.92, 0.99][index];
+    verdict.verdict.confidence = verdict.parsed.confidence;
+    const response = JSON.parse(Buffer.from(verdict.responseBody, 'base64').toString('utf8'));
+    response.choices[0].message.content = JSON.stringify(verdict.parsed);
+    const responseBytes = Buffer.from(JSON.stringify(response));
+    verdict.responseBody = responseBytes.toString('base64');
+    verdict.responseHash = sha256(responseBytes);
     const text = `${verdict.model}:${verdict.requestHash}:${verdict.responseHash}`;
     verdict.signature = { ...verdict.signature, text,
       signature: sign(null, Buffer.from(text), keyFor(verdict.model).privateKey).toString('hex') };
@@ -91,7 +102,7 @@ async function seedBet(stack, creator, acceptor, now, spec) {
   const termsHash = hash(JSON.stringify({ version: 2, salt,
     creatorUserId: String(creator.id), invitedUserId: null, ...terms }));
   const settled = spec.settledOutcome != null;
-  const status = settled ? 'settled' : 'accepted';
+  const status = spec.refunded ? 'refunded' : settled ? 'settled' : 'accepted';
   const creatorBinding = randomBytes(32).toString('hex');
   const acceptorBinding = randomBytes(32).toString('hex');
   const chain = {
@@ -103,7 +114,7 @@ async function seedBet(stack, creator, acceptor, now, spec) {
   };
   const record = spec.rulingOutcome ? enclaveRulingFixture({
     source: spec.source, outcome: spec.rulingOutcome, mode: spec.mode || 'ruling',
-    reason: spec.reason, models: ['Qwen/Qwen3.8-27B', 'Qwen/Qwen3.6-35B-A3B-FP8', 'deepseek-ai/DeepSeek-V4.1-Flash-1017'],
+    reason: spec.reason, outcomes: spec.outcomes, models: ['Qwen/Qwen3.8-27B', 'Qwen/Qwen3.6-35B-A3B-FP8', 'deepseek-ai/DeepSeek-V4.1-Flash-1017'],
     material: { claim: spec.claim, madeAt, deadline, postUrl: source.url,
       bets: [{ id, termsHash }] },
   }) : null;
@@ -136,7 +147,7 @@ async function seedBet(stack, creator, acceptor, now, spec) {
   }
   for (const [index, item] of (spec.evidence || []).entries()) {
     const user = item.side === 'yes' ? creator : acceptor;
-    const at = iso(record ? Date.parse(deadline) + HOUR + index * MINUTE : now - (20 - index * 5) * MINUTE);
+    const at = iso(record || spec.evidenceOpen === false ? Date.parse(deadline) + HOUR + index * MINUTE : now - (20 - index * 5) * MINUTE);
     await stack.db.query(`insert into bet_evidence
       (statement_id,bet_id,user_id,side,url,title,body,body_hash,via,at)
       values ($1,$2,$3,$4,$5,$6,$7,$8,'page',$9)`,
@@ -144,6 +155,15 @@ async function seedBet(stack, creator, acceptor, now, spec) {
   }
   if (record) {
     if (record.evidence.kind === 'submitted') bindFixtureEvidence(record, await evidenceFor(stack.db, source.statementId));
+    else {
+      // The Bitcoin opening price must differ from the claim's threshold.
+      const evidence = JSON.parse(record.evidence.text);
+      const bodies = evidence.segments.map(segment => JSON.stringify(segment.candles.map(row =>
+        [Date.parse(row[0]) / 1000, row[1], row[2], 101240.55, 101240.55, row[5]])));
+      record.evidence.text = candleEvidence(record.plan.parsed, bodies).text;
+      record.evidence.textHash = hash(record.evidence.text);
+      signFixtureEvidence(record);
+    }
     verifyEnclaveRecord(record);
     await stack.db.query(`insert into bilateral_bet_events (bet_id,actor_user_id,kind,detail)
       values ($1,$2,'enclave_ruling',$3)`, [id, creator.id, record]);
@@ -165,7 +185,7 @@ async function seedBet(stack, creator, acceptor, now, spec) {
     if (spec.mode === 'review') assert.equal(published.enclave.agrees, spec.rulingOutcome === spec.settledOutcome);
   } else {
     assert.equal(published.enclave, null);
-    assert.equal(published.evidence?.open, true);
+    assert.equal(published.evidence?.open, spec.evidenceOpen !== false);
   }
   if (spec.evidence?.length) assert.equal(published.evidence.items.length, spec.evidence.length);
   return { name: spec.name, path: `/bets/${id}` };
@@ -248,14 +268,14 @@ async function gallery(stack) {
       body: 'The ferry operator confirms that every scheduled passenger sailing used the temporary terminal through the deadline. The new terminal was not in passenger service.' },
   ];
   const specs = [
-    { name: '01 Evidence open, two links', claim: LONG_CLAIM, stake: '0.5', hoursAgo: 3,
+    { name: '01 Links open, two links', claim: LONG_CLAIM, stake: '0.5', hoursAgo: 3,
       criteria: 'The city and ferry operator confirm scheduled passenger service from the completed terminal before the deadline.',
       source: 'evidence', evidence: terminalEvidence },
     { name: '03 Ruled Yes, Coinbase price, awaiting payout', stake: '0.1', hoursAgo: 1,
       claim: 'Bitcoin will trade above $100,000 before the deadline.',
       criteria: 'A completed BTC-USD candle on Coinbase closes above $100,000 in the price window before the deadline.',
-      source: 'coinbase-candles', rulingOutcome: 'yes', reason: 'Coinbase recorded a BTC-USD close of $101,000 in the completed price window before the deadline.' },
-    { name: '04 Ruled No, posted evidence, awaiting payout', stake: '0.5', hoursAgo: 26,
+      source: 'coinbase-candles', rulingOutcome: 'yes', reason: 'Coinbase recorded a BTC-USD close of $101,240.55 in the completed price window before the deadline.' },
+    { name: '04 Ruled No, posted links, awaiting payout', stake: '0.5', hoursAgo: 26,
       claim: 'The waterfront ferry terminal will begin scheduled passenger service before the deadline.',
       criteria: 'Scheduled passenger sailings must depart from the new terminal, rather than a preview or opening ceremony.',
       source: 'evidence', rulingOutcome: 'no', evidence: delayedEvidence.slice(0, 2),
@@ -264,8 +284,8 @@ async function gallery(stack) {
       claim: 'Bitcoin will hold above $100,000 in the price window before the deadline.',
       criteria: 'Completed Coinbase BTC-USD candles in the price window close above $100,000.',
       source: 'coinbase-candles', rulingOutcome: 'yes', settledOutcome: 'yes',
-      reason: 'Every completed Coinbase BTC-USD candle in the recorded window closed at $101,000, above the stated threshold.' },
-    { name: '06 Settled No, posted evidence, three links', stake: '0.5', hoursAgo: 96,
+      reason: 'Every completed Coinbase BTC-USD candle in the recorded window closed at $101,240.55, above the stated threshold.' },
+    { name: '06 Settled No, posted links, three links', stake: '0.5', hoursAgo: 96,
       claim: 'The new waterfront ferry terminal will be carrying paying passengers before the deadline.',
       criteria: 'The ferry operator confirms that scheduled passenger sailings used the new terminal before the deadline.',
       source: 'evidence', rulingOutcome: 'no', settledOutcome: 'no', evidence: delayedEvidence,
@@ -290,8 +310,29 @@ async function gallery(stack) {
       evidence: [{ side: 'yes', url: 'https://council.example.org/minutes/ferry-terminal-budget', title: 'Council minutes: ferry terminal budget approved',
         body: 'The council minutes record the motion approving the waterfront ferry terminal budget. The vote took place before the deadline.' }] },
   ];
+  specs.push(
+    { name: '16 Links closed, jury still deciding', claim: LONG_CLAIM, stake: '0.5', hoursAgo: 26,
+      criteria: 'The ferry operator confirms scheduled passenger sailings before the deadline.',
+      source: 'evidence', evidence: terminalEvidence, evidenceOpen: false },
+    { name: '17 Split jury, awaiting refund', claim: 'The ferry terminal will be fully operational before the deadline.',
+      stake: '0.5', hoursAgo: 26, criteria: 'All entrances and boarding gates operate for scheduled passenger service.',
+      source: 'evidence', rulingOutcome: 'unclear', outcomes: ['yes', 'yes', 'no'], evidence: terminalEvidence,
+      reason: 'The reports disagree about whether the boarding gates were operating.' },
+    { name: '18 Undecided jury, refunded', claim: 'The terminal will feel less crowded than the temporary terminal.',
+      stake: '0.5', hoursAgo: 96, criteria: 'Compare passenger experience on opening day.',
+      source: 'evidence', rulingOutcome: 'unclear', refunded: true, evidence: terminalEvidence,
+      reason: 'The claim does not specify a measure of crowding.' },
+  );
   const seeded = [];
   for (const spec of specs) seeded.push(await seedBet(stack, priya.user, daniel.user, now, spec));
+  const paidBet = seeded.find(page => page.name.startsWith('05 '));
+  const paidId = paidBet.path.split('/').pop();
+  await stack.db.query(`insert into play_accounts (x_user_id,account_id,public_key,ready)
+    values ($1,'priya.testnet','ed25519:synthetic',true)`, [priya.user.x_user_id]);
+  await stack.db.query(`insert into bilateral_near_requests
+    (id,bet_id,user_id,wallet_account,method,args,execution_status,transaction_hash)
+    values ($1,$2,$3,'priya.testnet','withdraw','{}','succeeded',$4)`,
+  [randomUUID(), paidId, priya.user.id, '1'.repeat(44)]);
 
   // These public, dated posts fill the first step of /bets/new and the home feed.
   for (const [index, [owner, text]] of [
@@ -308,7 +349,7 @@ async function gallery(stack) {
   assert.equal((await stack.browser().get(evidencePath)).status, 404, 'Evidence must remain private');
   assert.equal((await priya.browser.get(evidencePath)).status, 200, 'The bettor must see the evidence form');
   const pages = seeded.map(({ name, path }) => ({ name, url: `${stack.base}${path}`, signedInAs: null }));
-  pages.splice(1, 0, { name: '02 Private evidence form, signed in as @priya_m',
+  pages.splice(1, 0, { name: '02 Private links form, signed in as @priya_m',
     url: `${stack.base}${evidencePath}`, signedInAs: '@priya_m' });
   pages.push(
     { name: '10 New Bet, unknown pasted post, Decide by',
@@ -317,7 +358,7 @@ async function gallery(stack) {
     { name: '12 Home', url: `${stack.base}/`, signedInAs: null },
   );
   const empty = await seedBet(stack, priya.user, daniel.user, now, {
-    name: '13 Private evidence form, no evidence yet', claim: LONG_CLAIM, stake: '0.5', hoursAgo: 3,
+    name: '13 Private links form, no links yet', claim: LONG_CLAIM, stake: '0.5', hoursAgo: 3,
     criteria: 'The ferry operator confirms scheduled passenger sailings before the deadline.', source: 'evidence',
   });
   const emptyPath = `${empty.path}/evidence`;
@@ -336,8 +377,13 @@ async function gallery(stack) {
   });
   pages.push(
     { name: empty.name, url: `${stack.base}${emptyPath}`, signedInAs: '@priya_m' },
-    { name: '14 Private evidence form, rejected link', url: `${stack.base}${errorPath}`, signedInAs: '@priya_m', status: 400 },
+    { name: '14 Private links form, rejected link', url: `${stack.base}${errorPath}`, signedInAs: '@priya_m', status: 400 },
     { name: longBet.name, url: `${stack.base}${longBet.path}`, signedInAs: null },
+    { name: '19 Paid winner, signed in as @priya_m', url: `${stack.base}${paidBet.path}`, signedInAs: '@priya_m' },
+    { name: '20 New Bet, invalid deadline', url: `${stack.base}/bets/new?${new URLSearchParams({
+      link: 'https://x.com/danielokafor/status/1234567890123456789', side: 'no', stake: '0.25',
+      datePreset: 'custom', date: '2026-02-31', go: '1',
+    })}`, signedInAs: null, status: 400 },
   );
   // Exercise the real handlers before advertising the gallery. This is run only
   // by the designer starting the script, never by node --check.
@@ -346,6 +392,8 @@ async function gallery(stack) {
     const response = await browser.get(page.url);
     assert.equal(response.status, page.status || 200, `${page.name} did not load`);
     if (page.name.startsWith('10 ')) assert.match(response.text, /name="date"/);
+    if (page.name.startsWith('19 ')) assert.match(response.text, /Paid to your account\./);
+    if (page.name.startsWith('20 ')) assert.match(response.text, /role="alert"/);
   }
   // Open this once to set the real test-stack session and land on page 2.
   // It is separate from page 2's URL so every listed url names its actual page.
@@ -363,7 +411,7 @@ async function main() {
   process.on('SIGTERM', onSignal);
   try {
     stack = await startStack({ ...enclaveEnv, STATED_PLAY: '1', STATED_NEAR_CONTRACT: 'escrow.testnet',
-      STATED_PLAY_SETTLE_DELAY_SECONDS: '3600' }, {
+      STATED_PLAY_SETTLE_DELAY_SECONDS: '600' }, {
       fetchImpl: async (url, options) => {
         if (stack && new URL(url).origin === new URL(stack.fakeX.base).origin) return fetch(url, options);
         throw new Error('The gallery refuses external API requests');

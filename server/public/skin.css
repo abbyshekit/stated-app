@@ -164,7 +164,7 @@ label.check { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10
 /* The marks. Came true: a highlighter bar over the words, line by line. Did not: a line through them. */
 .hl { background: var(--mark); color: var(--on-mark); padding: 0.24em 0.16em; margin: 0 -0.16em; border-radius: 2px; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
 .post .hl { padding: 0.19em 0.14em; margin: 0 -0.14em; }
-.struck { text-decoration: line-through; text-decoration-thickness: 2px; text-decoration-color: var(--dim); }
+.struck { color: var(--ink); opacity: 1; text-decoration: line-through; text-decoration-thickness: 2px; text-decoration-color: var(--ink); }
 @media (prefers-reduced-motion: no-preference) {
   .hl.sweep { background: linear-gradient(var(--mark), var(--mark)) no-repeat 0 0 / 0% 100%; color: inherit; animation: sweep 480ms cubic-bezier(0.22, 1, 0.36, 1) 250ms forwards; }
   @keyframes sweep { to { background-size: 100% 100%; color: var(--on-mark); } }
@@ -189,12 +189,15 @@ label.check { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10
 /* DESIGN.md: the jury's faces carry the verdict; its technical detail stays folded. */
 .ruling-post .prow .said { display: block; overflow: visible; -webkit-line-clamp: unset; }
 .ruling-verdict { flex-wrap: wrap; gap: 8px 12px; }
-.ruling-verdict h2 { margin: 0; font-size: 17px; }
+.ruling-verdict h2 { margin: 0; font-size: 17px; font-weight: 400; }
 .ruling-verdict > span { font-size: 14px; }
 .jury-rail { list-style: none; margin: 0; padding: 24px 16px 8px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .jury-rail .seat { grid-template-rows: auto 1fr auto; }
 .jury-rail .seat b { font-size: 14px; font-weight: 400; overflow-wrap: anywhere; }
 .jury-rail .seat > span:last-child { font-variant-numeric: tabular-nums; }
+.jury-rail .seat .model-logo { border-radius: 0; background: var(--ink); mask-position: center; mask-size: contain; mask-repeat: no-repeat; }
+.model-logo.qwen { mask-image: url('/static/models/qwen.svg'); }
+.model-logo.deepseek { mask-image: url('/static/models/deepseek.svg'); }
 @media (prefers-color-scheme: light) {
   .verdict.yes b { color: var(--ink); }
 }
@@ -215,7 +218,6 @@ label.check { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10
 .bet-seats[data-ruling="yes"] .seat:first-child .face,
 .bet-seats[data-ruling="no"] .seat:last-child .face { outline: 3px solid var(--mark-ring); outline-offset: 3px; }
 .versus.no .seat.won .face, .versus.agreed .seat.won .face,
-.jury-rail.agreed .seat.won .face,
 .bet-seats[data-ruling="no"] .seat:last-child .face { outline-color: var(--ink); }
 .seat.lost b { color: var(--dim); }
 .pot { align-self: start; padding-top: 12px; }
@@ -235,6 +237,9 @@ label.check { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10
 .prop.bet-claim.long { font-size: 20px; }
 @media (max-width: 340px) {
   .prop.bet-claim:not(.long) { font-size: 22px; }
+}
+@media (max-width: 359px) {
+  .prop.bet-claim.long { font-size: 18px; }
 }
 .stepper { display: flex; justify-content: center; gap: 16px; margin-top: 10px; }
 .stepper .step { width: 44px; height: 44px; min-height: 44px; padding: 0; border-radius: 50%; border: 1px solid var(--dim); display: grid; place-items: center; font-size: 22px; font-weight: 400; line-height: 1; flex: none; }
@@ -306,7 +311,7 @@ form > .acts, form > .lead, form > .stakes, form > .prop { margin-left: 0; margi
 .proof .tl { min-height: 44px; }
 .prow.note .said { font-size: 16px; }
 .hero + .posts, .hero + .blank { border-top: 1px solid var(--line); }
-p { margin: 0 0 12px; }
+p { margin: 0 0 12px; text-wrap: pretty; }
 .lede { font-size: 17px; color: var(--dim); }
 .quiet, .note { color: var(--dim); font-size: 14px; line-height: 1.45; }
 label { display: block; font-size: 14px; font-weight: 600; margin: 14px 0 6px; }
@@ -427,6 +432,7 @@ input.bad[aria-invalid="true"],
 .source-author .head span { white-space: normal; overflow-wrap: anywhere; overflow: visible; text-overflow: clip; }
 .source-author > p { margin: 0 0 8px; }
 .source-author .head { margin-bottom: 0; }
+.source-author .head .offered-by { font-size: 16px; font-weight: 400; }
 
 /* A NEAR account name is one long word: it may break anywhere. */
 .acct { overflow-wrap: anywhere; }
@@ -447,11 +453,13 @@ input.bad[aria-invalid="true"],
 .bet-seats .pot small { white-space: nowrap; overflow-wrap: normal; text-wrap: nowrap; }
 .seat b { white-space: normal; word-break: normal; overflow-wrap: normal; overflow: visible; text-overflow: clip; text-wrap: wrap; }
 @media (max-width: 420px) { .seat b { font-size: 15px; } }
-@media (max-width: 340px) { .seat b { min-height: 3em; } }
 .bet-seats .seat b { overflow-wrap: anywhere; }
 .bet-seats .seat b.long-handle { font-size: 13px; white-space: nowrap; overflow-wrap: normal; max-width: 100%; }
-/* At 320 a 15-character handle cannot fit whole; it is cut at the end, never broken in the middle. */
-@media (max-width: 340px) { .bet-seats .seat b.long-handle { font-size: 12px; overflow: hidden; text-overflow: ellipsis; } }
+/* DESIGN.md: below 360 the full handle wraps within its seat, without a spacer. */
+@media (max-width: 359px) {
+  .bet-seats .seat b.long-handle { white-space: normal; overflow-wrap: anywhere; }
+  .jury-rail .seat b { font-size: 14px; white-space: nowrap; }
+}
 
 /* The reply that makes a bet, set as the thing to type. */
 .say { margin: 4px 0 0; padding: 0 16px 6px; font-size: 24px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; overflow-wrap: anywhere; }
@@ -577,7 +585,7 @@ form:not(:has(input[name="side"]:checked)) .send { opacity: 0.45; }
 .seg.line { background: none; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 0; }
 .seg.line label { font-size: 15px; font-weight: 400; border: 0; border-bottom: 2px solid transparent; border-radius: 0; white-space: nowrap; }
 .seg.line input:checked + label { background: none; color: var(--ink); border-color: var(--ink); }
-/* DESIGN.md: side choices are outline pills; stake and date stay underlined. */
+/* DESIGN.md: side, stake and deadline use the same outline choice. */
 .seg.side-choice { background: none; border: 0; border-radius: 0; padding: 0; gap: 8px; }
 .seg.side-choice label { border: 1px solid var(--line); color: var(--ink); min-height: 44px; font-weight: 400; }
 .seg.side-choice input:checked + label { background: var(--ink); color: var(--ground); border-color: var(--ink); }

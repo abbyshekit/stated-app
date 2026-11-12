@@ -4,13 +4,10 @@ import { ownerSave, publicPredictionOwner, publicSave, UserError } from './store
 import { submitEvidence } from './bet-evidence.mjs';
 import { evidenceForBet } from './bet-public.mjs';
 import { face, facesByUsername, facesFor } from './certificate.mjs';
-import { dayMonth } from './marked.mjs';
+import { nextBetTime } from './bet-view.mjs';
 
 const ID = '([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})';
 const opposite = (side) => side === 'yes' ? 'no' : 'yes';
-const clock = (value) => new Intl.DateTimeFormat('en-GB', {
-  timeZone: 'UTC', hour: '2-digit', minute: '2-digit',
-}).format(new Date(value));
 
 export function registerBetEvidenceRoutes({ route, db, config, layout, needPost, csrfField, send, redirect, notFound, fetchPage }) {
   async function findBet(ctx) {
@@ -60,27 +57,35 @@ export function registerBetEvidenceRoutes({ route, db, config, layout, needPost,
         <p class="pwho"><b>${String(row.user_id) === String(ctx.user.id) ? 'You' : username ? `@${username}` : 'Bettor'} bet ${row.side}</b></p>
         <p class="evidence-title">${link ? html`<a class="tl" href="${link}" rel="noopener noreferrer">${row.title || host}</a>` : (row.title || row.final_url || row.url)}</p>
         <p class="meta">${host ? html`<span>${host}</span>` : ''}${postedHost ? html`<span class="quiet">posted as ${postedHost}</span>` : ''}</p>
-        <details class="fold"><summary>What the jury read</summary>${String(row.body || '').split('\n\n').map(text => html`<p>${text}</p>`)}</details>
       </div></li>`;
     });
+    // DESIGN.md: one fold holds the complete saved text, below the link list.
+    const savedText = rows.length ? html`<details class="fold"><summary>What the jury reads</summary>
+      <ul class="posts evidence-list">${rows.map(row => html`<li class="prow"><div>
+        <p class="pwho"><b>${row.title || row.final_url || row.url}</b></p>
+        ${String(row.body || '').split('\n\n').map(text => html`<p>${text}</p>`)}
+      </div></li>`)}</ul></details>` : '';
+    const errorMessage = error?.message === 'Evidence is closed.' ? 'Links are closed.'
+      : error?.message === 'Evidence is unavailable.' ? 'Links are unavailable.' : error?.message;
     const body = html`
-      <h1 class="visually-hidden">Evidence</h1>
+      <h1 class="visually-hidden">Links</h1>
       <ul class="posts"><li class="prow">${face({ url: authorPicture, name: author })}<div>
         <p class="pwho"><b>${author}</b>${handle && `@${handle}` !== author ? html`<span>@${handle}</span>` : ''}</p>
         <p class="said">${bet.claim}</p>
       </div></li></ul>
-      <p class="gut quiet">Closes ${clock(closes)} UTC, ${dayMonth(closes)}. The jury reads the text under each link.</p>
-      ${items.length ? html`<ul class="posts evidence-list">${items}</ul>` : html`<p class="empty">Links from both sides appear here.</p>`}
+      <p class="gut quiet">Links close ${nextBetTime(closes)}. The jury reads the text saved from each page.</p>
       ${open ? html`<form method="post" action="${path}" class="evidence-form">
         ${csrfField(ctx)}
         <div class="gut">
-          <label for="evidence-url">Link to a public page</label>
+          <label for="evidence-url">Link to a web page (not an X post)</label>
           <input id="evidence-url" name="url" type="url" value="${url}" maxlength="600" placeholder="https://"${error ? html` aria-invalid="true"` : ''} required>
         </div>
         <input type="hidden" name="side" value="${ownSide}">
-        <div class="acts">${error ? html`<p class="err" role="alert">${error.message}</p>` : ''}<button class="primary big" type="submit">Add evidence</button></div>
-      </form>` : html`<div class="gut">${error ? html`<p class="err" role="alert">${error.message}</p>${url ? html`<p>${url}</p>` : ''}` : ''}<p class="quiet">${accepted || bet.accepted_at ? 'The evidence window has closed.' : 'Evidence can be added once the bet is accepted.'}</p></div>`}`;
-    send(ctx.res, error?.status || 200, await layout(ctx, 'Evidence', body, { back: `/bets/${bet.id}`, extra: html`<span class="page-title">Evidence</span>`, kind: 'private', flush: true }), { kind: 'private' });
+        <div class="acts">${error ? html`<p class="err" role="alert">${errorMessage}</p>` : ''}<button class="primary big" type="submit">Add a link</button></div>
+      </form>` : html`<div class="gut">${error ? html`<p class="err" role="alert">${errorMessage}</p>${url ? html`<p>${url}</p>` : ''}` : ''}<p class="quiet">${accepted || bet.accepted_at ? 'Links are closed.' : 'Links can be added once the bet is accepted.'}</p></div>`}
+      ${items.length ? html`<ul class="posts evidence-list">${items}</ul>` : html`<p class="empty">Links from both sides appear here.</p>`}
+      ${savedText}`;
+    send(ctx.res, error?.status || 200, await layout(ctx, 'Links', body, { back: `/bets/${bet.id}`, extra: html`<span class="page-title">Links</span>`, kind: 'private', flush: true }), { kind: 'private' });
   }
 
   route('GET', new RegExp(`^/bets/${ID}/evidence$`), async (ctx) => {

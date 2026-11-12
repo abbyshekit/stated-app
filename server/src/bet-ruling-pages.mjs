@@ -1,6 +1,7 @@
 // INTEGRATION: web.mjs registers this public, read-only page beside the Bet start routes.
 // DESIGN.md: a normal post row, hairline-separated evidence and one filled action; skin.css only.
 import Decimal from 'decimal.js';
+import { readFileSync } from 'node:fs';
 import { html } from './html.mjs';
 import { readPublicBet } from './bet-public.mjs';
 import { face, facesByUsername, facesFor } from './certificate.mjs';
@@ -10,15 +11,19 @@ import { dayMonth } from './marked.mjs';
 import { markedClaim } from './bet-view.mjs';
 
 const ID = '([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})';
+const MODEL_LOGOS = new Map(['qwen', 'deepseek'].map(family => [family,
+  readFileSync(new URL(`../public/models/${family}.svg`, import.meta.url))]));
+const modelFace = (id) => {
+  const family = id.startsWith('Qwen/') ? 'qwen' : id.startsWith('deepseek-ai/') ? 'deepseek' : null;
+  return family ? html`<span class="face model-logo ${family}" role="img" aria-label="${family === 'qwen' ? 'Qwen' : 'DeepSeek'} logo"></span>`
+    : face({ name: modelName(id) });
+};
 const percent = (value) => `${new Decimal(value).times(100).toFixed()}%`;
 // Thousands separated, decimals as Coinbase gave them: US$100,000 and US$3.689.
 const price = (value) => {
   const [whole, cents] = new Decimal(value).toFixed().split('.');
   return `US$${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}${cents ? `.${cents}` : ''}`;
 };
-const time = (value) => new Intl.DateTimeFormat('en-GB', {
-  timeZone: 'UTC', dateStyle: 'medium', timeStyle: 'short',
-}).format(new Date(value)) + ' UTC';
 const clock = (value) => new Intl.DateTimeFormat('en-GB', {
   timeZone: 'UTC', hour: '2-digit', minute: '2-digit',
 }).format(new Date(value));
@@ -31,7 +36,7 @@ const VERIFIED = [
   'Each enclave’s signing key and this request’s fresh nonce are inside its quote',
   'Each verdict is signed by its enclave’s key',
   'The signed request names this bet and its terms hash',
-  'The evidence text the models read is inside the signed request',
+  'The text the models read is inside the signed request',
 ];
 
 // Public pages never enrich the source identity from the viewer's private save.
@@ -51,20 +56,43 @@ async function postRow(db, bet, outcome) {
   </div></li></ul>`;
 }
 
-function evidenceLine(record) {
+function evidenceLine(record, bet) {
   const evidence = JSON.parse(record.evidence.text);
-  if (record.evidence.kind === 'submitted') return evidence.items.length
-    ? (evidence.items.length === 1 ? 'From 1 link posted as evidence.'
-      : new Set(evidence.items.map((item) => item.side)).size > 1 ? `From ${evidence.items.length} links posted by both sides.`
-        : `From ${evidence.items.length} links posted by one side.`)
-    : 'No links were posted.';
+  const deadline = `${clock(bet.resolve_at)} UTC, ${dayMonth(bet.resolve_at)}`;
+  if (record.evidence.kind === 'submitted') {
+    const first = record.verdicts[0];
+    return html`“${first.parsed.reason}” <span class="quiet">${modelName(first.model)}</span> Deadline: ${deadline}.`;
+  }
   const plan = record.plan.parsed;
   return plan.kind === 'moment'
-    ? `Coinbase ${plan.product} opened at ${price(evidence.summary.priceAtMoment)} at ${clock(plan.start)} UTC on ${dayMonth(plan.start)}.`
-    : `Coinbase ${plan.product} ranged from ${price(evidence.summary.lowestLow)} to ${price(evidence.summary.highestHigh)} between ${time(plan.start).replace(/ UTC$/, '')} and ${time(plan.end)}.`;
+    ? `Coinbase ${plan.product} opened at ${price(evidence.summary.priceAtMoment)} at ${clock(plan.start)} UTC, ${dayMonth(plan.start)}; the deadline was ${deadline}.`
+    : `Coinbase ${plan.product} ranged from ${price(evidence.summary.lowestLow)} to ${price(evidence.summary.highestHigh)} before the ${deadline} deadline.`;
+}
+
+function evidenceFold(record) {
+  if (record.evidence.kind !== 'submitted') return '';
+  const { items } = JSON.parse(record.evidence.text);
+  if (!items.length) return '';
+  return html`<details class="fold"><summary>Links, ${items.length}</summary>
+    <ul class="posts evidence-list">${items.map(item => {
+      let url = null; let host = null;
+      try {
+        const parsed = new URL(item.url);
+        if (parsed.protocol === 'https:' && !parsed.username && !parsed.password) { url = parsed.href; host = parsed.host; }
+      } catch { /* Invalid stored URLs remain escaped text. */ }
+      return html`<li class="prow"><div><p>Bet ${item.side}: ${url ? html`<a class="tl" href="${url}" rel="noopener noreferrer">${item.title || host}</a>` : item.title || item.url}${host ? html` <span class="quiet">${host}</span>` : ''}</p>
+        <details class="fold"><summary>Saved page text</summary>${item.text.split('\n\n').map(text => html`<p>${text}</p>`)}</details>
+      </div></li>`;
+    })}</ul>
+  </details>`;
 }
 
 export function registerBetRulingRoutes({ route, db, config, layout, send, notFound }) {
+  // Match web.mjs static handling, restricted to the two bundled model logos.
+  route('GET', /^\/static\/models\/(qwen|deepseek)\.svg$/, (ctx) => {
+    ctx.res.writeHead(200, { 'content-type': 'image/svg+xml', 'cache-control': 'public, max-age=86400', 'x-content-type-options': 'nosniff' });
+    ctx.res.end(MODEL_LOGOS.get(ctx.params[0]));
+  });
   route('GET', new RegExp(`^/bets/${ID}/ruling$`), async (ctx) => {
     const result = await db.tx(async tx => {
       const bet = await readPublicBet(tx, ctx.params[0], config.play);
@@ -84,21 +112,23 @@ export function registerBetRulingRoutes({ route, db, config, layout, send, notFo
     const gpuVerified = record.verdicts.every(verdict => verdict.gpu?.verdict === true);
     const verified = gpuVerified
       ? [...VERIFIED, 'Each model’s NVIDIA GPU attestation was verified by NVIDIA’s attestation service'] : VERIFIED;
+    const evidence = evidenceLine(record, bet);
     const body = html`
       <h1 class="visually-hidden">Ruling</h1>
       ${post}
       <div class="verdict ruling-verdict${record.outcome === 'yes' ? ' yes' : ''}"><h2>NEAR AI enclave jury</h2><b>${outcomeWord(record.outcome)}</b><span>${dayMonth(record.decidedAt, { year: true })}</span></div>
-      ${record.mode === 'review' && record.agrees !== null ? html`<p class="gut quiet">${record.agrees ? 'Agrees with the recorded result' : 'Disagrees with the recorded result'}</p>` : ''}
-      <ul class="jury-rail${record.outcome === 'yes' ? '' : ' agreed'}">${record.verdicts.map(verdict => html`<li class="seat${verdict.parsed.outcome === record.outcome ? ' won' : ''}">
-        ${face({ name: modelName(verdict.model) })}<b>${modelName(verdict.model)}</b><span>${outcomeWord(verdict.parsed.outcome)}, ${percent(verdict.parsed.confidence)}</span>
+      ${record.mode === 'review' && record.agrees !== null ? html`<p class="gut quiet">A Stated reviewer recorded ${outcomeWord(bet.outcome)} on ${dayMonth(bet.result_recorded_at || bet.settled_at)}. The jury ${record.agrees ? 'agreed' : 'disagreed'} on ${dayMonth(record.decidedAt)}.</p>` : ''}
+      <ul class="jury-rail">${record.verdicts.map(verdict => html`<li class="seat">
+        ${modelFace(verdict.model)}<b>${modelName(verdict.model)}</b><span>${outcomeWord(verdict.parsed.outcome)}, ${percent(verdict.parsed.confidence)} sure</span>
       </li>`)}</ul>
-      <p class="gut">${evidenceLine(record)}</p>
-      <p class="gut quiet">Each verdict was signed inside an Intel TDX enclave, and every signature checked out.</p>
+      ${evidence ? html`<p class="gut">${evidence}</p>` : ''}
       <div class="folds">
+      ${evidenceFold(record)}
       <details class="fold"><summary>Why each model decided</summary>
         <ul class="posts evidence-list">${record.verdicts.map(verdict => html`<li class="prow"><div><p class="pwho"><b>${verdict.model}</b></p><p>${verdict.parsed.reason}</p></div></li>`)}</ul>
       </details>
       <details class="fold"><summary>Check it yourself</summary>
+        <p>Each verdict was signed inside an Intel TDX enclave, and every signature checked out.</p>
         <ul class="posts evidence-list">${verified.map(line => html`<li class="prow"><div>${line}</div></li>`)}</ul>
         <p class="quiet">Not checked: enclave measurements against a published list, TCB level and revocation${gpuVerified ? '' : ', the GPU’s own attestation'}.</p>
         <p>${record.mode === 'review'

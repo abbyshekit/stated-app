@@ -119,8 +119,8 @@ test('a chosen post asks for a side with the smallest stake and a month chosen',
   assert.match(page.text, /<p class="lead">Bet on this post<\/p>/);
   assert.match(page.text, /<nav aria-label="More"><a href="\/search">Search<\/a><a href="\/privacy">Privacy<\/a><\/nav>/);
   assert.match(page.text, /<p class="meta stake-label">Your side<\/p>\s*<div class="seg side-choice"/);
-  for (const label of ['Stake each, in test NEAR', 'Decide by']) {
-    assert.match(page.text, new RegExp(`<p class="meta stake-label">${label}</p>\\s*<div class="seg line`));
+  for (const label of ['Stake each, in test NEAR', 'Deadline']) {
+    assert.match(page.text, new RegExp(`<p class="meta stake-label">${label}</p>\\s*<div class="seg side-choice`));
   }
   assert.match(page.text, /type="date" id="bet-date" name="date" value="" min="\d{4}-\d{2}-\d{2}" max="\d{4}-\d{2}-\d{2}"/);
   assert.match(page.text, /<span class="need">Choose yes or no<\/span><span class="go">[\s\S]*?Reply on X<\/span><\/button>/, 'the button asks for a side until one is chosen');

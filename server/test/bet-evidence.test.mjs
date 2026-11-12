@@ -286,18 +286,18 @@ test('the private evidence form fetches a local article and preserves a failed l
   const acceptorBrowser = await s.signIn(s.fakeX.users.get(String(acceptor.x_user_id)));
   const form = await acceptorBrowser.get(path);
   assert.equal(form.status, 200);
-  assert.match(form.text, /<span class="page-title">Evidence<\/span>/);
-  assert.match(form.text, /Closes \d{2}:\d{2} UTC, \d{1,2} [A-Z][a-z]{2}\. The jury reads the text under each link\./);
+  assert.match(form.text, /<span class="page-title">Links<\/span>/);
+  assert.match(form.text, /Links close (?:in \d+ (?:minutes?|hours?), \d{2}:\d{2} UTC \d{1,2} [A-Z][a-z]{2}|\d{1,2} [A-Z][a-z]{2}(?: \d{4})?, \d{2}:\d{2} UTC)\. The jury reads the text saved from each page\./);
   assert.match(form.text, /<form\b/i);
   assert.match(form.text, /name="(?:url|link)"/i);
   assert.match(form.text, /type="hidden" name="side" value="no"/);
   assert.doesNotMatch(form.text, /id="evidence-(?:yes|no)"|aria-label="Evidence for"/);
-  assert.match(form.text, /<label for="evidence-url">Link to a public page<\/label>/);
+  assert.match(form.text, /<label for="evidence-url">Link to a web page \(not an X post\)<\/label>/);
   assert.match(form.text, /id="evidence-url"[^>]*placeholder="https:\/\/"/);
   assert.doesNotMatch(form.text, /aria-invalid="true"/);
   const xFailure = await acceptorBrowser.submit(path, { side: 'no', url: 'https://x.com/official/status/123' }, { from: path });
   assert.equal(xFailure.status, 400);
-  assert.match(xFailure.text, /The jury can’t open X posts\. Paste a public web page\./);
+  assert.match(xFailure.text, /The jury can’t open X posts\. Paste a link to a public web page\./);
   const bad = `${fixtureBase}/missing`;
   const failure = await acceptorBrowser.submit(path, { side: 'no', url: bad }, { from: path });
   assert.match(failure.text, /That link could not be read\./);
@@ -319,8 +319,8 @@ test('the private evidence form fetches a local article and preserves a failed l
   assert.match(shown.text, /<b>You bet no<\/b>/);
   await s.db.query(`update enclave_plans set closes_at=clock_timestamp()-interval '1 second' where statement_id=$1`, [statementId]);
   const closed = await acceptorBrowser.get(path);
-  assert.match(closed.text, /The evidence window has closed\./);
-  assert.doesNotMatch(closed.text, /Add evidence<\/button>|name="url"/);
+  assert.match(closed.text, /Links are closed\./);
+  assert.doesNotMatch(closed.text, /Add a link<\/button>|name="url"/);
   await s.db.query(`update enclave_plans set closes_at=clock_timestamp()+interval '1 day' where statement_id=$1`, [statementId]);
 });
 
@@ -770,7 +770,8 @@ test('redirects preserve the final URL and original title and refuse X or privat
     assert.match(shown.text, browser === creatorBrowser ? /<b>You bet yes<\/b>/ : /<b>@ev_creator bet yes<\/b>/);
     assert.match(shown.text, /@ev_creator/);
     assert.match(shown.text, browser === acceptorBrowser ? /<b>You bet no<\/b>/ : /@ev_acceptor/);
-    assert.equal((shown.text.match(/<summary>What the jury read<\/summary>/g) || []).length, 2);
+    assert.equal((shown.text.match(/<summary>What the jury reads<\/summary>/g) || []).length, 1);
+    assert.ok(shown.text.indexOf('id="evidence-url"') < shown.text.indexOf('<ul class="posts evidence-list">'));
     assert.doesNotMatch(shown.text.match(/<ul class="posts evidence-list">([\s\S]*?)<\/ul>/)?.[1] || '', /class="face/);
     for (const row of [crossHost, redirected]) {
       assert.ok(shown.text.includes(row.body.split('\n\n').map(text => `<p>${esc(text)}</p>`).join('')));
@@ -804,9 +805,9 @@ test('only accepted, proposed or disputed Bets accept evidence from a reply or f
     const path = `/bets/${terminal.id}/evidence`;
     const shown = await creatorBrowser.get(path);
     assert.equal(shown.status, 200);
-    assert.doesNotMatch(shown.text, /Add evidence<\/button>|name="url"/);
+    assert.doesNotMatch(shown.text, /Add a link<\/button>|name="url"/);
     const refused = await creatorBrowser.submit(path, { side: 'yes', url: `https://example.org/${status}` }, { from: path });
-    assert.match(refused.text, /Evidence is closed\./);
+    assert.match(refused.text, /Links are closed\./);
   }
   for (const [index, status] of ['accepted', 'proposed', 'disputed'].entries()) {
     const bettor = index === 1 ? acceptor : creator;

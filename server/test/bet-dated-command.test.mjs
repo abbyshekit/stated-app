@@ -227,7 +227,7 @@ test('public date composer validates missing and impossible dates, then redirect
   assert.equal(page.status, 200);
   assert.match(page.text, /type="date"[^>]*name="date"(?![^>]*required)/);
   assert.match(page.text, /name="datePreset" value="month" checked/);
-  assert.match(page.text, /role="radiogroup" aria-label="Decide by"/);
+  assert.match(page.text, /role="radiogroup" aria-label="Deadline"/);
   const min = page.text.match(/\bmin="(\d{4}-\d{2}-\d{2})"/)?.[1];
   const max = page.text.match(/\bmax="(\d{4}-\d{2}-\d{2})"/)?.[1];
   assert.equal(min, ymd(new Date(Date.now() + DAY)));
@@ -240,7 +240,7 @@ test('public date composer validates missing and impossible dates, then redirect
 
   for (const preset of ['week', 'month', 'year']) {
     if (!page.text.includes(`name="datePreset" value="${preset}"`)) continue;
-    const preview = page.text.match(new RegExp(`class="date-${preset}"> by ([^<]+)</i>`))?.[1];
+    const preview = page.text.match(new RegExp(`class="date-${preset}"> by ([^<]+)</i>`))?.[1]?.replace(/\u00a0/g, ' ');
     assert.ok(preview, `the ${preset} date is drawn in the reply`);
     const selected = await stack.browser().request('GET', `/bets/new?link=${link}&side=yes&stake=0.1&datePreset=${preset}&date=not-a-date&go=1`);
     assert.equal(selected.status, 303, `${preset} ignores an unused custom date`);
@@ -250,7 +250,7 @@ test('public date composer validates missing and impossible dates, then redirect
   }
   const defaultDate = await stack.browser().request('GET', `/bets/new?link=${link}&side=yes&stake=0.1&go=1`);
   assert.equal(defaultDate.status, 303);
-  assert.equal(new URL(defaultDate.location).searchParams.get('text'), `@statedbot bet 0.1 yes by ${page.text.match(/class="date-month"> by ([^<]+)<\/i>/)[1]}`);
+  assert.equal(new URL(defaultDate.location).searchParams.get('text'), `@statedbot bet 0.1 yes by ${page.text.match(/class="date-month"> by ([^<]+)<\/i>/)[1].replace(/\u00a0/g, ' ')}`);
 
   const missing = await stack.browser().request('GET', `/bets/new?link=${link}&side=yes&stake=0.1&datePreset=custom&go=1`);
   assert.equal(missing.status, 400);

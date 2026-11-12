@@ -8,6 +8,7 @@ import { publishPublicResultEvidence } from '../src/bet-result-evidence.mjs';
 import { runAttestedCheck } from '../src/attested-check.mjs';
 import { sha256 } from '../src/attested-signature.mjs';
 import { dayMonth } from '../src/marked.mjs';
+import { nextBetTime } from '../src/bet-view.mjs';
 import { startStack } from './support/app.mjs';
 import { resetDb } from './support/pg.mjs';
 import { enclaveEnv, enclaveRulingFixture, fakeNearAi } from './support/enclave.mjs';
@@ -121,25 +122,26 @@ test('open evidence leads both pages, with one filled add action only for bettor
   await s.db.query("insert into enclave_plans (statement_id,source,closes_at,record) values ($1,'evidence',$2,'{}')", [statement.id, closes]);
   await addEvidence();
   const [publicPage, bettorPage] = await pages();
-  const line = 'After the deadline a NEAR AI enclave jury reads both sides’ links and decides.';
-  for (const [page, lead] of [[publicPage, 'Both sides are in'], [bettorPage, 'Evidence is open']]) {
-    assert.ok(page.includes(`<p class="lead">${lead}<span>Links close ${clock(closes)} UTC, ${dayMonth(closes)}</span></p>`));
+  const line = 'When links close, a NEAR AI enclave jury reads both sides’ links and decides.';
+  for (const [page, lead] of [[publicPage, 'Both sides are in'], [bettorPage, 'Links are open']]) {
+    assert.ok(page.includes(`<p class="lead">${lead}<span>Links close ${nextBetTime(closes)}</span></p>`));
     assert.ok(page.includes(line));
     assert.equal((page.match(new RegExp(`${clock(closes)} UTC`, 'g')) || []).length, 1);
     assert.doesNotMatch(page, new RegExp(HIDDEN_TEXT));
     assert.doesNotMatch(page, new RegExp(sha256(Buffer.from(HIDDEN_TEXT))));
     assert.doesNotMatch(page, /enclave-ruling\.json/);
   }
-  assert.match(publicPage, /<details class="fold"><summary>Evidence, 1 links<\/summary>/);
+  assert.match(publicPage, /<details class="fold"><summary>Links, 1<\/summary>/);
   assert.match(publicPage, /Bet yes: <a class="tl" href="https:\/\/news\.example\.org\/report"[^>]*>Official report<\/a>, @public_bettor/);
-  assert.doesNotMatch(bettorPage, /<summary>Evidence, \d+ links<\/summary>/);
-  assert.doesNotMatch(publicPage, /Add evidence/);
-  assert.ok(bettorPage.includes(`<a class="pill solid big" href="${path()}/evidence">Add evidence</a>`));
+  assert.match(bettorPage, /<details class="fold"><summary>Links, 1<\/summary>/);
+  assert.doesNotMatch(bettorPage, /class="evidence-row"/);
+  assert.doesNotMatch(publicPage, /Add a link/);
+  assert.ok(bettorPage.includes(`<a class="pill solid big" href="${path()}/evidence">Add a link</a>`));
   assert.match(bettorPage, /<a class="tl"[^>]*><svg class="xmark"[^>]*>[\s\S]*?<\/svg>Post on X<\/a>/);
   assert.doesNotMatch(bettorPage, /<summary>Propose a result<\/summary>|action="[^"\n]*\/propose"/);
-  assert.match((await acceptorBrowser.get(path())).text, /Add evidence/);
+  assert.match((await acceptorBrowser.get(path())).text, /Add a link/);
   const stranger = await s.signIn(s.fakeX.addUser('1903', 'evidence_viewer'));
-  assert.doesNotMatch((await stranger.get(path())).text, /Add evidence/);
+  assert.doesNotMatch((await stranger.get(path())).text, /Add a link/);
   assert.equal((bettorPage.match(/class="primary big"/g) || []).length, 0);
   assert.equal((bettorPage.match(/class="pill solid big"/g) || []).length, 1);
 });
@@ -147,9 +149,9 @@ test('open evidence leads both pages, with one filled add action only for bettor
 test('evidence plans appear with no links, and close without an add link', async () => {
   const closes = new Date(Date.now() + 86400000).toISOString();
   await s.db.query("insert into enclave_plans (statement_id,source,closes_at,record) values ($1,'evidence',$2,'{}')", [statement.id, closes]);
-  assert.match((await creatorBrowser.get(path())).text, /After the deadline a NEAR AI enclave jury reads both sides’ links and decides\./);
+  assert.match((await creatorBrowser.get(path())).text, /When links close, a NEAR AI enclave jury reads both sides’ links and decides\./);
   await s.db.query("update enclave_plans set closes_at=clock_timestamp()-interval '1 minute' where statement_id=$1", [statement.id]);
-  for (const page of await pages()) assert.doesNotMatch(page, /After the deadline a NEAR AI enclave jury reads both sides’ links and decides\.|Add evidence|Evidence, 0 links/);
+  for (const page of await pages()) assert.doesNotMatch(page, /When links close, a NEAR AI enclave jury reads both sides’ links and decides\.|Add a link|Links, 0/);
 });
 
 test('evidence before a plan uses the configured window and only public metadata', async () => {
@@ -168,18 +170,18 @@ test('pending outcomes use the recorded Result time rather than the jury decisio
   const resolvedAt = new Date(Date.parse(bet.resolve_at) + 2 * 3600000 + 17 * 60000).toISOString();
   s.config.play.settleDelaySeconds = 3600;
   await s.db.query('update statements set resolved_at=$2 where id=$1', [statement.id, resolvedAt]);
-  const paysAt = clock(new Date(Date.parse(resolvedAt) + 3600000));
+  const paysAt = nextBetTime(new Date(Date.parse(resolvedAt) + 3600000));
   for (const source of ['coinbase-candles', 'evidence']) {
     for (const outcome of ['yes', 'no']) {
       const record = await insertRuling({ source, outcome });
       assert.notEqual(clock(new Date(Date.parse(record.decidedAt) + 3600000)), paysAt);
-      const from = source === 'coinbase-candles' ? 'Coinbase’s BTC-USD price' : 'the evidence posted';
+      const from = source === 'coinbase-candles' ? 'Coinbase’s BTC-USD price' : 'the links both sides posted';
       await bothContain(`A NEAR AI enclave jury ruled from ${from}.`);
       const favoured = outcome === 'yes' ? '@public_bettor' : '@other_bettor';
       const pendingPages = [...await pages(), (await acceptorBrowser.get(path())).text];
       for (const [index, page] of pendingPages.entries()) {
         const who = (index === 1 && outcome === 'yes') || (index === 2 && outcome === 'no') ? 'You' : favoured;
-        assert.ok(page.includes(`<p class="lead">${who} won<span>Pays out ${paysAt} UTC</span></p>`));
+        assert.ok(page.includes(`<p class="lead">${who} won<span>Pays out ${paysAt}</span></p>`));
         assert.ok(page.includes(`<div class="bet-seats" data-ruling="${outcome}">`));
         assert.match(page, /class="pill solid big"[^>]*>[\s\S]*?Post the result<\/a>/);
         assert.doesNotMatch(page, />Post on X<\/a>/);
@@ -198,7 +200,7 @@ test('settled rulings, corrections and ambiguous refunds render on both pages', 
     for (const outcome of ['yes', 'no']) {
       await setChain('settled', outcome);
       await insertRuling({ source, outcome });
-      await bothContain(source === 'coinbase-candles' ? 'A NEAR AI enclave jury ruled from Coinbase’s BTC-USD price.' : 'A NEAR AI enclave jury ruled from the evidence posted.');
+      await bothContain(source === 'coinbase-candles' ? 'A NEAR AI enclave jury ruled from Coinbase’s BTC-USD price.' : 'A NEAR AI enclave jury ruled from the links both sides posted.');
       await clearRuling();
       await insertRuling({ source, outcome: outcome === 'yes' ? 'no' : 'yes' });
       await bothContain('A reviewer corrected the enclave’s ruling.');
@@ -239,9 +241,9 @@ test('review mode says whether the enclave agrees for either evidence source', a
   await setChain('settled', 'yes');
   for (const source of ['coinbase-candles', 'evidence']) {
     for (const agrees of [true, false]) {
-      await insertRuling({ mode: 'review', source, outcome: agrees ? 'yes' : 'no', agrees: !agrees });
-      const from = source === 'coinbase-candles' ? 'Coinbase’s BTC-USD price' : 'the evidence posted';
-      await bothContain(`NEAR AI signed second opinion: the enclave read ${from} and ${agrees ? 'agrees' : 'disagrees'}.`);
+      const record = await insertRuling({ mode: 'review', source, outcome: agrees ? 'yes' : 'no', agrees: !agrees });
+      const settled = await s.db.one('select settled_at from bilateral_bets where id=$1', [bet.id]);
+      await bothContain(`A Stated reviewer recorded Yes on ${dayMonth(settled.settled_at)}. The jury ${agrees ? 'agreed' : 'disagreed'} on ${dayMonth(record.decidedAt)}.`);
       await clearRuling();
     }
   }
@@ -267,7 +269,7 @@ test('JSON returns the verified record and recipe with the signed-check headers'
   assert.match(body.recipe, /verifyEnclaveRecord/);
   s.config.nearai.apiKey = '';
   assert.equal((await s.browser().get(jsonPath())).status, 200);
-  await bothContain('A NEAR AI enclave jury ruled from the evidence posted.');
+  await bothContain('A NEAR AI enclave jury ruled from the links both sides posted.');
   await s.db.query("update bilateral_bet_events set detail=jsonb_set(detail,'{materialHash}',to_jsonb('tampered'::text)) where bet_id=$1 and kind='enclave_ruling'", [bet.id]);
   assert.equal((await s.browser().get(jsonPath())).status, 404);
   for (const page of await pages()) assert.doesNotMatch(page, /enclave-ruling\.json/);
@@ -281,7 +283,7 @@ test('private Bets expose neither the ruling nor submitted evidence, even to a b
   assert.equal((await s.browser().get(jsonPath())).status, 404);
   const privatePage = await creatorBrowser.get(path());
   assert.equal(privatePage.status, 200);
-  assert.doesNotMatch(privatePage.text, /NEAR AI enclave|enclave_ruling|enclave-ruling\.json|Add evidence|Evidence, 1 links|Official report|news\.example\.org/);
+  assert.doesNotMatch(privatePage.text, /NEAR AI enclave|enclave_ruling|enclave-ruling\.json|Add a link|Links, 1|Official report|news\.example\.org/);
   assert.doesNotMatch(privatePage.text, new RegExp(HIDDEN_TEXT));
 });
 
@@ -312,10 +314,11 @@ test('private evidence read by the jury is counted without exposing its metadata
 
 test('evidence titles are escaped and unsafe stored links cannot become active', async () => {
   await addEvidence({ title: '<img src=x onerror=alert(1)>', url: 'javascript:alert(1)' });
-  for (const page of await pages()) {
-    assert.match(page, /&lt;img src=x onerror=alert\(1\)&gt;/);
-    assert.doesNotMatch(page, /<img src=x|href="javascript:/);
-  }
+  const [publicPage, bettorPage] = await pages();
+  // Both viewers get the same escaped links fold.
+  assert.match(publicPage, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.match(bettorPage, /Links, 1/);
+  for (const page of [publicPage, bettorPage]) assert.doesNotMatch(page, /<img src=x|href="javascript:/);
 });
 
 test('a ruling takes precedence over a verified legacy signed check', async () => {
@@ -339,6 +342,6 @@ test('a ruling takes precedence over a verified legacy signed check', async () =
   await insertRuling();
   for (const page of await pages()) {
     assert.ok(page.includes(`href="${rulingPath()}"`), 'the enclave ruling links its own page');
-    assert.doesNotMatch(page, /attested-check\.json|near\/planner-test read the evidence/);
+    assert.doesNotMatch(page, /attested-check\.json|near\/planner-test read the links/);
   }
 });
