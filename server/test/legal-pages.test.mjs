@@ -34,6 +34,7 @@ test('the Privacy Policy names what is public, each cookie, each recipient and t
   assert.match(words, /stored encrypted with AES-256-GCM/);
   assert.match(words, /not written to the database/);
   assert.match(words, /Stated keeps the link and the terms, not the words/);
+  assert.match(words, /your profile page lists, under your X handle, the published bets you took part in/);
   assert.match(page, /href="\/me\/export\.json"/);
   assert.match(page, /href="\/terms"/);
   assert.doesNotMatch(words, /operator named in the bot|play money|audit/i);
