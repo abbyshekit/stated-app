@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { juryLogos, jurySentence, settlementSentence } from '../src/settlement-view.mjs';
+import { juryLogos, jurySentence, rulingOnEvidence, settlementSentence } from '../src/settlement-view.mjs';
 
 // Copy the public signed corpus; mutate projections, never its signed material.
 const record = JSON.parse(readFileSync(new URL('../../evidence/enclave-ruling-3668aa04.json', import.meta.url))).record;
@@ -51,4 +51,12 @@ test('Court waiting and payment require matching filing, elapsed window and veri
   }
   assert.equal(await settlementSentence(db, config, { ...base, outcome: 'no', payout_completed: true }), 'All three models said yes. A reviewer corrected the enclave’s ruling.');
   assert.equal(record.material.claim, base.claim);
+});
+
+test('home leads only with a ruling made on evidence', () => {
+  assert.equal(rulingOnEvidence({ enclave: { source: 'coinbase-candles', itemCount: 0 } }), true, 'a price ruling');
+  assert.equal(rulingOnEvidence({ enclave: { source: 'submitted', itemCount: 2 } }), true, 'a ruling on posted links');
+  assert.equal(rulingOnEvidence({ enclave: { source: 'submitted', itemCount: 0 } }), false, 'no evidence arrived');
+  assert.equal(rulingOnEvidence({ enclave: null }), false);
+  assert.equal(rulingOnEvidence(null), false);
 });

@@ -39,6 +39,7 @@ import { metrics } from './metrics.mjs';
 import { purgeOrphanXSources, resolveStatement } from './notify.mjs';
 import { canViewProfile, ownerSaveView, profileIsPublic, PUBLIC_SAVE_SQL, publicSaveView } from './privacy.mjs';
 import { privacyPage, termsPage } from './legal-pages.mjs';
+import { rulingOnEvidence } from './settlement-view.mjs';
 import {
   annotate,
   publicSaveOwner,
@@ -887,7 +888,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
     for (const row of hall.rows.filter(bet => bet.status === 'settled' && ['yes', 'no'].includes(bet.outcome))
       .sort((a, b) => new Date(b.settled_at) - new Date(a.settled_at))) {
       const bet = await publicBet(db, row.id, { ...config.play, readRuling: readPublicRuling });
-      if (bet?.enclave && !bet.evidence?.privateItemCount) { settled = bet; break; }
+      if (rulingOnEvidence(bet) && !bet.evidence?.privateItemCount) { settled = bet; break; }
     }
     const dare = !settled && config.play?.enabled
       ? recent.find((row) => betLines.dares.has(String(row.save_id)) && !isPlaceholder(row)) || null : null;

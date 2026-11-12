@@ -37,7 +37,7 @@ test('/court links every valid chain target, puts rejected rulings first and kee
   assert.match(response.body, /A public claim &lt;safe&gt;/);
   assert.ok(response.body.includes(`href="/bets/${published}"`));
   for (const id of [missing, unusual]) assert.ok(!response.body.includes(`href="/bets/${id}"`), 'a bet with no page gets no link');
-  assert.equal(response.body.split('A private bet').length - 1, 2);
+  assert.equal(response.body.split('A bet with no public page').length - 1, 2);
   assert.doesNotMatch(response.body, /not-a-uuid/);
   assert.deepEqual(lookedUp.sort(), [published, missing].sort());
   assert.ok(response.body.indexOf('Voted it down') < response.body.indexOf('Let it stand'));

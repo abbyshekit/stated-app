@@ -97,7 +97,7 @@ export function registerCourtRoutes({ route, db, config, layout, send, notFound,
         const bet = bets.get(target.id);
         const mark = bet?.status === 'settled' && bet.settled_by === 'referee' ? bet.outcome : null;
         return html`<li class="prow court-ruling${p.status === 'Rejected' ? ' rejected' : ''}"><div>
-          <p class="said">${bet?.claim ? html`<a class="tl" href="/bets/${target.id}">${markedClaim(bet.claim, mark)}</a>` : html`<span class="quiet">A private bet</span>`}</p>
+          <p class="said">${bet?.claim ? html`<a class="tl" href="/bets/${target.id}">${markedClaim(bet.claim, mark)}</a>` : html`<span class="quiet">A bet with no public page</span>`}</p>
           <p class="court-action"><b>${councilAction(p.status)}</b></p>
           <p class="meta">${courtEffect(p, target, bet)} ${votes.Approve || 0} for, ${votes.Reject || 0} against</p>
           <p class="court-vote"><a class="tl" href="${accountLink(dao)}" rel="noopener noreferrer">See the vote on NEAR</a></p>

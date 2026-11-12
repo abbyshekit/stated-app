@@ -35,3 +35,10 @@ export async function settlementSentence(db, config, bet) {
   if (bet.payout_completed) sentence += ' The winner was paid.';
   return sentence;
 }
+
+// A ruling made on evidence: a price, or at least one posted link. A ruling that only records that no
+// evidence arrived is a true record, but it does not show what the jury does, so home never leads with it.
+export function rulingOnEvidence(bet) {
+  const ruling = bet?.enclave;
+  return Boolean(ruling) && (ruling.source !== 'submitted' || Number(ruling.itemCount) > 0);
+}
