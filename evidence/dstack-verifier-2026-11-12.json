@@ -235,5 +235,40 @@
    "rtmr1": null,
    "rtmr2": null
   }
+ },
+ "tamperChecks": {
+  "recordedAt": "2026-11-12T08:21:51Z",
+  "report": "hosted ruling c171de89, verdicts[0] model Qwen/Qwen3.8-27B",
+  "what": "The same verifier, given the stored report unchanged and then with one change each.",
+  "results": {
+   "unaltered": {
+    "http": 200,
+    "is_valid": true,
+    "quote_verified": true,
+    "os_image_hash_verified": true,
+    "reason": null
+   },
+   "quoteByteFlipped": {
+    "http": 200,
+    "is_valid": false,
+    "quote_verified": false,
+    "os_image_hash_verified": false,
+    "reason": "Quote verification failed: failed to verify TDX quote: ISV enclave report signature is invalid"
+   },
+   "vmConfigMemoryHalved": {
+    "http": 200,
+    "is_valid": false,
+    "quote_verified": true,
+    "os_image_hash_verified": false,
+    "reason": "OS image hash verification failed: MRs do not match: RTMR0 mismatch: expected=0cb94dba1a9773d741efad49370e1e909557409a904a24a4620b6305651360952cb8111f851b03fc2a35a6c3b7bb05f6, actual=bc122d143ab768565ba5c3774ff5f03a63c89a4df7c1f5ea38d3bd173409d14f8cbdcc36d40e703cccb996a9d9687590"
+   },
+   "composeHashEventChanged": {
+    "http": 200,
+    "is_valid": false,
+    "quote_verified": false,
+    "os_image_hash_verified": false,
+    "reason": "Quote verification failed: RTMR3 mismatch, quoted: bbada8ce4eb49dcf9d67f987f8ce6a3a3a59e8e86374180075aa12b4cdad6b06234acb1e044902cbcac130993ef9bb46, replayed: b08290f016206458c7537de294361c6f60d02bebd643355e9ab7827a94373e65e6cb98e0bdce485a597495a4f94cde1b"
+   }
+  }
  }
 }
