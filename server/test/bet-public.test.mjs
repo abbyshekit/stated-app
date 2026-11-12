@@ -2,6 +2,7 @@
 // NEAR state below is a labelled database fixture, not a live connector check.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { sha256 } from '../src/attested-signature.mjs';
 import { after, before, beforeEach, test } from 'node:test';
 import { createBet } from '../src/bets.mjs';
 import {
@@ -152,6 +153,47 @@ test('anonymous reads are empty until explicit publication consent', async () =>
   await storeFinalizedSnapshot(bet);
   assert.equal(await publicBet(s.db, bet.id), null);
   assert.deepEqual(await recentPublicBets(s.db), []);
+});
+
+test('public evidence includes this Bet and public siblings without disclosing private siblings', async () => {
+  const current = await makeBet();
+  const shared = await makeBet();
+  const hidden = await makeBet(other);
+  const source = await s.db.one(`insert into sources (platform,platform_id,url,text,acquisition)
+    values ('x',$1,'https://example.org/post','Shared post','mention') returning id`, [randomUUID()]);
+  const statement = await s.db.one(`insert into statements (source_id,span,speaker)
+    values ($1,'Shared post','@author') returning id`, [source.id]);
+  const save = await s.db.one(`insert into saves (owner_x_user_id,owner_user_id,statement_id,relation,intake)
+    values ($1,$2,$3,'following','mention') returning id`, [creator.x_user_id, creator.id, statement.id]);
+  for (const sibling of [current, shared, hidden]) {
+    await s.db.query('update bilateral_bets set source_save_id=$2 where id=$1', [sibling.id, save.id]);
+  }
+  for (const sibling of [current, shared]) {
+    await storeFinalizedSnapshot(sibling);
+    await publishBet(s.db, creator, sibling.id);
+  }
+  for (const [sibling, user, label] of [[current, creator, 'current'], [shared, creator, 'shared'], [hidden, other, 'private']]) {
+    const body = `${label} evidence body`;
+    await s.db.query(`insert into bet_evidence (statement_id,bet_id,user_id,side,url,final_url,title,body,body_hash,via)
+      values ($1,$2,$3,'yes',$4,$5,$6,$7,$8,'page')`,
+    [statement.id, sibling.id, user.id, `https://posted.example.org/${label}`,
+      `https://final.example.net/${label}`, `${label} evidence title`, body, sha256(Buffer.from(body))]);
+  }
+  let projection = await publicBet(s.db, current.id);
+  assert.deepEqual(projection.evidence.items.map(item => item.title), ['current evidence title', 'shared evidence title']);
+  assert.equal(projection.evidence.privateItemCount, 0, 'unread private links are not counted');
+  assert.equal(projection.evidence.items[0].url, 'https://final.example.net/current');
+  assert.equal(projection.evidence.items[0].postedUrl, 'https://posted.example.org/current');
+  assert.doesNotMatch(JSON.stringify(projection.evidence), /private evidence|\/private|public_other/);
+  const shown = await s.browser().get(`/bets/${current.id}`);
+  assert.equal(shown.status, 200);
+  assert.match(shown.text, /href="https:\/\/final\.example\.net\/current"/);
+  assert.match(shown.text, /<span class="quiet">final\.example\.net<\/span>/);
+  assert.match(shown.text, /<span class="quiet">posted as posted\.example\.org<\/span>/);
+  assert.doesNotMatch(shown.text, /private evidence|\/private|public_other|href="https:\/\/posted\.example\.org/);
+  await withdrawBetPublication(s.db, creator, shared.id);
+  projection = await publicBet(s.db, current.id);
+  assert.deepEqual(projection.evidence.items.map(item => item.title), ['current evidence title']);
 });
 
 test('private-profile creator can publish a narrow projection without private account data', async () => {

@@ -9,6 +9,7 @@ import { createBet } from '../src/bets.mjs';
 import { publishBet } from '../src/bet-public.mjs';
 import { parseBetCommand } from '../src/reply-bets.mjs';
 import { completeSetup, signInFromX } from '../src/store.mjs';
+import { clearOembedCache } from '../src/xtext.mjs';
 
 let s;
 let plain;
@@ -99,7 +100,7 @@ test('the Make a bet page is public, needs no sign-in and sets nothing in motion
   assert.deepEqual(after, before);
 });
 
-test('a chosen post asks for a side, with nothing chosen for the visitor but the smallest stake', async () => {
+test('a chosen post asks for a side with the smallest stake and a month chosen', async () => {
   const link = encodeURIComponent('https://x.com/someone/status/1234567890123456789');
   const page = await s.browser().get(`/bets/new?link=${link}`);
   assert.equal(page.status, 200);
@@ -107,26 +108,62 @@ test('a chosen post asks for a side, with nothing chosen for the visitor but the
   assert.match(page.text, /name="side" value="no" required>/);
   assert.doesNotMatch(page.text, /name="side" value="(?:yes|no)" required checked/, 'no side is picked for them');
   assert.match(page.text, /name="stake" value="0\.1" checked/);
+  assert.match(page.text, /name="datePreset" value="month" checked/);
+  assert.match(page.text, /<label for="date-week">1 week<\/label>/);
+  assert.match(page.text, /<label for="date-month">1 month<\/label>/);
+  if (page.text.includes('id="date-year"')) {
+    assert.match(page.text, /<label for="date-year">31 Dec<\/label>/);
+    assert.match(page.text, /class="date-year"/);
+  }
+  assert.match(page.text, /<label for="date-custom">Other<\/label>/);
+  for (const label of ['Your side', 'Stake each, in test NEAR', 'Decide by']) {
+    assert.match(page.text, new RegExp(`<p class="meta stake-label">${label}</p>\\s*<div class="seg line`));
+  }
+  assert.match(page.text, /type="date" id="bet-date" name="date" value="" min="\d{4}-\d{2}-\d{2}" max="\d{4}-\d{2}-\d{2}"/);
   assert.match(page.text, /<span class="need">Choose yes or no<\/span><span class="go">[\s\S]*?Reply on X<\/span><\/button>/, 'the button asks for a side until one is chosen');
   assert.doesNotMatch(page.text, /href="\/signin/, 'nothing on this path offers a sign-in it does not need');
   assert.match(page.text, /Replying to @someone</, 'the handle in the pasted link names whose post it is');
-  assert.match(page.text, /<p class="said cmd"><b>@statedbot<\/b> bet <i class="k0">0\.1<\/i><i class="k1">0\.25<\/i><i class="k2">0\.5<\/i><i class="k3">1<\/i> <i class="yes">yes<\/i><i class="no">no<\/i><i class="unset">yes or no<\/i><\/p>/,
+  assert.match(page.text, /<p class="said cmd"><b>@statedbot<\/b> bet <i class="k0">0\.1<\/i><i class="k1">0\.25<\/i><i class="k2">0\.5<\/i><i class="k3">1<\/i> <i class="yes">yes<\/i><i class="no">no<\/i><i class="unset">yes or no<\/i>[\s\S]*class="date-week"[\s\S]*class="date-month"[\s\S]*class="date-custom"[\s\S]*<\/p>/,
     'the reply is drawn with every choice the stylesheet can show');
   const anonymousLink = await s.browser().get(`/bets/new?link=${encodeURIComponent('https://x.com/i/web/status/1234567890123456789')}`);
-  assert.match(anonymousLink.text, /Stated has not read this post\. Check its date before you reply\./);
+  assert.match(anonymousLink.text, /Pick a date for this post\./);
   assert.match(page.text, /<a class="tl unread" href="https:\/\/x\.com\/i\/web\/status\/1234567890123456789" rel="noopener noreferrer">x\.com\/someone\/status\/1234567890123456789<\/a>/, 'an unread post is named by its own link and can be opened');
   assert.equal(filled(page.text).length, 1);
 });
 
+test('a pasted public post is shown from oEmbed with escaped author and words, and unavailable posts keep the link fallback', async () => {
+  const author = s.fakeX.addUser('83001', 'previewauthor', { name: '<img src=x onerror=alert(1)>' });
+  const post = s.fakeX.post(author.id, '<script>alert("x")</script> & a claim');
+  const link = encodeURIComponent(`https://x.com/i/web/status/${post.id}`);
+  clearOembedCache();
+  const before = s.fakeX.calls.filter((call) => call.path === '/oembed').length;
+  const page = await s.browser().get(`/bets/new?link=${link}`);
+  assert.match(page.text, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.match(page.text, /&lt;script&gt;alert\(&quot;x&quot;\)&lt;\/script&gt; &amp; a claim/);
+  assert.match(page.text, /<span>@previewauthor<\/span>/);
+  assert.doesNotMatch(page.text, /<script>alert\("x"\)<\/script>|<img src=x/);
+  assert.equal(s.fakeX.calls.filter((call) => call.path === '/oembed').length, before + 1);
+  const unavailable = await s.browser().get('/bets/new?link=' + encodeURIComponent('https://x.com/i/web/status/1999999999999999999'));
+  assert.match(unavailable.text, /Pick a date for this post\./);
+  assert.match(unavailable.text, /x\.com\/i\/web\/status\/1999999999999999999/);
+});
+
 test('a pasted post link opens the reply on X with the command typed', async () => {
   const link = encodeURIComponent('https://x.com/someone/status/1234567890123456789?s=20');
-  const res = await s.browser().request('GET', `/bets/new?link=${link}&side=no&stake=0.25&go=1`);
+  const missing = await s.browser().request('GET', `/bets/new?link=${link}&side=no&stake=0.25&datePreset=custom&go=1`);
+  assert.equal(missing.status, 400);
+  assert.equal(missing.location, null);
+  assert.match(missing.text, /<p class="err" role="alert">Choose a date from tomorrow to a year away\.<\/p>/);
+  const date = new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10);
+  const res = await s.browser().request('GET', `/bets/new?link=${link}&side=no&stake=0.25&date=${date}&go=1`);
   assert.equal(res.status, 303);
   const to = new URL(res.location);
   assert.equal(to.origin, 'https://x.com');
   assert.equal(to.pathname, '/intent/tweet');
   assert.equal(to.searchParams.get('in_reply_to'), '1234567890123456789');
-  assert.equal(to.searchParams.get('text'), '@statedbot bet 0.25 no');
+  const chosen = new Date(`${date}T00:00:00Z`);
+  const dateText = `${chosen.getUTCDate()} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][chosen.getUTCMonth()]} ${chosen.getUTCFullYear()}`;
+  assert.equal(to.searchParams.get('text'), `@statedbot bet 0.25 no by ${dateText}`);
   assert.deepEqual([...to.searchParams.keys()].sort(), ['in_reply_to', 'text']);
 });
 

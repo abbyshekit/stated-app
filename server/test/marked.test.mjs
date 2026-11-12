@@ -1,7 +1,8 @@
 // The Marked presentation helpers: how long until we find out, and the two-seat Bet block.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { betBlock, betLead, betState, dayMonth, timeLeft } from '../src/marked.mjs';
+import { betLead, betState, dayMonth, timeLeft } from '../src/marked.mjs';
+import { betBlock } from '../src/bet-view.mjs';
 
 const NOW = Date.UTC(2026, 10, 10, 15, 0, 0);
 const STAKE = '100000000000000000000000'; // 0.1 test NEAR
@@ -90,15 +91,28 @@ test('betBlock: an agreed result rings the winner in ink; only a Prediction that
   assert.match(agreed, /<div class="versus agreed">/);
   assert.match(agreed, /<div class="seat won">[^]*?<b>@priya<\/b><span>bet yes<\/span><\/div>/);
   assert.match(agreed, /<div class="seat lost">[^]*?<b>@oskar<\/b><span>bet no<\/span><\/div>/);
-  assert.match(agreed, /<b>0\.2<\/b><small>test NEAR<\/small><small>credited<\/small>/);
+  assert.match(agreed, /<b>0\.2<\/b><small>test NEAR<\/small><small>pot<\/small>/);
   assert.match(text(betBlock(settled, { cameTrue: true })), /<div class="versus">/);
   const called = text(betBlock(bet({ status: 'settled', outcome: 'void', acceptor_username: 'oskar' })));
   assert.doesNotMatch(called, /seat won|seat lost/);
   assert.match(called, /<small>escrow closed<\/small>/);
+  assert.match(called, /<span>Agreed void<\/span>/);
   assert.doesNotMatch(called, /Stakes returned|<small>returned<\/small>/);
+  for (const method of [{ settled_by: 'referee' }, { chain_state: { resolution: { method: 'referee' } } }]) {
+    const voided = bet({ status: 'settled', outcome: 'void', acceptor_username: 'oskar', ...method });
+    assert.match(text(betBlock(voided)), /<span>Stakes returned<\/span>/);
+    assert.doesNotMatch(text(betBlock(voided)), /Agreed void|seat won|seat lost/);
+    assert.doesNotMatch(text(betBlock(voided, { lead: false })), /Stakes returned|class="lead"/);
+  }
 });
 
 test('betBlock escapes names and never prints a long wallet whole', () => {
+  for (const username of ['alexandermorgan', 'alex_morgan_abc']) {
+    const long = text(betBlock(bet({ creator_username: username })));
+    assert.ok(long.includes(`<b class="long-handle">@${username}</b>`));
+    assert.doesNotMatch(long, /<wbr>/);
+  }
+  assert.match(text(betBlock(bet({ creator_username: 'abcdefghijkl' }))), /<b>@abcdefghijkl<\/b>/);
   const out = text(betBlock(bet({ creator_username: null, creator_wallet: 'a'.repeat(64) })));
   assert.match(out, /<b>aaaaaaaaa…aaaaaaa<\/b>/);
   const hostile = text(betBlock(bet({ creator_username: '<img src=x>' })));

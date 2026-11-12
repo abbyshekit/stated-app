@@ -174,6 +174,15 @@ function firstDeadline(text, publishedAt) {
     t = `${t.slice(0, match.index)}${' '.repeat(match[0].length)}${t.slice(match.index + match[0].length)}`;
   }
 
+  // Relative reply dates use the reply's UTC day, rather than the source post's day.
+  if ((m = t.match(/\b(by|before)\s+(tomorrow|sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/i))) {
+    const name = m[2].toLowerCase();
+    const weekday = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'].indexOf(name);
+    const days = name === 'tomorrow' ? 1 : (weekday - pub.getUTCDay() + 7) % 7;
+    const at = endOfDayUtc(py, pm, pub.getUTCDate() + days - (m[1].toLowerCase() === 'before' ? 1 : 0));
+    return found(m, at);
+  }
+
   // Mask invalid explicit dates so a later, looser rule cannot reinterpret them.
   const datePatterns = [
     new RegExp(`\\b(?:by|before|on|until|through|no later than)\\s+${MONTH_RE}\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s+(\\d{4}))?\\b`, 'gi'),

@@ -1,5 +1,23 @@
 import { isNamedAccount, useNetwork } from './near-network.mjs';
 
+// Enclave rulings decide a Result with no human step, so they run only when asked
+// for in so many words (STATED_ENCLAVE_RULINGS=1) and a key is set. A ruling is
+// decisive only when every listed model gives the same answer at this confidence.
+function nearaiConfig(env, list) {
+  const apiKey = env.NEARAI_API_KEY || '';
+  const model = env.NEARAI_MODEL || 'Qwen/Qwen3.8-27B';
+  const models = list(env.NEARAI_RULING_MODELS);
+  const confidence = Number(env.NEARAI_RULING_MIN_CONFIDENCE ?? 0.8);
+  return {
+    apiKey,
+    baseUrl: String(env.NEARAI_BASE_URL || 'https://cloud-api.near.ai/v1').replace(/\/$/, ''),
+    model,
+    rulings: Boolean(apiKey) && env.STATED_ENCLAVE_RULINGS === '1',
+    rulingModels: models.length ? models : [model],
+    rulingMinConfidence: Number.isFinite(confidence) && confidence > 0 && confidence <= 1 ? confidence : 0.8,
+  };
+}
+
 export function loadConfig(env = process.env) {
   const port = Number(env.PORT || 8080);
   // One process serves one NEAR network; loading a configuration selects it.
@@ -11,11 +29,7 @@ export function loadConfig(env = process.env) {
     port,
     baseUrl,
     databaseUrl: env.DATABASE_URL || '',
-    nearai: {
-      apiKey: env.NEARAI_API_KEY || '',
-      baseUrl: String(env.NEARAI_BASE_URL || 'https://cloud-api.near.ai/v1').replace(/\/$/, ''),
-      model: env.NEARAI_MODEL || 'Qwen/Qwen3.8-27B',
-    },
+    nearai: nearaiConfig(env, list),
     demoBetId: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(env.STATED_DEMO_BET_ID || '') ? env.STATED_DEMO_BET_ID.toLowerCase() : null,
     sessionDays: Number(env.STATED_SESSION_DAYS || 30),
     tokenKey: env.STATED_TOKEN_KEY || '',
@@ -48,6 +62,8 @@ export function loadConfig(env = process.env) {
       repliesPerDay: Number(env.STATED_PLAY_REPLIES_PER_DAY || 150),
       // A recorded Result waits this long before the referee acts on it, so a slip can be corrected first.
       settleDelaySeconds: Number(env.STATED_PLAY_SETTLE_DELAY_SECONDS ?? 600),
+      // After the deadline the two bettors have this long to offer evidence before the enclave jury rules.
+      evidenceWindowSeconds: Number(env.STATED_EVIDENCE_WINDOW_SECONDS ?? 86400),
     },
     // A Bet's page can say what its stake would cost from another chain, as a dry-run quote from NEAR Intents.
     // On mainnet, STATED_INTENTS_DEPOSITS=1 also lets a person pay NEAR into their account from another

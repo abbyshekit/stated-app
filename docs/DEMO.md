@@ -16,7 +16,7 @@ Open Stated at `http://127.0.0.1:4310` and simulated X at `http://127.0.0.1:4311
 
 ### Practice a live Bet
 
-Open `http://127.0.0.1:4310/demo-challenge` after the Docker stack prints `Ready:`. Start signed out. Choose **Fund Bob's offer**, then **Stake 0.1 test NEAR on Yes** when the offer finalizes. **Record test result** lets the simulated referee record Yes early for this fixture. Refresh until the payout appears. The matching stake and payout links open the real NEAR testnet transactions. The practice path uses one round per local demo data set. [Verified practice run](../evidence/practice-judge-testnet-20261111.json)
+Open `http://127.0.0.1:4310/demo-challenge` after the Docker stack prints `Ready:`. Start signed out. Choose **Fund Bob's offer**, then **Stake 0.1 test NEAR on Yes** when the offer finalizes. **Record test result** lets the simulated referee record Yes early for this fixture; this practice shortcut demonstrates the reviewer path with enclave rulings off. Refresh until the payout appears. The matching stake and payout links open the real NEAR testnet transactions. The practice path uses one round per local demo data set. [Verified practice run](../evidence/practice-judge-testnet-20261111.json)
 
 Without Docker, use Node 22.9+ and PostgreSQL 15+ tools on PATH.
 
@@ -33,6 +33,8 @@ SEED_APP=http://127.0.0.1:4310 SEED_X=http://127.0.0.1:4311 node server/dev/seed
 ```
 
 The simulated sign-in page offers Alice, Bob, Carol and the reviewer. The non-Docker command above starts the prediction flow. To enable reply Bets, use the testnet escrow and play settings from `compose.yaml`. Reseed a temporary database after restarting.
+
+The walkthrough uses human-recorded Results with enclave rulings off. With `STATED_ENCLAVE_RULINGS=1` and a NEAR AI Cloud key, reply Bets follow [Who decides the result](../README.md#who-decides-the-result): Coinbase candles for price claims, or bettor-submitted links when the evidence window closes, with at least two enclave models that must all agree at the confidence threshold for Yes or No; reviewers can correct a Result before payout.
 
 ## Use a funded testnet treasury
 

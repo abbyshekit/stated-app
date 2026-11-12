@@ -5,6 +5,7 @@ import { baseDecode } from 'near-api-js';
 import { isAccount } from './near-network.mjs';
 import { idOf, UserError } from './store.mjs';
 import { readPublicResultEvidence } from './bet-result-evidence.mjs';
+import { readEnclaveRuling } from './enclave-ruling.mjs';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const HASH = /^[a-f0-9]{64}$/;
@@ -12,7 +13,7 @@ const STATUSES = new Set(['offered', 'accepted', 'proposed', 'disputed', 'settle
 const OUTCOMES = new Set(['yes', 'no', 'void']);
 const STALE_AFTER_MS = 5 * 60 * 1000;
 
-// No sources, saves, annotations, proposal notes or request metadata are read.
+// The base projection excludes source content, annotations and proposal notes.
 const SELECT = `select b.id, b.creator_user_id, b.acceptor_user_id, b.invited_user_id,
   b.claim, b.criteria, b.evidence_source_url, b.creator_side, b.stake_yocto,
   b.accept_by, b.resolve_at, b.created_at, b.accepted_at, b.settled_at,
@@ -107,6 +108,7 @@ function view(row) {
     && (!row.invited_user_id || String(row.invited_user_id) === String(row.acceptor_user_id));
   return {
     id: row.id,
+    terms_hash: row.terms_hash,
     claim: row.claim,
     criteria: row.criteria,
     evidence_source_url: row.evidence_source_url,
@@ -137,10 +139,54 @@ function view(row) {
   };
 }
 
-export async function readPublicBet(tx, id) {
+// DESIGN.md: publication never grants access to another Bet's private evidence.
+export async function evidenceForBet(tx, statementId, betId, viewerId = null) {
+  return tx.many(`select e.*, u.x_username from bet_evidence e
+    join users u on u.id=e.user_id join bilateral_bets b on b.id=e.bet_id
+    where e.statement_id=$1 and (e.bet_id=$2
+      or b.creator_user_id=$3 or b.acceptor_user_id=$3
+      or exists (select 1 from bilateral_bet_publications p
+        where p.bet_id=b.id and p.creator_user_id=b.creator_user_id and p.withdrawn_at is null))
+    order by e.at, e.id`, [statementId, betId, viewerId]);
+}
+
+export async function readPublicBet(tx, id, { evidenceWindowSeconds = 86400 } = {}) {
   const row = await tx.one(`${SELECT} where b.id=$1 and p.withdrawn_at is null for share of b,p`, [id]);
   if (!row) return null;
   const bet = view(row);
+  // DESIGN.md: only published Bets disclose the verified call and submitted links.
+  // Full source text belongs in the signed JSON, never in this page projection.
+  const record = await readEnclaveRuling(tx, id);
+  bet.enclave = record ? {
+    mode: record.mode, outcome: record.outcome, agrees: record.agrees,
+    models: record.verdicts.map(verdict => verdict.model), reason: record.verdicts[0].parsed.reason,
+    source: record.evidence.kind, product: record.plan.parsed.product || null,
+    itemCount: record.evidence.kind === 'submitted' ? record.evidence.items.length : 0,
+    decidedAt: record.decidedAt, minConfidence: record.minConfidence,
+  } : null;
+  const post = await tx.one(`select s.statement_id, st.resolved_at, p.source, p.closes_at
+    from bilateral_bets b join saves s on s.id=b.source_save_id
+    join statements st on st.id=s.statement_id
+    left join enclave_plans p on p.statement_id=s.statement_id where b.id=$1`, [id]);
+  bet.result_recorded_at = timestamp(post?.resolved_at);
+  const rows = post ? await evidenceForBet(tx, post.statement_id, id) : [];
+  const submitted = record?.evidence.kind === 'submitted' ? record.evidence : null;
+  const visibleIds = new Set(rows.map(item => String(item.id)));
+  const privateItemCount = (submitted?.items || []).filter(item => !visibleIds.has(String(item.id))).length;
+  if (post?.source === 'evidence' || rows.length || submitted) {
+    const closesAt = timestamp(post?.closes_at || submitted?.closesAt
+      || new Date(new Date(bet.resolve_at).getTime() + evidenceWindowSeconds * 1000));
+    bet.evidence = {
+      closesAt,
+      privateItemCount,
+      open: Boolean(!record && bet.accepted_at && row.acceptor_user_id && closesAt
+        && ['accepted', 'proposed', 'disputed'].includes(bet.status)
+        && new Date(bet.accepted_at).getTime() <= new Date(row.read_at).getTime()
+        && new Date(row.read_at).getTime() < new Date(closesAt).getTime()),
+      items: rows.map(item => ({ side: item.side, url: item.final_url || item.url, postedUrl: item.url,
+        title: item.title || '', by: item.x_username || null, at: timestamp(item.at) })),
+    };
+  }
   if (bet.settled_by !== 'referee' || !['yes', 'no'].includes(bet.outcome)) return bet;
 
   // This call resolves one Bet. A wallet withdrawal may combine credit from several Bets.
@@ -157,9 +203,9 @@ export async function readPublicBet(tx, id) {
   return bet;
 }
 
-export async function publicBet(db, id) {
+export async function publicBet(db, id, options) {
   const ref = reference(id);
-  return db.tx((tx) => readPublicBet(tx, ref));
+  return db.tx((tx) => readPublicBet(tx, ref, options));
 }
 
 export async function recentPublicBets(db, limit = 20) {

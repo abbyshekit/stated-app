@@ -552,3 +552,68 @@ create table if not exists play_deposits (
 );
 create index if not exists play_deposits_person_idx on play_deposits (x_user_id, created_at desc);
 create index if not exists play_deposits_open_idx on play_deposits (created_at) where finished_at is null;
+
+-- Enclave ruling attempts: at most three per statement (a ruling) or per Bet (a
+-- review), five minutes apart. A row is written before inference starts, so it
+-- also keeps two workers from ruling on the same thing at once.
+create table if not exists enclave_ruling_attempts (
+  id bigserial primary key,
+  mode text not null check (mode in ('ruling', 'review')),
+  statement_id bigint references statements(id) on delete cascade,
+  bet_id uuid references bilateral_bets(id),
+  reason text not null default 'running',
+  at timestamptz not null default now(),
+  check ((mode = 'ruling' and statement_id is not null and bet_id is null)
+    or (mode = 'review' and bet_id is not null and statement_id is null))
+);
+create index if not exists enclave_ruling_attempts_statement_idx on enclave_ruling_attempts (statement_id, at) where statement_id is not null;
+create index if not exists enclave_ruling_attempts_bet_idx on enclave_ruling_attempts (bet_id, at) where bet_id is not null;
+
+-- Evidence a bettor offers for a post's Result, by reply or on the Bet's page. The page's
+-- text is read once, when it is offered, and kept with its hash: the jury reads exactly this.
+create table if not exists bet_evidence (
+  id bigserial primary key,
+  statement_id bigint not null references statements(id) on delete cascade,
+  bet_id uuid not null references bilateral_bets(id),
+  user_id bigint not null references users(id),
+  side text not null check (side in ('yes', 'no')),
+  url text not null check (length(url) between 9 and 600),
+  final_url text,
+  title text,
+  body text not null check (length(body) between 1 and 6000),
+  body_hash text not null,
+  via text not null check (via in ('reply', 'page')),
+  event_id text,
+  at timestamptz not null default clock_timestamp(),
+  unique (statement_id, user_id, url)
+);
+create index if not exists bet_evidence_statement_idx on bet_evidence (statement_id, id);
+
+-- Where a post's Result will come from, decided once by the enclave when the deadline passes:
+-- a Coinbase price, or evidence the bettors offer until closes_at. prompted_at is when the
+-- bot asked for that evidence in the thread.
+create table if not exists enclave_plans (
+  statement_id bigint primary key references statements(id) on delete cascade,
+  source text not null check (source in ('coinbase-candles', 'evidence')),
+  closes_at timestamptz,
+  record jsonb not null,
+  prompted_at timestamptz,
+  at timestamptz not null default clock_timestamp()
+);
+
+-- A bettor's reply offering evidence ("yes <link>"), queued when the mention is read and
+-- worked off by the play worker, which is where the page is fetched.
+create table if not exists evidence_commands (
+  event_id text primary key,
+  x_user_id text not null,
+  x_username text,
+  side text not null check (side in ('yes', 'no')),
+  url text not null,
+  target_ref text,
+  status text not null default 'queued' check (status in ('queued', 'done', 'refused', 'failed')),
+  detail text,
+  attempts integer not null default 0,
+  created_at timestamptz not null default clock_timestamp(),
+  updated_at timestamptz not null default clock_timestamp()
+);
+create index if not exists evidence_commands_queue_idx on evidence_commands (created_at) where status = 'queued';

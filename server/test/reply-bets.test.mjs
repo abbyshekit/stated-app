@@ -9,6 +9,9 @@ import { FakeNear } from './support/fake-near.mjs';
 import { tick } from '../src/worker.mjs';
 import { accountNameFor, claimPlayAccount, playAccountFor, refillTreasury, refereeId, treasury, yocto } from '../src/play.mjs';
 import { betReplies, parseBetCommand, runBetCommands, settleReplyBets } from '../src/reply-bets.mjs';
+import { ensureJury, readEnclaveRuling } from '../src/enclave-ruling.mjs';
+import { resolveStatement } from '../src/notify.mjs';
+import { enclaveRulingFixture } from './support/enclave.mjs';
 
 const NEXT = new Date().getUTCFullYear() + 1;
 let s; let near; let X; let adminB;
@@ -24,6 +27,15 @@ const resolve = async (post, outcome, note) => {
   assert.equal(res.status, 200);
 };
 const balance = async (user) => BigInt(await near.chain.balance((await playAccountFor(s.db, user.id)).account_id));
+
+// Move a funded fixture's deadline on both sides of chain verification.
+async function moveDeadline(id, at = Date.now()) {
+  const acceptBy = new Date(at - 60000);
+  const resolveAt = new Date(at);
+  await s.db.query('update bilateral_bets set accept_by=$2, resolve_at=$3 where id=$1', [id, acceptBy, resolveAt]);
+  Object.assign(near.bets.get(id), { accept_by_ns: (BigInt(acceptBy.getTime()) * 1000000n).toString(),
+    resolve_at_ns: (BigInt(resolveAt.getTime()) * 1000000n).toString() });
+}
 
 // A stand-in for NEAR Intents quotes, so the Bet page can be read with them on, off and failing.
 const quoted = { mode: 'ok', calls: [] };
@@ -230,6 +242,7 @@ test('when the Result is recorded, the referee settles on NEAR, the winner is pa
   const before = await balance(X.lena);
   assert.deepEqual(await settle(), { settled: 0, reclaimed: 0, errors: 0 }, 'nothing settles before there is a Result');
   await resolve(post, 'yes', 'Release 2.0.0 is tagged.');
+  await moveDeadline(betId);
   assert.deepEqual(await settle(), { settled: 1, reclaimed: 0, errors: 0 });
   const chain = near.bets.get(betId);
   assert.equal(chain.status, 'settled');
@@ -521,6 +534,7 @@ test('a crash after the transaction was sent, but before it was recorded, finish
 test('the referee waits out the settlement delay, rules from the Result as it stands, and a payout that fails is retried', async () => {
   const platinum = [...s.fakeX.posts.values()].find((post) => post.text.startsWith('Platinum tops'));
   const { id } = await one(`select id from bilateral_bets where claim like 'Platinum tops%'`);
+  await moveDeadline(id);
   await resolve(platinum, 'no', 'Closed below.');
   const slow = { ...s.config, play: { ...s.config.play, settleDelaySeconds: 3600 } };
   assert.deepEqual(await settleReplyBets(s.db, slow, near.chain, { fetchImpl: near.fetchImpl }), { settled: 0, reclaimed: 0, errors: 0 }, 'a fresh Result is not acted on yet');
@@ -557,4 +571,221 @@ test('the referee waits out the settlement delay, rules from the Result as it st
     assert.match(paid.text, /Paid to your account/);
     assert.doesNotMatch(paid.text, /Your payout is being sent|Withdraw tokens|Resume withdrawal/);
   } finally { near.chain.call = realCall; }
+});
+
+test('a jury Result settles only Bets with their own matching ruling; a human Result still settles the others', async () => {
+  const source = s.fakeX.post(X.lena.id, `The registry will publish its decision before March 1, ${NEXT}.`);
+  const makers = [s.fakeX.addUser('7401', 'jury_first'), s.fakeX.addUser('7402', 'jury_second')];
+  const taker = s.fakeX.addUser('7403', 'jury_taker');
+  const bets = [];
+  for (const creator of makers) {
+    const command = tag(creator, '@statedbot bet 0.1 yes', source);
+    await tick(s.db, s.config, s.x);
+    assert.deepEqual(await run(), { done: 1, refused: 0, retry: 0, failed: 0 });
+    const offer = await one('select bet_id from bet_commands where event_id=$1', [command.id]);
+    tag(taker, '@statedbot take', command);
+    await tick(s.db, s.config, s.x);
+    assert.deepEqual(await run(), { done: 1, refused: 0, retry: 0, failed: 0 });
+    await moveDeadline(offer.bet_id);
+    bets.push(await one('select * from bilateral_bets where id=$1', [offer.bet_id]));
+  }
+  const [ruled, unruled] = bets;
+  const { statement_id: statementId } = await one('select statement_id from saves where id=$1', [ruled.source_save_id]);
+  assert.equal((await one('select statement_id from saves where id=$1', [unruled.source_save_id])).statement_id, statementId);
+  const jury = await ensureJury(s.db);
+  const recordFor = (bet, outcome) => enclaveRulingFixture({ outcome, material: {
+    claim: bet.claim, madeAt: source.created_at, deadline: bet.resolve_at, postUrl: bet.evidence_source_url,
+    bets: [{ id: bet.id, termsHash: bet.terms_hash }],
+  } });
+  await s.db.query(`insert into bilateral_bet_events (bet_id,actor_user_id,kind,detail)
+    values ($1,$2,'enclave_ruling',$3)`, [ruled.id, jury, recordFor(ruled, 'yes')]);
+  assert.equal((await readEnclaveRuling(s.db, ruled.id))?.outcome, 'yes', 'the fixture is a verified ruling about this Bet');
+  await resolveStatement(s.db, { statementId, outcome: 'yes', url: 'https://example.org/jury',
+    note: 'The enclave jury found the published decision.', reviewer: { id: jury }, outcomeAt: new Date().toISOString() });
+
+  assert.deepEqual(await settle(), { settled: 1, reclaimed: 0, errors: 0 });
+  assert.equal((await one('select status from bilateral_bets where id=$1', [ruled.id])).status, 'settled');
+  assert.equal((await one('select status from bilateral_bets where id=$1', [unruled.id])).status, 'accepted');
+  assert.equal(near.bets.get(unruled.id).status, 'accepted');
+  assert.equal(await one(`select id from bilateral_bet_events where bet_id=$1 and kind='enclave_ruling'`, [unruled.id]), null);
+  assert.equal(near.sent.filter((request) => request.method === 'referee_resolve' && request.args.id === unruled.id).length, 0);
+
+  await s.db.query(`insert into bilateral_bet_events (bet_id,actor_user_id,kind,detail)
+    values ($1,$2,'enclave_ruling',$3)`, [unruled.id, jury, recordFor(unruled, 'no')]);
+  assert.equal((await readEnclaveRuling(s.db, unruled.id))?.outcome, 'no');
+  await s.db.query(`update bilateral_bets set settle_checked_at=clock_timestamp()-interval '2 minutes' where id=$1`, [unruled.id]);
+  assert.deepEqual(await settle(), { settled: 0, reclaimed: 0, errors: 0 }, 'a verified but conflicting ruling also leaves the Bet open');
+
+  await resolve(source, 'yes', 'A reviewer independently confirmed the published decision.');
+  await s.db.query(`update bilateral_bets set settle_checked_at=clock_timestamp()-interval '2 minutes' where id=$1`, [unruled.id]);
+  assert.deepEqual(await settle(), { settled: 1, reclaimed: 0, errors: 0 }, 'a human Result keeps the existing settlement behavior');
+  assert.equal(near.bets.get(unruled.id).resolution.outcome, 'yes');
+});
+
+async function settlementFixture(t, { future = false, jury = false, ruling = true, outcome = 'yes' } = {}) {
+  const source = s.fakeX.post(X.lena.id, `The registry will publish a new decision before March 1, ${NEXT}.`);
+  const maker = s.fakeX.users.get('7401');
+  const taker = s.fakeX.users.get('7403');
+  const command = tag(maker, '@statedbot bet 0.1 yes', source);
+  await tick(s.db, s.config, s.x);
+  assert.equal((await run()).done, 1);
+  const { bet_id: id } = await one('select bet_id from bet_commands where event_id=$1', [command.id]);
+  tag(taker, '@statedbot take', command);
+  await tick(s.db, s.config, s.x);
+  assert.equal((await run()).done, 1);
+  t.after(() => s.db.query(`update bilateral_bets set settle_checked_at=clock_timestamp()+interval '1 day' where id=$1`, [id]));
+  await moveDeadline(id, Date.now() + (future ? 3600000 : -1000));
+  const bet = await one('select * from bilateral_bets where id=$1', [id]);
+  const { statement_id: statementId } = await one('select statement_id from saves where id=$1', [bet.source_save_id]);
+  const human = await one('select id from users where x_user_id=$1', ['900']);
+  const reviewer = jury ? { id: await ensureJury(s.db) } : human;
+  if (jury && ruling) {
+    await s.db.query(`insert into bilateral_bet_events (bet_id,actor_user_id,kind,detail)
+      values ($1,$2,'enclave_ruling',$3)`, [id, reviewer.id, enclaveRulingFixture({ outcome: 'yes', material: {
+      claim: bet.claim, madeAt: new Date(new Date(bet.resolve_at).getTime() - 86400000), deadline: bet.resolve_at,
+      postUrl: bet.evidence_source_url, bets: [{ id, termsHash: bet.terms_hash }],
+    } })]);
+    assert.ok(await readEnclaveRuling(s.db, id));
+  }
+  await resolveStatement(s.db, { statementId, outcome, url: 'https://example.org/decision',
+    note: 'The registry published its decision.', reviewer, outcomeAt: new Date(Date.now() - 60000).toISOString() });
+  await s.db.query(`update statements set resolved_at=clock_timestamp()-interval '2 hours' where id=$1`, [statementId]);
+  return { bet, statementId, human };
+}
+
+function afterDueSelection(betId, change) {
+  let changed = false;
+  return { ...s.db, many: async (sql, params) => {
+    const rows = await s.db.many(sql, params);
+    if (!changed && /st\.resolved_at/.test(sql) && rows.some((row) => row.id === betId)) {
+      changed = true;
+      await change();
+    }
+    return rows;
+  } };
+}
+
+async function correctionIsBlocked(statementId, human) {
+  try {
+    await s.db.tx(async (tx) => {
+      await tx.query("set local lock_timeout = '100ms'");
+      await tx.query(`update statements set status='no', resolved_by=$2, resolved_at=clock_timestamp(),
+        outcome_at=clock_timestamp() where id=$1`, [statementId, human.id]);
+    });
+    return false;
+  } catch (error) {
+    if (error.code !== '55P03') throw error;
+    return true;
+  }
+}
+
+test('a correction after due selection starts its own settlement delay', async (t) => {
+  const { bet, statementId, human } = await settlementFixture(t);
+  const slow = { ...s.config, play: { ...s.config.play, settleDelaySeconds: 3600 } };
+  let corrected = false;
+  const raced = afterDueSelection(bet.id, async () => {
+    await resolveStatement(s.db, { statementId, outcome: 'no', url: 'https://example.org/correction',
+      note: 'The registry corrected its decision.', reviewer: human, outcomeAt: new Date().toISOString() });
+    corrected = true;
+  });
+  assert.deepEqual(await settleReplyBets(raced, slow, near.chain, { fetchImpl: near.fetchImpl }), { settled: 0, reclaimed: 0, errors: 0 });
+  assert.equal(corrected, true);
+  assert.equal(near.bets.get(bet.id).status, 'accepted');
+  assert.equal(near.sent.filter((call) => call.method === 'referee_resolve' && call.args.id === bet.id).length, 0);
+  await s.db.query(`update statements set resolved_at=clock_timestamp()-interval '2 hours' where id=$1`, [statementId]);
+  await s.db.query('update bilateral_bets set settle_checked_at=null where id=$1', [bet.id]);
+  assert.equal((await settleReplyBets(s.db, slow, near.chain, { fetchImpl: near.fetchImpl })).settled, 1);
+  assert.equal(near.bets.get(bet.id).resolution.outcome, 'no');
+});
+
+test('status and jury provenance come from one locked statement version', async (t) => {
+  const { bet, statementId, human } = await settlementFixture(t, { jury: true, ruling: false });
+  let attempted = false;
+  let blocked = false;
+  const observe = (reader) => ({ ...reader, one: async (sql, params) => {
+    const row = await reader.one(sql, params);
+    if (!attempted && /select st\.(?:id, st\.)?status/.test(sql) && String(params?.[0]) === String(bet.source_save_id)) {
+      attempted = true;
+      blocked = await correctionIsBlocked(statementId, human);
+    }
+    return row;
+  } });
+  const raced = { ...observe(s.db), tx: (fn) => s.db.tx((tx) => fn(observe(tx))) };
+  assert.deepEqual(await settleReplyBets(raced, s.config, near.chain, { fetchImpl: near.fetchImpl }), { settled: 0, reclaimed: 0, errors: 0 });
+  assert.equal(attempted, true, 'the correction raced the statement read');
+  assert.equal(blocked, true, 'a human correction cannot replace jury provenance between reads');
+  assert.equal(near.sent.filter((call) => call.method === 'referee_resolve' && call.args.id === bet.id).length, 0);
+});
+
+test('human and jury Results stay share locked through the referee broadcast', async (t) => {
+  for (const jury of [false, true]) {
+    const { bet, statementId, human } = await settlementFixture(t, { jury });
+    if (jury) await s.db.query('update statements set outcome_at=clock_timestamp() where id=$1', [statementId]);
+    const realCall = near.chain.call;
+    let broadcast = false;
+    let blocked = false;
+    near.chain.call = async (input) => {
+      if (input.method === 'referee_resolve' && input.args.id === bet.id) {
+        broadcast = true;
+        blocked = await correctionIsBlocked(statementId, human);
+      }
+      return realCall(input);
+    };
+    try {
+      assert.deepEqual(await settle(), { settled: 1, reclaimed: 0, errors: 0 });
+      assert.equal(broadcast, true);
+      assert.equal(blocked, true);
+      assert.equal(near.bets.get(bet.id).resolution.outcome, 'yes');
+    } finally { near.chain.call = realCall; }
+    assert.equal(await correctionIsBlocked(statementId, human), false, 'the lock closes after settlement');
+  }
+});
+
+test('before its own deadline a Bet waits for a No, a void or any jury Result', async (t) => {
+  // A reviewer's No cannot be known before the date, and the jury only rules after it.
+  for (const options of [{ outcome: 'no' }, { jury: true }]) {
+    const { bet } = await settlementFixture(t, { future: true, ...options });
+    assert.deepEqual(await settle(), { settled: 0, reclaimed: 0, errors: 0 });
+    assert.equal((await one('select settle_checked_at from bilateral_bets where id=$1', [bet.id])).settle_checked_at, null);
+    assert.equal(near.sent.filter((call) => call.method === 'referee_resolve' && call.args.id === bet.id).length, 0);
+  }
+});
+
+test('a reviewer’s Yes settles before the deadline: the thing already happened', async (t) => {
+  const { bet } = await settlementFixture(t, { future: true });
+  assert.deepEqual(await settle(), { settled: 1, reclaimed: 0, errors: 0 });
+  assert.equal(near.bets.get(bet.id).resolution.outcome, 'yes');
+});
+
+test('after one successful referee transaction a lagging chain view is re-read, never sent again', async (t) => {
+  const { bet, human } = await settlementFixture(t);
+  await s.db.query(`insert into bilateral_bet_events (bet_id,actor_user_id,kind,detail) values ($1,$2,'referee_resolved',$3)`,
+    [bet.id, human.id, { outcome: 'yes', transactionHash: 'earlier-success', referee: 'referee.testnet' }]);
+  assert.deepEqual(await settle(), { settled: 0, reclaimed: 0, errors: 0 }, 'the chain still shows the Bet open, so nothing is paid yet');
+  assert.equal(near.sent.filter((call) => call.method === 'referee_resolve' && call.args.id === bet.id).length, 0);
+});
+
+test('the Bet deadline is checked again after due selection', async (t) => {
+  const { bet } = await settlementFixture(t, { outcome: 'no' });
+  let moved = false;
+  const raced = afterDueSelection(bet.id, async () => {
+    await moveDeadline(bet.id, Date.now() + 3600000);
+    moved = true;
+  });
+  assert.deepEqual(await settleReplyBets(raced, s.config, near.chain, { fetchImpl: near.fetchImpl }), { settled: 0, reclaimed: 0, errors: 0 });
+  assert.equal(moved, true);
+  assert.equal(near.bets.get(bet.id).status, 'accepted');
+  assert.equal(near.sent.filter((call) => call.method === 'referee_resolve' && call.args.id === bet.id).length, 0);
+});
+
+test('a human Yes known after the Bet deadline stays open for review without an error', async (t) => {
+  const { bet, statementId } = await settlementFixture(t);
+  // A reviewer records a day, so "after the deadline" means a later day.
+  await s.db.query(`update statements set outcome_at=$2::timestamptz + interval '1 day' where id=$1`, [statementId, bet.resolve_at]);
+  assert.deepEqual(await settle(), { settled: 0, reclaimed: 0, errors: 0 });
+  assert.equal(near.bets.get(bet.id).status, 'accepted');
+  assert.equal(near.sent.filter((call) => call.method === 'referee_resolve' && call.args.id === bet.id).length, 0);
+  await s.db.query('update statements set outcome_at=$2 where id=$1', [statementId, bet.resolve_at]);
+  await s.db.query('update bilateral_bets set settle_checked_at=null where id=$1', [bet.id]);
+  assert.deepEqual(await settle(), { settled: 1, reclaimed: 0, errors: 0 }, 'a Yes known exactly at the deadline is eligible');
 });

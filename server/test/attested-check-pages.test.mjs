@@ -10,6 +10,7 @@ import { sha256 } from '../src/attested-signature.mjs';
 import { completeSetup, signInFromX } from '../src/store.mjs';
 import { startStack } from './support/app.mjs';
 import { resetDb } from './support/pg.mjs';
+import { testReport } from './support/enclave.mjs';
 
 let s, creator, bet, admin, stranger;
 const SENTINEL = 'PRIVATE_PROPOSAL_NOTE_NEVER_PUBLIC';
@@ -84,7 +85,7 @@ test('a saved signed check renders publicly, excludes private notes, and the adm
       calls += 1;
       if (url.includes('/attestation/report?')) {
         const nonce = new URL(url).searchParams.get('nonce');
-        const report = { signing_algo: 'ed25519', signing_address: address, request_nonce: nonce, intel_quote: 'abcd', event_log: '[]' };
+        const report = testReport(nonce, address);
         return Response.json({ gateway_attestation: report, model_attestations: [report] });
       }
       if (url.endsWith('/chat/completions')) {

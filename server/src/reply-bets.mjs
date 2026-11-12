@@ -6,6 +6,8 @@
 //
 // Every public reply is a fixed template. Nothing a person typed is echoed.
 import { createHash } from 'node:crypto';
+import { evidencePrompts, parseEvidenceCommand, runEvidenceCommands } from './bet-evidence.mjs';
+import { JURY_X_ID, ruleDue, rulingSettles } from './enclave-ruling.mjs';
 import { createBet } from './bets.mjs';
 import { consentToPublicBet, publicBet, publishBet } from './bet-public.mjs';
 import { dayMonth } from './marked.mjs';
@@ -13,6 +15,7 @@ import { formatTestNear } from './near-escrow.mjs';
 import { network, networkName, unit } from './near-network.mjs';
 import { fundingOn, refreshOpenDeposits } from './funding.mjs';
 import { intentsQuotes } from './intents.mjs';
+import { deadlineOf } from './interpret.mjs';
 import { syncNearBet } from './near-bets.mjs';
 import { verifyBetTransaction } from './near-execution-state.mjs';
 import { ensurePlayAccount, inPilot, nearChain, playAccountFor, playAction, referee, refereeSettle, refillTreasury, topUpReferee } from './play.mjs';
@@ -26,18 +29,35 @@ const STAKE = /^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?$/;
  * sentence that merely contains "bet no" ("I bet no one saw this coming") is a
  * claim, never a command.
  */
-export function parseBetCommand(text, { defaultStake = '0.1' } = {}) {
+export function parseBetCommand(text, { defaultStake = '0.1', now = new Date(), rulings = true } = {}) {
+  const evidence = rulings && parseEvidenceCommand(text);
+  if (evidence) return evidence;
   const typed = String(text || '').replace(/@\w{1,15}/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase().replace(/[.!]+$/, '');
   if (/^(?:take|take it|i take|i'll take it|i’ll take it|take the other side)$/.test(typed)) return { kind: 'take' };
-  const m = typed.match(/^bet(?: ([0-9.]+))?(?: (?:test )?near)? (yes|no)$/) || typed.match(/^bet (yes|no)(?: ([0-9.]+))?(?: (?:test )?near)?$/);
+  const dated = typed.match(/^(bet .+?) ((?:by|before) .+)$/);
+  const words = dated ? dated[1] : typed;
+  const m = words.match(/^bet(?: ([0-9.]+))?(?: (?:test )?near)? (yes|no)$/) || words.match(/^bet (yes|no)(?: ([0-9.]+))?(?: (?:test )?near)?$/);
   if (!m) return null;
+  let deadline;
+  if (dated) {
+    const read = deadlineOf(dated[2], now);
+    // A date inside a sentence does not make the rest of that sentence a command.
+    if (!read.at || !Number.isFinite(read.at.getTime()) || read.text?.toLowerCase() !== dated[2]) return null;
+    deadline = read.at.toISOString();
+  }
   const [amount, side] = /^(yes|no)$/.test(m[1] || '') ? [m[2], m[1]] : [m[1], m[2]];
   const stake = amount || defaultStake;
   if (!STAKE.test(stake) || Number(stake) <= 0 || Number(stake) > 1) return { kind: 'bet', side, error: 'stake' };
-  return { kind: 'bet', side, stake };
+  return { kind: 'bet', side, stake, ...(deadline ? { deadline } : {}) };
 }
 
-export async function queueBetCommand(tx, { eventId, xUserId, username, command, saveId = null, targetRef = null, words = null, exclude = [] }) {
+export async function queueBetCommand(tx, { eventId, xUserId, username, command, saveId = null, targetRef = null, words = null, exclude = [], receivedAt = new Date() }) {
+  if (command.kind === 'evidence') {
+    await tx.query(`insert into evidence_commands (event_id, x_user_id, x_username, side, url, target_ref, created_at)
+      values ($1,$2,$3,$4,$5,$6,$7) on conflict (event_id) do nothing`,
+    [eventId, String(xUserId), username || null, command.side, command.url, targetRef, receivedAt]);
+    return;
+  }
   await tx.query(`insert into bet_commands (event_id, x_user_id, x_username, kind, side, stake_near, save_id, target_ref, words, exclude)
     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) on conflict (event_id) do nothing`,
   [eventId, String(xUserId), username || null, command.kind, command.side || null, command.stake || null, saveId, targetRef,
@@ -53,7 +73,7 @@ function requestIdFor(eventId) {
 // Built when asked for, so the unit is the one for the network this server is on.
 const refusals = ({ walletUrl = null } = {}) => ({
   stake: `A bet here is between 0.01 and 1 ${unit()}. Try again with an amount in that range.`,
-  no_date: 'That post gives no date to settle on, so there is nothing to bet on yet.',
+  no_date: 'Add a date to make it a bet, like: bet 0.1 yes by 30 Nov.',
   too_soon: 'That post is due too soon to take a bet on.',
   too_far: 'That post is dated more than a year out. Bets here settle within a year.',
   resolved: 'That one already has a result.',
@@ -69,6 +89,8 @@ const refusals = ({ walletUrl = null } = {}) => ({
 });
 
 export const betReplies = {
+  evidencePrompt: ({ closesAt, url }) => `Time’s up. Reply yes or no with a public link that shows what happened. A NEAR AI enclave jury rules at ${new Date(closesAt).toISOString().slice(11, 16)} UTC on ${dayMonth(closesAt, { year: true })}. ${url}`,
+  evidenceAck: ({ closesAt, url }) => `Got it. The jury rules at ${new Date(closesAt).toISOString().slice(11, 16)} UTC. ${url}`,
   offer: ({ stake, side, date, bot, url }) => `${stake} ${unit()} says this ${side === 'yes' ? 'happens' : 'does not happen'} by ${date}. `
     + `To take the other side, reply here with "@${bot} take".${url ? ` ${url}` : ''}`,
   match: ({ pot, date, creator, creatorSide, taker, url }) => `It’s on. ${pot} ${unit()} is held on ${networkName()} until ${date}. `
@@ -83,15 +105,18 @@ export const betReplies = {
 // A reply goes under the post of someone who summoned the bot. Anyone else in
 // the thread, above all the author of the post being bet on, is left out of
 // the automatic mentions: they did not ask to hear from the bot.
-async function say(db, config, { key, inReplyTo, body, betId = null }) {
+export async function say(db, config, { key, inReplyTo, body, betId = null }) {
   if (!body) return;
-  const origin = await db.one('select exclude, x_user_id from bet_commands where event_id = $1', [inReplyTo]);
+  const origin = await db.one(`select exclude, x_user_id from bet_commands where event_id = $1
+    union all select m.reply_exclude, e.x_user_id from evidence_commands e
+      join mention_events m on m.event_id = e.event_id where e.event_id = $1 limit 1`, [inReplyTo]);
   // Each reply is a paid post. One person's commands get at most the hourly number of replies that
   // ordinary tags do; past that the reply is kept as held, and the Bet itself is unaffected.
   let status = config.x.repliesEnabled ? 'pending' : 'held';
   if (status === 'pending' && origin) {
-    const recent = await db.one(`select count(*)::int as n from bot_outbox o join bet_commands c on c.event_id = o.in_reply_to
-      where c.x_user_id = $1 and o.status in ('pending', 'sending', 'sent') and o.created_at > clock_timestamp() - interval '1 hour'`, [origin.x_user_id]);
+    const recent = await db.one(`select count(*)::int as n from bot_outbox o
+      left join bet_commands c on c.event_id = o.in_reply_to left join evidence_commands e on e.event_id = o.in_reply_to
+      where coalesce(c.x_user_id, e.x_user_id) = $1 and o.status in ('pending', 'sending', 'sent') and o.created_at > clock_timestamp() - interval '1 hour'`, [origin.x_user_id]);
     if (recent.n >= config.x.repliesPerTaggerPerHour) status = 'held';
   }
   // And a ceiling across everyone, so a flood of commands cannot run up the X bill.
@@ -166,7 +191,7 @@ export async function queueWebMatchNotice(db, config, user, betId) {
 
 async function offer(db, config, chain, cmd, deps) {
   if (!inPilot(config, cmd.x_user_id)) throw new Refused('pilot');
-  if (cmd.detail === 'stake') throw new Refused('stake');
+  if (['stake', 'too_soon', 'too_far'].includes(cmd.detail)) throw new Refused(cmd.detail);
   const user = await ensureUser(db, { xUserId: cmd.x_user_id, username: cmd.x_username });
   const judge = await referee(db, config, chain);
   let betId = cmd.bet_id;
@@ -183,7 +208,9 @@ async function offer(db, config, chain, cmd, deps) {
     const bet = await createBet(db, user, {
       requestId: requestIdFor(cmd.event_id),
       claim: cmd.words,
-      criteria: `Yes if what the post says has happened by ${dayMonth(row.deadline, { year: true })}. Stated’s recorded Result for this post, with its evidence link, decides.`,
+      criteria: `Yes if what the post says has happened by ${dayMonth(row.deadline, { year: true })}. ` + (config.nearai?.rulings
+        ? 'Either side can post a link as evidence. A NEAR AI enclave jury rules on it: without credible evidence that it happened, it counts as not having happened. If the jury cannot decide, both stakes go back.'
+        : 'Stated’s recorded Result for this post, with its evidence link, decides.'),
       evidenceSourceUrl: row.url,
       creatorSide: cmd.side,
       stakeNear: cmd.stake_near,
@@ -316,13 +343,16 @@ const RESULT_TO_OUTCOME = { yes: 'yes', no: 'no', ambiguous: 'void', annulled: '
  */
 export async function settleReplyBets(db, config, chain, { limit = 5, fetchImpl = fetch } = {}) {
   const judge = await referee(db, config, chain);
-  const due = await db.many(`select b.id, st.status as result
+  const due = await db.many(`select b.id
     from bilateral_bets b join saves s on s.id = b.source_save_id join statements st on st.id = s.statement_id
     where b.referee_wallet = $1 and b.chain_state is not null and b.status in ('accepted', 'proposed', 'disputed')
+      -- A reviewer's Yes can be known early (it happened before the date); a No, a void or a jury ruling cannot.
+      and (b.resolve_at <= clock_timestamp() or (st.status = 'yes'
+        and st.resolved_by is distinct from (select id from users where x_user_id = $4)))
       and st.status in ('yes', 'no', 'ambiguous', 'annulled')
       and st.resolved_at <= clock_timestamp() - make_interval(secs => $3)
       and (b.settle_checked_at is null or b.settle_checked_at < clock_timestamp() - interval '60 seconds')
-    order by b.settle_checked_at asc nulls first, b.created_at limit $2`, [judge.id, limit, config.play.settleDelaySeconds]);
+    order by b.settle_checked_at asc nulls first, b.created_at limit $2`, [judge.id, limit, config.play.settleDelaySeconds, JURY_X_ID]);
   const result = { settled: 0, reclaimed: 0, errors: 0 };
   const people = async (bet) => ({
     creator: await db.one('select * from users where id = $1', [bet.creator_user_id]),
@@ -364,15 +394,47 @@ export async function settleReplyBets(db, config, chain, { limit = 5, fetchImpl 
       const owner = await db.one('select * from users where id = $1', [first.creator_user_id]);
       // The chain may have moved on (refunded, or settled by the two sides). Only a Bet it still holds open is ruled on.
       await syncNearBet(db, config, owner, row.id, { fetchImpl });
-      const bet = await db.one('select * from bilateral_bets where id = $1', [row.id]);
-      if (!['accepted', 'proposed', 'disputed'].includes(bet.status)) continue;
-      // The Result as it stands at this moment, not as it stood when the list was read.
-      const now = await db.one(`select st.status from saves s join statements st on st.id = s.statement_id where s.id = $1`, [bet.source_save_id]);
-      const outcome = RESULT_TO_OUTCOME[now?.status];
-      if (!outcome) continue;
-      const { creator, acceptor } = await people(bet);
-      const { bet: settled } = await refereeSettle(db, config, chain, bet, creator, outcome, { fetchImpl });
-      if (settled.status !== 'settled') continue;
+      const decision = await db.tx(async (tx) => {
+        // Another worker settling this Bet holds its row; this pass leaves it alone rather than send a second transaction.
+        const bet = await tx.one('select * from bilateral_bets where id = $1 for update skip locked', [row.id]);
+        if (!bet || !['accepted', 'proposed', 'disputed'].includes(bet.status)) return null;
+        // Corrections must wait for the broadcast. Status, provenance and the
+        // correction delay all belong to this one locked version of the Result.
+        const statement = await tx.one(`select st.status, st.resolved_at, st.resolved_by, st.outcome_at, u.id as jury_user_id
+          from saves s join statements st on st.id = s.statement_id
+          left join users u on u.x_user_id = $2 where s.id = $1 for share of st`, [bet.source_save_id, JURY_X_ID]);
+        const outcome = RESULT_TO_OUTCOME[statement?.status];
+        if (!outcome || !statement.resolved_at
+          || !(new Date(statement.resolved_at).getTime() <= Date.now() - config.play.settleDelaySeconds * 1000)) return null;
+        const jury = statement.resolved_by != null && statement.jury_user_id != null
+          && String(statement.resolved_by) === String(statement.jury_user_id);
+        if (jury && !await rulingSettles(tx, bet, statement.status)) return null;
+        // A jury ruling already binds its evidence to this Bet's deadline.
+        // A human Yes known later cannot decide whether it happened in time.
+        // A reviewer records the day an outcome became known, not the minute, so this compares days.
+        if (!jury && statement.status === 'yes' && statement.outcome_at
+          && new Date(statement.outcome_at).toISOString().slice(0, 10) > new Date(bet.resolve_at).toISOString().slice(0, 10)) return null;
+        const creator = await tx.one('select * from users where id = $1', [bet.creator_user_id]);
+        // Before the Bet's own deadline only a reviewer's Yes settles it: the thing happened early.
+        // A No, a void and every jury ruling wait for the deadline.
+        const due = new Date(bet.resolve_at).getTime() <= Date.now();
+        if (!due && !(statement.status === 'yes' && !jury)) return null;
+        // Chain sync also opens transactions; keep those reads and writes on
+        // this connection so they cannot wait on locks held by this settlement.
+        const locked = { ...tx, tx: (fn) => fn(locked) };
+        // One referee transaction per Bet. If an earlier one succeeded but a lagging RPC has not
+        // shown the settlement yet, read the chain again rather than send a second, failing call.
+        const sentBefore = await tx.one(`select 1 as sent from bilateral_bet_events where bet_id = $1 and kind = 'referee_resolved' limit 1`, [bet.id]);
+        if (sentBefore) {
+          const fresh = await syncNearBet(locked, config, creator, bet.id, { fetchImpl });
+          return fresh?.status === 'settled' ? { bet, creator, outcome: fresh.outcome || outcome } : null;
+        }
+        const { bet: settled } = await refereeSettle(locked, config, chain, bet, creator, outcome, { fetchImpl });
+        return settled.status === 'settled' ? { bet, creator, outcome } : null;
+      });
+      if (!decision) continue;
+      const { bet, creator, outcome } = decision;
+      const acceptor = bet.acceptor_user_id ? await db.one('select * from users where id = $1', [bet.acceptor_user_id]) : null;
       await payOut(bet, creator, acceptor);
       const origin = await db.one(`select event_id from bet_commands where bet_id = $1 and kind = 'bet' limit 1`, [bet.id]);
       const creatorWins = outcome === bet.creator_side;
@@ -445,6 +507,7 @@ export function startPlayWorker(db, config, { chain = nearChain(), intervalMs = 
   let stopped = false;
   let timer;
   let passes = 0;
+  let evidenceCheckedAt = null;
   // After a failure the worker waits longer each time, up to five minutes. The usual cause is the
   // faucet or an RPC endpoint saying "too many requests", and asking again at once makes it worse.
   let delay = intervalMs;
@@ -456,6 +519,21 @@ export function startPlayWorker(db, config, { chain = nearChain(), intervalMs = 
       const name = typeof botUsername === 'function' ? await botUsername() : botUsername;
       const ran = await runBetCommands(db, config, chain, { fetchImpl, botUsername: name || 'stated' });
       passes += 1;
+      if (config.nearai?.rulings && (evidenceCheckedAt === null || Date.now() - evidenceCheckedAt >= 30000)) {
+        evidenceCheckedAt = Date.now();
+        const report = (error) => { try { onError?.(error); } catch { /* reporting must not stop commands or settlements */ } };
+        try {
+          const evidence = await runEvidenceCommands(db, config);
+          if (evidence.failed) report(new Error(`${evidence.failed} evidence commands failed after three attempts.`));
+        } catch (error) { report(error); }
+        try {
+          const rulings = await ruleDue(db, config, { fetchImpl });
+          if (rulings.errors) report(new Error(`${rulings.errors} enclave ruling operations failed; they will retry.`));
+        } catch (error) { report(error); }
+        try {
+          await evidencePrompts(db, config, { say: (options, tx) => say(tx || db, config, options) });
+        } catch (error) { report(error); }
+      }
       // Looking for a recorded Result is one query, so it runs every pass; the treasury is checked each minute.
       const settled = await settleReplyBets(db, config, chain, { fetchImpl });
       if (settled.errors) onError?.(new Error(`${settled.errors} reply-bet settlements failed; they will retry.`));

@@ -1,6 +1,8 @@
 import { parseBetCommand, queueBetCommand } from './reply-bets.mjs';
+import { parseEvidenceCommand, targetEvidenceBet } from './bet-evidence.mjs';
 import { interpret, looksLikePrediction, missingTerms } from './interpret.mjs';
 import { INTAKES_PER_HOUR, intakesInLastHour } from './limits.mjs';
+import { inPilot } from './near-network.mjs';
 import { replyFor } from './replies.mjs';
 import { addInbox, restoreCommitment, userByXId } from './store.mjs';
 import { explicitlyMentions, postText, postUrl } from './xapi.mjs';
@@ -280,7 +282,7 @@ export async function processMention(db, config, { mention, includes = {}, bot, 
           or (mention_events.outcome = 'processing' and mention_events.processing_since is not null
               and mention_events.processing_since < now() - interval '${PROCESSING_LEASE}')
           or (mention_events.outcome = 'processing' and mention_events.processing_since is null)
-     returning event_id`,
+     returning event_id, received_at`,
     [
       mention.id,
       mention.author_id,
@@ -306,7 +308,18 @@ export async function processMention(db, config, { mention, includes = {}, bot, 
     const quoted = refs.find((r) => r.type === 'quoted');
     const parent = refs.find((r) => r.type === 'replied_to');
     // "bet 0.5 no" and "take" are commands only when they are all the person typed.
-    const bet = config.play?.enabled ? parseBetCommand(text, { defaultStake: config.play.defaultStakeNear }) : null;
+    // X shortens pasted links. Expand only exact URL tokens so surrounding prose
+    // still fails the whole-command parser, and URL path casing stays intact.
+    const urls = mention.note_tweet?.entities?.urls || mention.entities?.urls || [];
+    const commandText = text.replace(/\S+/g, (word) => {
+      const link = urls.find((entry) => entry.url === word);
+      return link?.unwound_url || link?.expanded_url || word;
+    });
+    const bet = config.play?.enabled ? parseBetCommand(commandText, {
+      defaultStake: config.play.defaultStakeNear,
+      now: mention.created_at || new Date(),
+      rulings: Boolean(config.nearai?.rulings),
+    }) : null;
 
     // Replying inside a thread the bot is already in puts the bot's handle in
     // the hidden reply prefix. That is not a request, so nothing is saved or posted.
@@ -315,6 +328,37 @@ export async function processMention(db, config, { mention, includes = {}, bot, 
     const botInThread = mention.in_reply_to_user_id === bot.userId
       || parentPost?.author_id === bot.userId
       || (parentPost?.entities?.mentions || []).some((m) => m.id === bot.userId || (botName && String(m.username || '').toLowerCase() === botName));
+    // Evidence replies belong to the enclave jury; with it switched off they are not read as links to track.
+    if (parent && config.play?.enabled && !config.nearai?.rulings && parseEvidenceCommand(commandText)) {
+      return { outcome: 'ignored_evidence', event: await recordEvent(db, config, mention, { outcome: 'ignored_evidence' }) };
+    }
+    if (bet?.kind === 'evidence' && parent
+      && (explicitlyMentions(mention, bot.username) || parentPost?.author_id === bot.userId || mention.in_reply_to_user_id === bot.userId)) {
+      return db.tx(async (tx) => {
+        const bettor = await targetEvidenceBet(tx, { target_ref: parent.id, x_user_id: mention.author_id });
+        if (!bettor) return { outcome: 'ignored_evidence', event: await recordEvent(tx, config, mention, { outcome: 'ignored_evidence' }) };
+        const closesAt = bettor.closes_at ? new Date(bettor.closes_at).getTime()
+          : new Date(bettor.resolve_at).getTime() + config.play.evidenceWindowSeconds * 1000;
+        if (!(new Date(claimed.received_at).getTime() < closesAt)) {
+          return { outcome: 'ignored_evidence', event: await recordEvent(tx, config, mention, { outcome: 'ignored_evidence' }) };
+        }
+        // Serialize this sender's count and insert so concurrent replies cannot exceed the cap.
+        await tx.query('select id from users where id = $1 for update', [bettor.user_id]);
+        const { n } = await tx.one(`select count(*)::int as n from evidence_commands c
+          where c.x_user_id = $1 and c.status = 'queued' and exists (
+            select 1 from bilateral_bets b join saves s on s.id = b.source_save_id
+            join statements st on st.id = s.statement_id join sources src on src.id = st.source_id
+            where s.statement_id = $2 and (
+              exists (select 1 from bot_outbox o where o.post_id = c.target_ref and o.bet_id = b.id)
+              or exists (select 1 from bet_commands offer where offer.event_id = c.target_ref and offer.kind = 'bet' and offer.bet_id = b.id)
+              or (src.platform = 'x' and src.platform_id = c.target_ref)))`, [mention.author_id, bettor.statement_id]);
+        if (n >= 4) return { outcome: 'ignored_evidence', event: await recordEvent(tx, config, mention, { outcome: 'ignored_evidence' }) };
+        const exclude = replyExclusions(mention, mention.author_id, bot.userId, null);
+        await queueBetCommand(tx, { eventId: mention.id, xUserId: mention.author_id, username: requester.username,
+          command: bet, targetRef: parent.id, exclude, receivedAt: claimed.received_at });
+        return { outcome: 'bet_evidence', event: await recordEvent(tx, config, mention, { outcome: 'bet_evidence', command: 'evidence', exclude }) };
+      });
+    }
     // Taking a Bet: a reply to the offer, to the reply that made it, or to the post itself.
     // A bare "take" under the bot's own offer is deliberate, so it does not need the handle typed again.
     if (bet?.kind === 'take' && (parent || quoted)
@@ -408,6 +452,21 @@ export async function processMention(db, config, { mention, includes = {}, bot, 
         speakerXUserId: target.author_id,
         publishedAt: target.created_at ? new Date(target.created_at) : new Date(),
       });
+      const offering = bet?.kind === 'bet' && target.id !== mention.id;
+      if (offering && !bet.error && bet.deadline && !statement.deadline_at && !statement.proposed_deadline_at) {
+        const due = new Date(bet.deadline).getTime();
+        const now = Date.now();
+        if (due < now + 10 * 60000) bet.error = 'too_soon';
+        else if (due > now + 365 * DAY) bet.error = 'too_far';
+      }
+      if (offering && !bet.error && inPilot(config, mention.author_id)
+        && bet.deadline && !statement.deadline_at && !statement.proposed_deadline_at) {
+        // Store before the save so its capture and revision use the same deadline
+        // as the queued Bet. A concurrent capture's existing date always wins.
+        statement = await tx.one(`update statements set proposed_deadline_at = $2
+          where id = $1 and deadline_at is null and proposed_deadline_at is null returning *`, [statement.id, bet.deadline])
+          || await tx.one('select * from statements where id = $1', [statement.id]);
+      }
       const { save, created } = await insertSave(tx, {
         ownerXUserId: mention.author_id,
         owner,
@@ -451,7 +510,6 @@ export async function processMention(db, config, { mention, includes = {}, bot, 
       // A Bet offered from this reply is carried out by the play worker, which
       // answers once the stake is final on NEAR. The post's words ride along
       // only until the Bet is made from them.
-      const offering = bet?.kind === 'bet' && target.id !== mention.id;
       if (offering) {
         await queueBetCommand(tx, { eventId: mention.id, xUserId: mention.author_id, username: requester.username,
           command: bet.error ? { ...bet, stake: null } : bet, saveId: save.id, words: claim,

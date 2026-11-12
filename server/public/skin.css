@@ -125,6 +125,20 @@ button.link, .tl, button.tl { font-family: var(--sans); font-size: 15px; font-we
 .said { margin: 0; font-size: 16px; line-height: 1.5; overflow-wrap: anywhere; }
 .said a { color: inherit; text-decoration: none; }
 .prow .said a::after { content: ""; position: absolute; inset: 0; }
+/* Evidence follows DESIGN.md's post rows and folds, with one hairline per row. */
+.evidence-list .prow { grid-template-columns: minmax(0, 1fr); }
+.evidence-list .pwho { white-space: normal; }
+.evidence-list .pwho b { overflow: visible; overflow-wrap: anywhere; }
+.evidence-list .evidence-title { display: flow-root; margin: 0; line-height: 20px; overflow-wrap: anywhere; }
+.evidence-list .evidence-title .tl { display: block; min-width: 0; min-height: 44px; margin: -12px 0; padding: 12px 0; line-height: 20px; overflow-wrap: anywhere; }
+.evidence-list .meta { margin: 4px 0 0; }
+.evidence-list details.fold { padding: 0; border: 0; }
+.evidence-form > .gut, .evidence-form > .seg { margin-top: 16px; }
+.evidence-form .gut > label { margin-top: 0; }
+.evidence-form .acts { gap: 16px; }
+.evidence-form .err { margin: 0; }
+.evidence-form input[type="url"] { border: 1px solid var(--line); }
+.evidence-form input[aria-invalid="true"] { border: 1px solid var(--err); }
 .meta { margin: 8px 0 0; color: var(--dim); font-size: 14px; line-height: 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; }
 .meta a, .meta form, .meta button { position: relative; z-index: 1; }
 .meta a { color: inherit; }
@@ -181,7 +195,7 @@ label.check { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10
 .seat { display: grid; justify-items: center; gap: 4px; min-width: 0; text-decoration: none; color: inherit; }
 .seat .face, .seat .open { width: 64px; height: 64px; border-radius: 50%; margin-bottom: 4px; font-size: 24px; }
 .seat .open { border: 1.5px solid var(--dim); }
-.seat b { font-size: 16px; max-width: 100%; white-space: normal; overflow-wrap: anywhere; word-break: break-all; text-wrap: balance; text-overflow: clip; }
+.seat b { font-size: 16px; max-width: 100%; white-space: normal; overflow-wrap: normal; word-break: normal; text-wrap: balance; text-overflow: clip; }
 .seat span { color: var(--dim); font-size: 14px; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 /* The winner's ring. The marker yellow is faint as a thin line on white, so the ring takes a deeper one there. */
 .seat.won .face { outline: 3px solid var(--mark-ring); outline-offset: 3px; }
@@ -275,6 +289,8 @@ p { margin: 0 0 12px; }
 label { display: block; font-size: 14px; font-weight: 600; margin: 14px 0 6px; }
 form > label:first-of-type { margin-top: 0; }
 input[type="text"], input[type="url"], input[type="date"], input[type="datetime-local"], input[type="number"], input[type="search"], textarea, select { font-family: var(--sans); font-size: 16px; width: 100%; min-height: 44px; background: var(--lift); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+/* DESIGN.md: the date uses the link field's tokens in either colour mode. */
+input[type="date"] { appearance: none; }
 textarea { min-height: 96px; }
 fieldset { border: 0; padding: 0; margin: 20px 0 0; min-width: 0; }
 legend { padding: 0; font-size: 15px; font-weight: 700; margin-bottom: 4px; }
@@ -403,10 +419,16 @@ input.bad[aria-invalid="true"],
 .source-author .head { grid-template-columns: 44px minmax(0, 1fr) auto; }
 .source-author .head > span:not(.face) { grid-column: 2; grid-row: 2; }
 .source-author .head .src { grid-column: 3; grid-row: 1 / span 2; align-self: center; margin-left: 12px; }
-/* A handle wraps in full. It breaks after an underscore before it breaks anywhere else. */
-.seat b { white-space: normal; word-break: normal; overflow-wrap: anywhere; overflow: visible; text-overflow: clip; text-wrap: wrap; }
+/* DESIGN.md: Bet seats leave the stake its natural width and keep handles whole. */
+.bet-seats .versus { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
+.seat b { white-space: normal; word-break: normal; overflow-wrap: normal; overflow: visible; text-overflow: clip; text-wrap: wrap; }
 @media (max-width: 420px) { .seat b { font-size: 15px; } }
 @media (max-width: 340px) { .seat b { min-height: 3em; } }
+.bet-seats .seat b.long-handle { font-size: 14px; white-space: nowrap; max-width: none; }
+@media (max-width: 340px) {
+  .bet-seats .seat:first-child b.long-handle { justify-self: start; }
+  .bet-seats .seat:last-child b.long-handle { justify-self: end; }
+}
 
 /* The reply that makes a bet, set as the thing to type. */
 .say { margin: 4px 0 0; padding: 0 16px 6px; font-size: 24px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; overflow-wrap: anywhere; }
@@ -484,6 +506,8 @@ h1.send .sel { font-weight: inherit; user-select: all; -webkit-user-select: all;
 .stakes.left { text-wrap: pretty; }
 /* A line of text or a link set in from the page's edge. (Not .pad: that is the layout's own class on main.) */
 .gut { margin: 10px 0 0; padding: 0 16px; }
+.gut.link-row { margin-top: 0; }
+.gut.link-row .tl { padding: 0; min-height: 44px; }
 .pays { list-style: none; margin: 16px 16px 0; padding: 0; border-top: 1px solid var(--line); }
 .pays.past { margin: 0; border-top: 0; }
 .pays li { border-top: 1px solid var(--line); }
@@ -509,13 +533,27 @@ form:not(:has(input[name="side"]:checked)) .cmd .unset,
 form:has(#stake-0:checked) .cmd .k0,
 form:has(#stake-1:checked) .cmd .k1,
 form:has(#stake-2:checked) .cmd .k2,
-form:has(#stake-3:checked) .cmd .k3 { display: inline; }
+form:has(#stake-3:checked) .cmd .k3,
+form:has(#date-week:checked) .cmd .date-week,
+form:has(#date-month:checked) .cmd .date-month,
+form:has(#date-year:checked) .cmd .date-year,
+form:has(#date-custom:checked) .cmd .date-custom { display: inline; }
+.custom-date { display: none; }
+form:has(#date-custom:checked) .custom-date { display: block; }
+.date-presets label { min-width: 0; padding: 4px; text-align: center; white-space: normal; line-height: 20px; }
+.date-presets input:disabled + label { opacity: 0.45; cursor: default; }
+.stake-label { margin: 16px 16px 0; }
+.stake-label + .seg { margin-top: 8px; }
 .send .go { display: none; align-items: center; gap: 8px; }
 form:has(input[name="side"]:checked) .send .go { display: inline-flex; }
 form:has(input[name="side"]:checked) .send .need { display: none; }
 form:not(:has(input[name="side"]:checked)) .send { opacity: 0.45; }
 .seg.quiet label { font-size: 14px; font-weight: 500; }
 .seg.quiet input:checked + label { font-weight: 600; border-width: 1px; }
+/* The new-Bet choices are text rows, separated by one hairline. */
+.seg.line { background: none; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 0; }
+.seg.line label { font-size: 15px; font-weight: 400; border: 0; border-bottom: 2px solid transparent; border-radius: 0; white-space: nowrap; }
+.seg.line input:checked + label { background: none; color: var(--ink); border-color: var(--ink); }
 .tl.unread { font-size: 14px; overflow-wrap: anywhere; }
 /* The paste button appears once the field holds a link. */
 form:not(:has(#bet-link:valid)) .acts.paste { display: none; }

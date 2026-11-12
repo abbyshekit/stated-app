@@ -1,6 +1,28 @@
-// INTEGRATION: exact signed-byte verification only; hardware evidence remains unverified.
+// INTEGRATION: exact signed bytes, plus the Intel TDX quote that binds the signing key and nonce.
 import { Buffer } from 'node:buffer';
 import { createHash, createPublicKey, timingSafeEqual, verify } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
+import { INTEL_SGX_ROOT_CA_PEM, verifyAttestationReport } from './tdx-quote.mjs';
+
+// The trust roots for TDX quotes: the pinned Intel SGX root. Test support code (and
+// nothing else) may replace the process default with its own ephemeral root, because
+// some readers of stored records have no configuration to pass roots through. It is
+// never read from the environment.
+let defaultRoots = [INTEL_SGX_ROOT_CA_PEM];
+export function setQuoteRootsForTests(roots) {
+  defaultRoots = roots ? [...roots] : [INTEL_SGX_ROOT_CA_PEM];
+}
+const rootsOr = (roots) => (roots?.length ? roots : defaultRoots);
+
+// The quote's certificates are checked at the time the report was fetched, so a
+// record keeps verifying after a certificate in its chain has expired.
+function authenticate(value, name, nonceHex, roots, now) {
+  try {
+    return verifyAttestationReport(value, nonceHex, { roots: rootsOr(roots), now });
+  } catch (error) {
+    throw new Error(`${name} quote does not verify: ${error.message}`);
+  }
+}
 
 const MAX_BODY_BYTES = 1024 * 1024;
 const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
@@ -100,7 +122,12 @@ function timestamp(value, name) {
   return Date.parse(value);
 }
 
-export function validatePreflight(evidence, nonceHex) {
+/**
+ * Before a completion: the report must answer this nonce, the gateway's quote must
+ * verify, and at least one model candidate's quote must verify (the one whose key
+ * signs the response is checked again, by name, in verifyAttestedRecord).
+ */
+export function validatePreflight(evidence, nonceHex, { roots, now = new Date() } = {}) {
   const nonce = hex(nonceHex, 'nonce', 32, false);
   object(evidence, 'attestation');
   if (('error' in evidence && evidence.error != null) || 'error_code' in evidence) throw new Error('Attestation unavailable.');
@@ -109,14 +136,27 @@ export function validatePreflight(evidence, nonceHex) {
     throw new Error('attestation.model_attestations must contain model evidence');
   }
   evidence.model_attestations.forEach((candidate, index) => report(candidate, `attestation.model_attestations[${index}]`, nonce));
+  authenticate(evidence.gateway_attestation, 'attestation.gateway_attestation', nonceHex, roots, now);
+  const verified = evidence.model_attestations.some((candidate, index) => {
+    try { authenticate(candidate, `attestation.model_attestations[${index}]`, nonceHex, roots, now); return true; }
+    catch { return false; }
+  });
+  if (!verified) throw new Error('no model attestation quote verifies');
 }
 
 /**
- * Verify exact-byte SHA-256 and Ed25519 response binding. Report shape, echoed
- * nonce and signer consistency are checked, but no quote is authenticated.
- * modelSigner means a unique match to supplied evidence, not a hardware trust decision.
+ * Verify exact-byte SHA-256 and the Ed25519 response signature, and authenticate
+ * the Intel TDX quotes of the gateway report and of the model report whose key
+ * signed the response: the quote signature, the QE report and its binding, the
+ * certificate chain to the trusted Intel SGX root (valid at the record's
+ * attestedAt), and report_data = signing key || nonce.
+ * NOT checked: the platform TCB level and revocation collateral (no network),
+ * the NVIDIA GPU payload, event-log replay or any measurement allowlist.
+ * checkContent validates the parsed reply; the agrees/reason verdict of the
+ * signed second opinion is the default, and the enclave ruling passes its own.
+ * roots overrides the trust roots (tests only; the default is the pinned Intel root).
  */
-export function verifyAttestedRecord(record) {
+export function verifyAttestedRecord(record, { checkContent = verdict, roots } = {}) {
   object(record, 'record');
   const model = nonempty(record.model, 'model');
   const nonce = hex(record.nonce, 'nonce', 32, false);
@@ -136,13 +176,14 @@ export function verifyAttestedRecord(record) {
   if (request.model !== model) throw new Error('signed request model does not match model');
   nonempty(record.completionId, 'completionId');
   if (response.id !== record.completionId) throw new Error('signed response id does not match completionId');
-  const savedVerdict = verdict(record.verdict, 'verdict');
+  const savedVerdict = checkContent(record.verdict, 'verdict');
   const content = response.choices?.[0]?.message?.content;
   if (typeof content !== 'string') throw new Error('signed response must contain a JSON verdict message');
   let parsedVerdict;
   try { parsedVerdict = JSON.parse(content); } catch { throw new Error('signed response verdict must be strict JSON'); }
-  verdict(parsedVerdict, 'signed response verdict');
-  if (parsedVerdict.agrees !== savedVerdict.agrees || parsedVerdict.reason !== savedVerdict.reason) {
+  checkContent(parsedVerdict, 'signed response verdict');
+  // Both sides passed the same strict key check, so deep equality is field-by-field equality.
+  if (!isDeepStrictEqual(parsedVerdict, savedVerdict)) {
     throw new Error('signed response verdict does not match verdict');
   }
 
@@ -167,19 +208,28 @@ export function verifyAttestedRecord(record) {
     throw new Error('attestation.model_attestations must contain model evidence');
   }
   let matches = 0;
+  let signerReport = null;
   for (const [index, candidate] of evidence.model_attestations.entries()) {
-    if (equal(report(candidate, `attestation.model_attestations[${index}]`, nonce), signer)) matches += 1;
+    if (equal(report(candidate, `attestation.model_attestations[${index}]`, nonce), signer)) {
+      matches += 1;
+      signerReport = candidate;
+    }
   }
   if (matches !== 1) throw new Error('signature must match exactly one model-attestation signer');
+  const at = new Date(attested);
+  authenticate(evidence.gateway_attestation, 'attestation.gateway_attestation', record.nonce, roots, at);
+  authenticate(signerReport, 'signing model attestation', record.nonce, roots, at);
   const publicKey = createPublicKey({ key: Buffer.concat([ED25519_SPKI_PREFIX, signer]), format: 'der', type: 'spki' });
   if (!verify(null, Buffer.from(expectedText, 'utf8'), publicKey, signatureBytes)) {
     throw new Error('Ed25519 signature verification failed');
   }
-  return { requestHash: true, responseHash: true, signature: true, modelSigner: true, hardwareAttestation: 'not_verified' };
+  return { requestHash: true, responseHash: true, signature: true, modelSigner: true, quote: 'tdx_chain_verified',
+    // The platform TCB level, revocation, the GPU payload and the event log are still not checked.
+    hardwareAttestation: 'not_verified' };
 }
 
 export const verificationRecipe = Object.freeze({
-  scope: 'This helper verifies exact signed bytes and signer consistency only. Hardware quotes and attestation trust are not verified.',
+  scope: 'This helper verifies exact signed bytes, signer consistency, and the Intel TDX quotes of the gateway and the signing model: quote and QE signatures, the certificate chain to the pinned Intel SGX root, and report_data = signing key || nonce. Not verified: TCB level and revocation collateral, the NVIDIA GPU payload, and event-log replay.',
   preflight: 'Generate and retain a fresh 32-byte nonce. Before completion, request /v1/attestation/report with canonical model, provider=near, signing_algo=ed25519, nonce, and x-no-aliasing:true. Retain every returned model candidate and the gateway report.',
   exactBytes: 'Send the canonical request model with x-no-aliasing:true and Accept-Encoding:identity. Preserve exact request and decompressed response bytes. Request the response signature with signing_algo=ed25519.',
   hardware: 'Use the official Verification Center or a DCAP quote verifier on the gateway and every model candidate. Apply explicit TCB/advisory and measurement/provenance policy; reject debug mode. Read signer and nonce binding from the verified quote report data and compare echoed fields.',

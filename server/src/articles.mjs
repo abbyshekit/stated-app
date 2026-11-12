@@ -285,14 +285,42 @@ function blockTexts(html) {
 
 const lengthOf = (list) => list.reduce((n, p) => n + p.length, 0);
 
-export function extractArticle(html, finalUrl) {
+function withoutHiddenElements(source) {
+  const chunks = [];
+  let cursor = 0; let hiddenTag = null; let depth = 0;
+  // Track nesting so a hidden wrapper's inner closing tag cannot expose its tail.
+  for (const match of source.matchAll(/<(\/?)([a-z][\w:-]*)\b(?:[^<>"']|"[^"]*"|'[^']*')*>/gi)) {
+    const [tag, closing, name] = match;
+    const lower = name.toLowerCase();
+    if (hiddenTag) {
+      if (lower === hiddenTag) depth += closing ? -1 : 1;
+      if (!depth) { hiddenTag = null; cursor = match.index + tag.length; }
+      continue;
+    }
+    if (closing) continue;
+    const attributes = [...tag.matchAll(/\s([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g)];
+    const hidden = attributes.some(([, attr, double, single, bare]) => attr.toLowerCase() === 'hidden'
+      || (attr.toLowerCase() === 'aria-hidden' && decode(double ?? single ?? bare ?? '').trim().toLowerCase() === 'true'));
+    if (!hidden) continue;
+    chunks.push(source.slice(cursor, match.index));
+    cursor = match.index + tag.length;
+    if (!/^(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)$/.test(lower)) {
+      hiddenTag = lower; depth = 1;
+    }
+  }
+  if (!hiddenTag) chunks.push(source.slice(cursor));
+  return chunks.join(' ');
+}
+
+export function extractArticle(html, finalUrl, { visibleOnly = false } = {}) {
   const source = String(html || '');
-  const ld = jsonLd(source);
-  const clean = source
+  const ld = visibleOnly ? {} : jsonLd(source);
+  const markup = source
     .replace(/<!--[\s\S]*?-->/g, ' ')
     .replace(/<(script|style|noscript|template|svg)[\s\S]*?<\/\1>/gi, ' ');
+  const clean = visibleOnly ? withoutHiddenElements(markup) : markup;
   const canonical = clean.match(/<link[^>]+rel=["']canonical["'][^>]*>/i)?.[0]?.match(/href=["']([^"']+)["']/i)?.[1];
-  const title = metaContent(clean, 'property', 'og:title') || ld.headline || textOf(clean.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '') || null;
+  const title = metaContent(clean, 'property', 'og:title') || (!visibleOnly && ld.headline) || textOf(clean.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '') || null;
   const byline = metaContent(clean, 'name', 'author') || metaContent(clean, 'property', 'article:author') || ld.author || null;
   const published = metaContent(clean, 'property', 'article:published_time') || ld.published
     || clean.match(/<time[^>]+datetime=["']([^"']+)["']/i)?.[1] || null;
@@ -307,16 +335,16 @@ export function extractArticle(html, finalUrl) {
   if (lengthOf(paragraphs) < 300 && scope !== stripped) paragraphs = paragraphsIn(storySection(stripped, title));
   let from = 'paragraphs';
   // Structured data carries the full text on some pages that hide it from <p> tags.
-  if (ld.body && lengthOf(paragraphs) < 0.6 * ld.body.length) {
+  if (!visibleOnly && ld.body && lengthOf(paragraphs) < 0.6 * ld.body.length) {
     paragraphs = ld.body.split(/\n+/).map((p) => p.replace(/\s+/g, ' ').trim()).filter((p) => p.length > 30);
     from = 'structured-data';
   }
-  if (lengthOf(paragraphs) < 1500) {
+  if (!visibleOnly && lengthOf(paragraphs) < 1500) {
     const have = paragraphs.join(' ');
     const extra = blockTexts(storySection(scope, title)).filter((b) => !have.includes(b.slice(0, 80)));
     if (extra.length && lengthOf(extra) > lengthOf(paragraphs)) { paragraphs = extra; from = 'text-blocks'; }
   }
-  if (!paragraphs.length) paragraphs = [textOf(clean.match(/<body[^>]*>([\s\S]*)<\/body>/i)?.[1] || clean)];
+  if (!visibleOnly && !paragraphs.length) paragraphs = [textOf(clean.match(/<body[^>]*>([\s\S]*)<\/body>/i)?.[1] || clean)];
   let canonicalUrl = finalUrl;
   try {
     if (canonical) canonicalUrl = new URL(canonical, finalUrl).toString();

@@ -464,6 +464,8 @@ async function performPlayAction(db, config, chain, user, betId, input, { fetchI
 }
 
 /** The referee settles an accepted Bet. Only a Bet funded with this referee can be settled this way. */
+const REFEREE_TIMEOUT_MS = 120_000;
+
 export async function refereeSettle(db, config, chain, bet, creator, outcome, { fetchImpl = fetch } = {}) {
   assertPlay(config);
   if (!['yes', 'no', 'void'].includes(outcome)) throw new Error('Unknown outcome');
@@ -471,8 +473,14 @@ export async function refereeSettle(db, config, chain, bet, creator, outcome, { 
   if (!bet.referee_wallet || bet.referee_wallet !== judge.id || bet.chain_state?.referee !== judge.id) {
     throw new UserError('This Bet did not name Stated as its referee.', 409);
   }
-  const sent = await chain.call({ signerId: judge.id, secret: judge.secret, contractId: config.nearContract,
-    method: 'referee_resolve', args: { id: bet.id, outcome } });
+  // The caller holds the Result's row lock through this call, so it must not wait forever on a stalled RPC.
+  // A transaction that lands after the timeout is found by the next pass, which reads the chain first.
+  let timer;
+  const sent = await Promise.race([
+    chain.call({ signerId: judge.id, secret: judge.secret, contractId: config.nearContract,
+      method: 'referee_resolve', args: { id: bet.id, outcome } }),
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('The referee transaction is unconfirmed after 120 s; the next pass reads the chain.')), REFEREE_TIMEOUT_MS); timer.unref?.(); }),
+  ]).finally(() => clearTimeout(timer));
   if (!sent.ok) throw new Error(`The referee transaction failed: ${sent.failure || 'not accepted'}`);
   const synced = await syncNearBet(db, config, creator, bet.id, { fetchImpl });
   await db.query(`insert into bilateral_bet_events (bet_id, actor_user_id, kind, detail) values ($1, $2, 'referee_resolved', $3)`,

@@ -1,7 +1,7 @@
 // INTEGRATION: the Marked look for Bets; callers supply an authorized Bet projection.
 // The two-seat block itself lives in marked.mjs; these helpers wrap it.
 import { html, raw } from './html.mjs';
-import { betBlock, betLead, betState, dayMonth } from './marked.mjs';
+import { betBlock as markedBetBlock, betLead, betState, dayMonth } from './marked.mjs';
 import { face } from './certificate.mjs';
 import { formatTestNear } from './near-escrow.mjs';
 import { network, unit } from './near-network.mjs';
@@ -21,6 +21,24 @@ export function displayBetStatus(bet) {
   return BET_STATUS[bet.status] || 'Verification needed';
 }
 
+// DESIGN.md: phase headings belong above the seats; settled stakes are the pot.
+export function betBlock(bet, options = {}) {
+  const refereeVoid = bet.status === 'settled' && bet.outcome === 'void'
+    && (bet.settled_by || bet.chain_state?.resolution?.method) === 'referee';
+  const head = options.lead === false ? null : options.heading
+    || (refereeVoid ? { text: betLead(bet, options).text, aside: 'Stakes returned' } : betLead(bet, options));
+  // The shared Marked seats also serve Prediction pages. Keep this Bet-only label here.
+  // DESIGN.md: Bet handles stay whole; only names over twelve characters step down.
+  const seats = raw(String(markedBetBlock(bet, { ...options, lead: false }))
+    .replace(/<b>(@[\w]*(?:<wbr>[\w]*)*)<\/b>/g, (_, name) => {
+      const handle = name.replaceAll('<wbr>', '');
+      return `<b${handle.length > 13 ? ' class="long-handle"' : ''}>${handle}</b>`;
+    }));
+  const body = betState(bet).decided
+    ? raw(String(seats).replace(/<small>(?:won|credited)<\/small>/, '<small>pot</small>')) : seats;
+  return html`${head ? html`<p class="lead">${head.text}${head.aside ? html`<span>${head.aside}</span>` : ''}</p>` : ''}<div class="bet-seats">${body}</div>`;
+}
+
 // Kept for callers that import it: the two seats, with no lead line.
 export function betStubs(bet, { joinHref = null, viewer = null, faces = null } = {}) {
   return betBlock(bet, { viewer, faces, joinHref, lead: false });
@@ -32,7 +50,7 @@ export function betCertificate(bet, { joinHref = null, viewer = null, faces = nu
 }
 
 // The terms as a fold. `extra` is more definition-list rows from the caller.
-export function betTerms(bet, { extra = '', open = false, title = 'Terms' } = {}) {
+export function betTerms(bet, { extra = '', open = false, title = 'Terms', juryReview = false } = {}) {
   return html`<details class="fold"${open ? ' open' : ''}><summary>${title}</summary><dl class="bet-terms">
     <dt>Counts as yes</dt><dd>${bet.criteria}</dd>
     <dt>Evidence source</dt><dd><a href="${bet.evidence_source_url}" rel="noopener noreferrer">${bet.evidence_source_url}</a></dd>
@@ -43,7 +61,7 @@ export function betTerms(bet, { extra = '', open = false, title = 'Terms' } = {}
     <dt>Stake back from</dt><dd>${betTime(new Date(new Date(bet.resolve_at).getTime() + 7 * 86400000))}</dd>
     <dt>Settlement</dt><dd>${bet.referee_wallet
       ? html`Stated’s recorded Result for the post decides, and the referee account <span class="mono">${bet.referee_wallet}</span> carries it to the contract. The referee can only choose yes, no or void between the two sides; it cannot take the stakes. With no Result, each side takes its stake back after that date.`
-      : 'Both must agree on the result. A result the other side leaves unanswered for two days stands. Without agreement, each can take their stake back after that date.'}</dd>
+      : 'Both must agree on the result. A result the other side leaves unanswered for two days stands. Without agreement, each can take their stake back after that date.'}${juryReview ? ' A reviewer can correct a ruling before it pays out.' : ''}</dd>
     ${extra}
   </dl></details>`;
 }

@@ -1,5 +1,6 @@
 // INTEGRATION: loopback transport and database doubles exercise public-only checks.
-// Synthetic quotes validate evidence shape only; no test claims hardware verification.
+// Quotes are real TDX quote structures chained to an ephemeral test root (support/enclave.mjs
+// installs it for this process); no test claims platform TCB verification.
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, sign } from 'node:crypto';
 import { createServer } from 'node:http';
@@ -9,6 +10,8 @@ import { runAttestedCheck } from '../src/attested-check.mjs';
 import { sha256, verifyAttestedRecord } from '../src/attested-signature.mjs';
 import { verifyHostedCheck } from '../../scripts/verify-attested-check.mjs';
 import { safeFetch } from '../src/articles.mjs';
+import { testReport, testRoots } from './support/enclave.mjs';
+import { INTEL_SGX_ROOT_CA_PEM } from '../src/tdx-quote.mjs';
 
 const CLI = new URL('../../scripts/verify-attested-check.mjs', import.meta.url).pathname;
 const BET = '0edb1716-79db-4cca-b795-d4b91cfc6b41';
@@ -24,10 +27,7 @@ function keys() {
   return { ...pair, address: pair.publicKey.export({ type: 'spki', format: 'der' }).subarray(-32).toString('hex') };
 }
 
-function report(nonce, address) {
-  return { signing_algo: 'ed25519', signing_address: address, request_nonce: nonce,
-    intel_quote: 'abcd', event_log: '[]' };
-}
+const report = (nonce, address) => testReport(nonce, address);
 
 function signature(key, request, response, kind = 'provider_tee') {
   const text = `${MODEL}:${sha256(request)}:${sha256(response)}`;
@@ -82,6 +82,8 @@ function database() {
         note: 'The official result supports yes.', url: 'https://public.example.org/result',
         knownAt: '2026-10-02T00:00:00.000Z' } };
       if (/kind='attested_check'/.test(sql)) return state.checks.length ? { detail: structuredClone(state.checks[0]) } : null;
+      // This Bet has no enclave ruling, plan or posted evidence: the public read looks and finds none.
+      if (/enclave_ruling|enclave_plans/.test(sql)) return null;
       throw new Error(`Unexpected SQL: ${sql}`);
     },
     async query(sql, args) {
@@ -117,7 +119,10 @@ async function fakeNear(t, { mode = 'success', reason = VERDICT.reason } = {}) {
         assert.equal(url.searchParams.get('signing_algo'), 'ed25519');
         assert.equal(req.headers['x-no-aliasing'], 'true');
         const nonce = mode === 'bad-preflight' ? '00'.repeat(32) : url.searchParams.get('nonce');
-        res.end(JSON.stringify({ gateway_attestation: report(nonce, key.address), model_attestations: [report(nonce, key.address)] }));
+        // junk-quote: no real quote; unbound-quote: a valid quote for another key.
+        const quoted = mode === 'junk-quote' ? { ...report(nonce, key.address), intel_quote: 'abcd' }
+          : mode === 'unbound-quote' ? { ...report(nonce, keys().address), signing_address: key.address } : report(nonce, key.address);
+        res.end(JSON.stringify({ gateway_attestation: quoted, model_attestations: [quoted] }));
       } else if (url.pathname === '/v1/chat/completions') {
         seen.completion += 1;
         const chunks = [];
@@ -201,13 +206,13 @@ test('evidence fetch keeps private-address guards and accepts caller cancellatio
   }), error => error.name === 'AbortError');
 });
 
-for (const mode of ['api-failure', 'tamper', 'gateway', 'bad-preflight']) {
+for (const mode of ['api-failure', 'tamper', 'gateway', 'bad-preflight', 'junk-quote', 'unbound-quote']) {
   test(`${mode} cannot persist a check`, async (t) => {
     const near = await fakeNear(t, { mode });
     const db = database();
     await assert.rejects(runAttestedCheck(db, near.config, BET, '3', { fetchEvidence: near.fetchEvidence }), (error) => error.status === 502);
     assert.equal(db.state.checks.length, 0);
-    if (mode === 'bad-preflight') assert.equal(near.seen.completion, 0);
+    if (['bad-preflight', 'junk-quote', 'unbound-quote'].includes(mode)) assert.equal(near.seen.completion, 0);
   });
 }
 
@@ -232,7 +237,20 @@ test('a verdict beyond forty words cannot persist a check', async (t) => {
 test('the standalone verifier accepts signed bytes and rejects a changed response byte', () => {
   const record = standaloneRecord();
   assert.deepEqual(verifyAttestedRecord(record), { requestHash: true, responseHash: true,
-    signature: true, modelSigner: true, hardwareAttestation: 'not_verified' });
+    signature: true, modelSigner: true, quote: 'tdx_chain_verified', hardwareAttestation: 'not_verified' });
+  // The same record under the pinned Intel root: its test quote is not Intel's.
+  assert.throws(() => verifyAttestedRecord(record, { roots: [INTEL_SGX_ROOT_CA_PEM] }), /quote does not verify/);
+  assert.equal(verifyAttestedRecord(record, { roots: testRoots }).quote, 'tdx_chain_verified');
+  // Certificates are checked at the record's attestedAt, not today: the test chain is valid from 2020.
+  const early = { ...standaloneRecord(), startedAt: '2019-06-01T00:00:00.000Z', attestedAt: '2019-06-01T00:00:01.000Z', completedAt: '2019-06-01T00:00:02.000Z' };
+  assert.throws(() => verifyAttestedRecord(early), /quote does not verify/);
+  // A junk quote, or a valid quote bound to another key, fails.
+  const junk = standaloneRecord();
+  junk.attestation.gateway_attestation.intel_quote = 'abcd';
+  assert.throws(() => verifyAttestedRecord(junk), /gateway_attestation quote does not verify/);
+  const unbound = standaloneRecord();
+  unbound.attestation.model_attestations[0].intel_quote = report(unbound.nonce, keys().address).intel_quote;
+  assert.throws(() => verifyAttestedRecord(unbound), /signing model attestation quote does not verify/);
   const bytes = Buffer.from(record.responseBody, 'base64');
   bytes[10] ^= 1;
   record.responseBody = bytes.toString('base64');
@@ -272,10 +290,12 @@ test('hosted verifier and CLI distinguish valid, mismatched and unavailable reco
     mode = scenario;
     const hosted = await verifyHostedCheck(base, BET);
     assert.equal(hosted.exitCode, expected);
+    // The CLI is a separate process and trusts only the pinned Intel root, so the
+    // test quote is rejected there: a record signed under another root never passes it.
     const child = await cli(base);
-    assert.equal(child.code, expected, child.stderr);
-    assert.equal(JSON.parse(child.stdout).pass, expected === 0);
-    if (expected === 0) assert.equal(JSON.parse(child.stdout).hardwareAttestation, 'not_verified');
+    assert.equal(child.code, scenario === 'valid' ? 1 : expected, child.stderr);
+    assert.equal(JSON.parse(child.stdout).pass, false);
+    if (scenario === 'valid') assert.match(child.stdout, /quote does not verify/);
   }
 });
 
