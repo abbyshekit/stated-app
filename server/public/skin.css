@@ -233,6 +233,8 @@ label.check { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10
 .stakes.left { text-align: left; padding-top: 6px; color: var(--dim); text-wrap: pretty; }
 /* A link at the end of a sentence keeps a 44px tap height without changing the line. */
 p.gut > .tl, p.stakes > .tl { display: inline; min-height: 0; padding-block: 12px; }
+/* Short action links never break; a pasted URL still wraps. */
+p.gut > .tl:not(.unread), p.stakes > .tl { white-space: nowrap; }
 .acts { padding: 16px 16px 8px; display: grid; gap: 2px; margin: 0; }
 .acts form { margin: 0; display: grid; }
 .acts.line { border-bottom: 1px solid var(--line); padding-bottom: 16px; }

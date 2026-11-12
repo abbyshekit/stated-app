@@ -73,7 +73,7 @@ export function registerBetEvidenceRoutes({ route, db, config, layout, needPost,
         <p class="pwho"><b>${author}</b>${handle && `@${handle}` !== author ? html`<span>@${handle}</span>` : ''}</p>
         <p class="said">${bet.claim}</p>
       </div></li></ul>
-      <p class="gut quiet">The deadline ${new Date(bet.resolve_at).getTime() > Date.now() ? 'is' : 'was'} ${nextBetTime(bet.resolve_at)}. Links close ${nextBetTime(closes)}.</p>
+      <p class="gut quiet">Links close ${nextBetTime(closes)}. The deadline ${new Date(bet.resolve_at).getTime() > Date.now() ? 'is' : 'was'} ${nextBetTime(bet.resolve_at)}.</p>
       ${open ? html`<form method="post" action="${path}" class="evidence-form">
         ${csrfField(ctx)}
         <div class="gut">

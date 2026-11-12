@@ -94,7 +94,7 @@ function evidenceLine(record, bet) {
 
 function rulingLine(record, bet) {
   if (record.mode === 'review') return record.agrees !== null
-    ? `A Stated reviewer recorded ${outcomeWord(bet.outcome)}. The jury ${record.agrees ? 'agreed' : 'disagreed'}.` : '';
+    ? `A Stated reviewer recorded ${outcomeWord(bet.outcome)}. The NEAR AI enclave jury ${record.agrees ? 'agreed' : 'disagreed'}.` : '';
   const settled = ['settled', 'refunded'].includes(bet.status);
   if (record.outcome === 'unclear') {
     const counts = new Map();
@@ -105,7 +105,7 @@ function rulingLine(record, bet) {
   const creatorWon = record.outcome === bet.creator_side;
   const winner = creatorWon ? bet.creator_username : bet.acceptor_username;
   const pot = formatTestNear((BigInt(bet.stake_yocto) * 2n).toString());
-  return `The NEAR AI enclave jury agreed, so ${winner ? `@${winner}, who bet ${record.outcome},` : `the ${record.outcome} side`} ${settled ? 'won' : 'wins'} the ${pot} ${unit()} pot.`;
+  return `The NEAR AI enclave jury agreed, so ${winner ? `@${winner}, who bet ${record.outcome},` : `the ${record.outcome} side`} ${settled ? 'won' : 'wins'} the ${`${pot} ${unit()}`.replace(/ /g, '\u00a0')} pot.`;
 }
 
 function evidenceFold(record) {

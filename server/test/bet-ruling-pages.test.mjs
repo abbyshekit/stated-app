@@ -120,7 +120,7 @@ test('price ruling shows the post, three models, confidence, window, price and v
   assert.doesNotMatch(response.text, /Private source words|private_author/);
   assert.ok(response.text.includes(`<b><span class="hl">Yes</span></b><span>${dayMonth(record.decidedAt, { year: true })}</span>`));
   assert.doesNotMatch(response.text, /<h2>NEAR AI enclave jury<\/h2>/);
-  assert.ok(response.text.includes('The NEAR AI enclave jury agreed, so @public_bettor, who bet yes, wins the 0.2 test NEAR pot.'));
+  assert.ok(response.text.includes('The NEAR AI enclave jury agreed, so @public_bettor, who bet yes, wins the 0.2\u00a0test\u00a0NEAR pot.'));
   assert.match(response.text, /<ul class="jury-rail">/);
   assert.equal((response.text.match(/<span>Yes, 95% sure<\/span>/g) || []).length, MODELS.length);
   assert.match(response.text, /<b>Qwen3\.8 27B<\/b>/);
@@ -243,7 +243,7 @@ test('review mode computes agreement from the settled Bet rather than the stored
   assert.equal(response.status, 200);
   assert.match(response.text, /class="verdict ruling-verdict yes"><b><span class="hl">Yes<\/span><\/b>/);
   const settled = await s.db.one('select settled_at from bilateral_bets where id=$1', [bet.id]);
-  assert.ok(response.text.includes('<p class="gut">A Stated reviewer recorded Yes. The jury agreed.</p>'));
+  assert.ok(response.text.includes('<p class="gut">A Stated reviewer recorded Yes. The NEAR AI enclave jury agreed.</p>'));
   assert.doesNotMatch(response.text, /Ruled yes/);
   assert.ok(response.text.includes('A second opinion does not change the payout.'));
   assert.doesNotMatch(response.text, /both stakes go back/, 'a second opinion never moves money');
