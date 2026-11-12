@@ -8,7 +8,7 @@ import { startStack } from './support/app.mjs';
 import { FakeNear } from './support/fake-near.mjs';
 import { tick } from '../src/worker.mjs';
 import { accountNameFor, claimPlayAccount, playAccountFor, refillTreasury, refereeId, treasury, yocto } from '../src/play.mjs';
-import { betReplies, parseBetCommand, runBetCommands, settleReplyBets } from '../src/reply-bets.mjs';
+import { betReplies, parseBetCommand, replyDeadline, runBetCommands, settleReplyBets } from '../src/reply-bets.mjs';
 import { ensureJury, readEnclaveRuling } from '../src/enclave-ruling.mjs';
 import { resolveStatement } from '../src/notify.mjs';
 import { enclaveRulingFixture } from './support/enclave.mjs';
@@ -789,4 +789,11 @@ test('a human Yes known after the Bet deadline stays open for review without an 
   await s.db.query('update statements set outcome_at=$2 where id=$1', [statementId, bet.resolve_at]);
   await s.db.query('update bilateral_bets set settle_checked_at=null where id=$1', [bet.id]);
   assert.deepEqual(await settle(), { settled: 1, reclaimed: 0, errors: 0 }, 'a Yes known exactly at the deadline is eligible');
+});
+
+test('the bot names the clock when a deadline is not the end of its day', () => {
+  assert.equal(replyDeadline('2026-11-13T16:00:00.000Z'), '16:00 UTC 13 Nov 2026');
+  assert.equal(replyDeadline('2026-11-19T23:59:59.000Z'), '19 Nov 2026');
+  assert.match(betReplies.offer({ stake: '0.1', side: 'yes', date: replyDeadline('2026-11-13T16:00:00.000Z'), bot: 'statedbot' }),
+    /^0\.1 .+ says this happens by 16:00 UTC 13 Nov 2026\. /);
 });

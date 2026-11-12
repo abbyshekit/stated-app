@@ -91,6 +91,15 @@ const refusals = ({ walletUrl = null, config, limit } = {}) => ({
   pilot: 'Bets with real NEAR are invite-only for now.',
 });
 
+// A deadline at the end of its day reads as the day; any other deadline keeps its clock,
+// so "by 13 Nov 2026" never stands for 16:00 UTC that day.
+export function replyDeadline(value) {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  const endOfDay = d.getUTCHours() === 23 && d.getUTCMinutes() === 59;
+  return endOfDay ? dayMonth(d, { year: true }) : `${d.toISOString().slice(11, 16)} UTC ${dayMonth(d, { year: true })}`;
+}
+
 export const betReplies = {
   evidencePrompt: ({ closesAt, url }) => `Time’s up. Reply yes or no with a public link that shows what happened. A NEAR AI enclave jury rules at ${new Date(closesAt).toISOString().slice(11, 16)} UTC on ${dayMonth(closesAt, { year: true })}. ${url}`,
   evidenceAck: ({ closesAt, url }) => `Got it. The jury rules at ${new Date(closesAt).toISOString().slice(11, 16)} UTC. ${url}`,
@@ -245,7 +254,7 @@ async function offer(db, config, chain, cmd, deps) {
   }
   await publishBet(db, user, betId);
   await say(db, config, { key: `offer:${betId}`, inReplyTo: cmd.event_id, betId,
-    body: betReplies.offer({ stake: formatTestNear(bet.stake_yocto), side: bet.creator_side, date: dayMonth(bet.resolve_at, { year: true }),
+    body: betReplies.offer({ stake: formatTestNear(bet.stake_yocto), side: bet.creator_side, date: replyDeadline(bet.resolve_at),
       bot: deps.botUsername, url: linkFor(config, betId) }) });
   return betId;
 }
@@ -289,7 +298,7 @@ async function take(db, config, chain, cmd, deps) {
   }
   if (String(bet.acceptor_user_id || '') !== String(user.id)) throw new Refused('taken');
   await say(db, config, { key: `match:${betId}`, inReplyTo: cmd.event_id, betId,
-    body: betReplies.match({ pot: formatTestNear((BigInt(row.stake_yocto) * 2n).toString()), date: dayMonth(row.resolve_at, { year: true }),
+    body: betReplies.match({ pot: formatTestNear((BigInt(row.stake_yocto) * 2n).toString()), date: replyDeadline(row.resolve_at),
       creator: row.creator_username, creatorSide: row.creator_side, taker: user.x_username, url: linkFor(config, betId) }) });
   return betId;
 }

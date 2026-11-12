@@ -59,7 +59,8 @@ export function nextBetTime(value, now = Date.now()) {
     const unit = minutes ? 'minute' : 'hour';
     return `in ${count} ${unit}${count === 1 ? '' : 's'}, ${clock} UTC ${day}`;
   }
-  if (left > 0) return `in ${Math.ceil(left / DAY)} days, ${clock} UTC ${day}`;
+  // Whole UTC days, so the count agrees with the date beside it ("in 2 days, … 14 Nov" on 12 Nov).
+  if (left > 0) return `in ${Math.floor(date.getTime() / DAY) - Math.floor(now / DAY)} days, ${clock} UTC ${day}`;
   return `${clock} UTC ${day}`;
 }
 
