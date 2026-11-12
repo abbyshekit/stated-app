@@ -205,8 +205,9 @@ test('settled rulings, corrections and ambiguous refunds render on both pages', 
   for (const source of ['coinbase-candles', 'evidence']) {
     for (const outcome of ['yes', 'no']) {
       await setChain('settled', outcome);
-      await insertRuling({ source, outcome });
-      await bothContain(source === 'coinbase-candles' ? 'A NEAR AI enclave jury ruled from Coinbase’s BTC-USD price.' : 'A NEAR AI enclave jury ruled from the links both sides posted.');
+      const record = await insertRuling({ source, outcome });
+      const count = record.verdicts.length;
+      await bothContain(`All ${count === 3 ? 'three' : count} models said ${outcome}.`);
       await clearRuling();
       await insertRuling({ source, outcome: outcome === 'yes' ? 'no' : 'yes' });
       await bothContain('A reviewer corrected the enclave’s ruling.');
@@ -261,6 +262,7 @@ test('JSON returns the verified record and recipe with the signed-check headers'
   const projection = await s.db.tx(tx => readPublicBet(tx, bet.id));
   assert.deepEqual(projection.enclave, {
     mode: 'ruling', outcome: record.outcome, agrees: null, models: record.verdicts.map(verdict => verdict.model),
+    verdicts: record.verdicts.map(({ parsed }) => ({ outcome: parsed.outcome, confidence: parsed.confidence })),
     reason: record.verdicts[0].parsed.reason, source: 'submitted', product: null,
     itemCount: record.evidence.items.length, decidedAt: record.decidedAt, minConfidence: record.minConfidence,
   });

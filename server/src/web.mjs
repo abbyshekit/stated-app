@@ -6,7 +6,7 @@ import { nearChain } from './play.mjs';
 import { registerPlayRoutes } from './play-pages.mjs';
 import { registerBetRoutes } from './bet-pages.mjs';
 import { registerBetStartRoutes } from './bet-start.mjs';
-import { registerBetRulingRoutes } from './bet-ruling-pages.mjs';
+import { registerBetRulingRoutes, rulingPost } from './bet-ruling-pages.mjs';
 import { registerCourtRoutes } from './court-pages.mjs';
 import { registerBetEvidenceRoutes } from './bet-evidence-pages.mjs';
 
@@ -17,9 +17,10 @@ const PERMISSIONS_POLICY = 'camera=(), microphone=(), geolocation=(), payment=()
 import { registerWalletRpc } from './near-wallet-rpc.mjs';
 import { registerShareRoutes } from './share-pages.mjs';
 import { betsFor } from './bets.mjs';
-import { publicBet, publicBetsForSave, firstPublicBetsForSaves, nextOpenPublicBet, publicBetHall } from './bet-public.mjs';
-import { betList } from './bet-view.mjs';
-import { betBlock, betState, dayMonth, timeLeft } from './marked.mjs';
+import { publicBet, publicBetsForProfile, publicBetsForSave, firstPublicBetsForSaves, nextOpenPublicBet, publicBetHall } from './bet-public.mjs';
+import { betList, betBlock as detailBetBlock } from './bet-view.mjs';
+import { betBlock, betLead, betState, dayMonth, timeLeft } from './marked.mjs';
+import { juryLogos } from './settlement-view.mjs';
 import { formatTestNear } from './near-escrow.mjs';
 import { network, unit } from './near-network.mjs';
 import { assertNetworkConfig } from './config.mjs';
@@ -270,14 +271,10 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
   async function layout(ctx, title, body, { og = null, kind = 'public', flush = false, back = null, extra = null, signin: headerSignin = true, inboxBadge = true, two = false } = {}) {
     const user = ctx.user;
     const path = ctx.url.pathname;
-    // A public Bet reached from outside the app identifies the site first.
+    // DESIGN.md: public Bet and ruling pages share the wordmark; the ruling
+    // has its own explicit back-to-bet link in the content.
     if (kind === 'public' && /^\/bets\/[a-f\d-]{36}(?:\/ruling)?$/i.test(path)) {
-      let from = null;
-      try {
-        const referrer = new URL(String(ctx.req.headers.referer || ''));
-        if (referrer.origin === new URL(config.baseUrl).origin) from = referrer.pathname + referrer.search;
-      } catch { /* No same-origin history: show the wordmark. */ }
-      back = from ? back || from : null;
+      back = null;
     }
     const current = (p) => (path === p || (p !== '/' && path.startsWith(`${p}/`)) ? raw('aria-current="page"') : '');
     // Four sections. Predictions owns /me, a save and tracking; Bets owns both bet paths.
@@ -305,6 +302,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${title} · Stated</title>
+  <meta name="description" content="${og?.description || 'Bet on what is said on X. Three AI models in NEAR AI enclaves decide the result.'}">
   ${kind === 'private' ? raw('<meta name="robots" content="noindex, nofollow">') : ''}
   ${ogTags}
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
@@ -642,7 +640,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
             line: html`<p class="meta bet"><span class="stack">${pic(bet.creator_username)}</span><span>@${bet.creator_username} bet ${formatTestNear(bet.stake_yocto)} ${unit()} on ${bet.creator_side}.</span></p>` });
         }
         lines.set(String(row.save_id), html`<p class="meta bet"><span class="stack">${pic(bet.creator_username)}</span><span>${mine ? 'You' : `@${bet.creator_username}`} bet ${bet.creator_side}.</span>${mine
-          ? html`<a href="/bets/${bet.id}">Open the bet</a>` : html`<a href="/bets/${bet.id}?join=1#accept">Take ${other}</a>`}</p>`);
+          ? html`<a href="/bets/${bet.id}">Open the bet</a>` : html`<a href="/bets/${bet.id}?join=1#accept">Bet ${other}</a>`}</p>`);
       } else if (['accepted', 'proposed', 'disputed'].includes(bet.status) && bet.creator_username && bet.acceptor_username) {
         lines.set(String(row.save_id), html`<p class="meta bet"><span class="stack">${pic(bet.creator_username)}${pic(bet.acceptor_username)}</span><a href="/bets/${bet.id}">@${bet.creator_username} v @${bet.acceptor_username}</a><span>${formatTestNear(bet.stake_yocto)} ${unit()} each</span></p>`);
       }
@@ -880,35 +878,40 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
     const recent = [...seen.values()].slice(0, 9);
     const faces = await facesFor(db, recent, ctx.user);
     const betLines = await betLinesFor(recent, ctx.user);
-    // With bets from replies on, open on a dare: an open prediction with a seat to take.
-    // Otherwise open on a real result: the latest public prediction that came true.
-    const dare = config.play?.enabled
+    // DESIGN.md: the latest public ruling is the first object, with its mark on the words.
+    let settled = null;
+    for (const row of hall.rows.filter(bet => bet.status === 'settled' && ['yes', 'no'].includes(bet.outcome))
+      .sort((a, b) => new Date(b.settled_at) - new Date(a.settled_at))) {
+      const bet = await publicBet(db, row.id, config.play);
+      if (bet?.enclave && !bet.evidence?.privateItemCount) { settled = bet; break; }
+    }
+    const dare = !settled && config.play?.enabled
       ? recent.find((row) => betLines.dares.has(String(row.save_id)) && !isPlaceholder(row)) || null : null;
     const lead = dare || recent.find((row) => verdictOf(row) === 'yes' && row.available && !isPlaceholder(row)) || null;
     const dareBet = dare ? betLines.dareBets.get(String(dare.save_id)) : null;
-    const fallback = !dareBet && config.play?.enabled && !config.near.real
+    const fallback = !settled && !dareBet && config.play?.enabled && !config.near.real
       ? await nextOpenPublicBet(db, ctx.user?.id) : null;
     const rest = recent.filter((row) => fallback || row !== lead).slice(0, 8);
     const fallbackFaces = fallback ? await facesByUsername(db, [fallback.creator_username], ctx.user) : null;
     const fallbackOther = fallback?.creator_side === 'yes' ? 'no' : 'yes';
-    const demo = !ctx.user && !config.near.real && config.demoBetId ? await publicBet(db, config.demoBetId) : null;
-    const showDemo = demo?.funded && demo.last_verified_at && demo.status === 'settled'
-      && ['yes', 'no'].includes(demo.outcome) && demo.creator_username && demo.acceptor_username;
-    const intro = config.play?.enabled
-      ? (dareBet || fallback ? html`<h1 class="visually-hidden">Stated</h1>` : html`<h1 class="visually-hidden">Stated</h1>
-      <p class="pitch"><b>Think they’re wrong?</b> Reply under their post on X:</p>
-      <p class="say">@${bot} bet ${config.play.defaultStakeNear} no</p>`)
-      : html`<h1 class="visually-hidden">Stated</h1>
-      <p class="pitch"><b>Sure about that?</b> Reply <b>@${bot}</b> under any prediction on X. Private until you publish.</p>`;
-    send(ctx.res, 200, await layout(ctx, 'Give your predictions a record', html`
-      <div class="pri">${fallback ? html`${intro}<p class="prop">${fallback.claim}</p>${betBlock(fallback, { viewer: ctx.user, faces: fallbackFaces, joinHref: `/bets/${fallback.id}?join=1#accept` })}` : lead ? html`${postCard(lead, { faces, sweep: true, link: publicRow(lead).link })}${dareBet ? html`<div class="dare">${dareBet.line}</div>` : ''}${intro}` : intro}
-      ${dareBet || fallback ? html`<div class="acts"><a class="pill solid big" href="${fallback ? `/bets/${fallback.id}?join=1#accept` : `/bets/${dareBet.id}`}">Take ${fallback ? fallbackOther : dareBet.other}</a></div>
-        <p class="pitch own"><a href="/bets/new"><b>Or make your own.</b></a> Reply under any prediction on X: <b>@${bot} bet ${config.play.defaultStakeNear} no</b></p>`
-      : html`<div class="acts line">${ctx.user ? html`<a class="pill solid big" href="/me">Your predictions</a>` : html`<a class="pill solid big" href="/signin">${X_MARK}Sign in with X</a>`}</div>`}
-      ${showDemo ? html`<p class="pitch">Operator-controlled test on NEAR testnet</p><div class="acts"><a class="pill big" href="/bets/${demo.id}">View test bet</a></div>` : ''}</div>
-      ${hall.total ? html`<p class="pitch">${hall.total} ${hall.total === 1 ? 'bet' : 'bets'}, ${hall.settled} settled, ${formatTestNear(hall.wonYocto)} ${unit()} won</p>${betList(hall.rows, { hall: true })}` : ''}
+    const featuredId = settled?.id || fallback?.id || dareBet?.id;
+    const listed = hall.rows.filter(bet => bet.id !== featuredId);
+    send(ctx.res, 200, await layout(ctx, 'Bets on what is said on X', html`
+      <h1 class="visually-hidden">Stated</h1>
+      ${settled ? html`<a class="settled-feature" href="/bets/${settled.id}/ruling">
+        ${await rulingPost(db, settled, settled.outcome)}
+        <p class="gut feature-winner"><b>${betLead(settled).text}</b><span>${formatTestNear((BigInt(settled.stake_yocto) * 2n).toString())} ${unit()} pot</span></p>
+        ${juryLogos(settled.enclave.models)}</a>`
+      : fallback ? html`<p class="prop">${fallback.claim}</p>${detailBetBlock(fallback, { viewer: ctx.user, faces: fallbackFaces, joinHref: `/bets/${fallback.id}?join=1#accept` })}`
+        : lead ? html`${postCard(lead, { faces, sweep: true, link: publicRow(lead).link })}${dareBet ? html`<div class="dare">${dareBet.line}</div>` : ''}` : ''}
+      <p class="pitch home-intro">Reply to any post on X with @${bot} bet ${config.play.defaultStakeNear} no. Three AI models judge it and NEAR pays the winner.</p>
+      ${dareBet || fallback ? html`<div class="acts"><a class="pill solid big" href="${fallback ? `/bets/${fallback.id}?join=1#accept` : `/bets/${dareBet.id}`}">Bet ${fallback ? fallbackOther : dareBet.other}</a></div>`
+        : settled ? '' : html`<div class="acts line">${ctx.user ? html`<a class="pill solid big" href="/me">Your predictions</a>` : html`<a class="pill solid big" href="/signin">${X_MARK}Sign in with X</a>`}</div>`}
+      ${hall.total ? html`<section id="public-bets"><p class="pitch"><a class="tl" href="#public-bets">${hall.total} ${hall.total === 1 ? 'bet' : 'bets'}</a>, ${hall.settled} settled, ${formatTestNear(hall.wonYocto)} ${unit()} won</p>${betList(listed, { hall: true })}</section>` : ''}
       ${rest.length ? fileList(rest, publicRow, faces, betLines) : ''}
-    `, { flush: true, signin: Boolean(dareBet || fallback), two: rest.length > 0 }), { headers: refCookie(ctx) });
+    `, { flush: true, signin: Boolean(settled || dareBet || fallback), og: {
+      title: 'Stated: bets on what is said on X', description: 'Bet on what is said on X, decided by three AI models in NEAR AI enclaves.',
+    } }), { headers: refCookie(ctx) });
   });
 
   route('GET', /^\/signin$/, async (ctx) => {
@@ -1542,8 +1545,10 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
     redirect(ctx.res, `/me?tab=following&done=following&n=${saves.length}`);
   });
 
-  async function profilePage(ctx, owner, { base, title }) {
-    const collections = await collectionPage(db, owner, ctx.url);
+  async function profilePage(ctx, owner, { base, title, publicBets = [] }) {
+    const publicProfile = canViewProfile(null, owner);
+    const collections = publicProfile ? await collectionPage(db, owner, ctx.url)
+      : publicBets.length ? { mine: [], following: [], next: null } : null;
     if (!collections) return notFound(ctx);
     ensureVisitor(ctx);
     const record = await publicRecord(db, owner);
@@ -1553,7 +1558,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
     const betLines = await betLinesFor(all, ctx.user);
     const list = (rows) => fileList(rows, (row) => ({ link: `${base}/${row.save_id}` }), listFaces, betLines);
     send(ctx.res, 200, await layout(ctx, title, html`
-      ${owner.kind === 'editorial' ? '' : html`<div class="post who-head"><div class="head">${face({ url: listFaces.get(String(owner.x_user_id)) || null, name: owner.x_username, size: 'lg' })}<b>${owner.x_name || owner.x_username}</b><span>@${owner.x_username}</span></div></div>`}
+      ${owner.kind === 'editorial' ? '' : html`<div class="post who-head"><div class="head">${face({ url: listFaces.get(String(owner.x_user_id)) || null, name: owner.x_username, size: 'lg' })}<b>${publicProfile ? owner.x_name || owner.x_username : owner.x_username}</b><span>@${owner.x_username}</span></div></div>`}
       <div class="hero${owner.kind === 'editorial' ? '' : ' visually-hidden'}">
         <h1>${title}</h1>
         ${owner.kind === 'editorial'
@@ -1561,12 +1566,13 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
           : ''}
       </div>
       ${isOwnerViewing ? html`<p class="notice">This is what others see. Private saves are not listed.</p>` : ''}
-      ${owner.kind !== 'editorial' ? html`<h2>Predictions on this page (${collections.mine.length})</h2>
+      ${publicBets.length ? html`<h2 class="lead">Public bets</h2>${betList(publicBets, { hall: true })}` : ''}
+      ${publicProfile && owner.kind !== 'editorial' ? html`<h2>Predictions on this page (${collections.mine.length})</h2>
       ${collections.mine.length ? list(collections.mine) : html`<p class="blank">No public predictions.</p>`}` : ''}
-      <h2>${owner.kind === 'editorial' ? 'Records' : 'Following'} on this page (${collections.following.length})</h2>
-      ${collections.following.length ? list(collections.following) : html`<p class="blank">Nothing public.</p>`}
+      ${publicProfile ? html`<h2>${owner.kind === 'editorial' ? 'Records' : 'Following'} on this page (${collections.following.length})</h2>
+      ${collections.following.length ? list(collections.following) : html`<p class="blank">Nothing public.</p>`}` : ''}
       ${collections.next ? html`<p class="gut"><a class="tl" rel="next" href="${collections.next}">Next page</a></p>` : ''}
-      ${owner.kind !== 'editorial' ? html`<section class="folds"><details class="fold record"><summary>Record</summary>${recordBlock(record, { publicOnly: true })}</details></section>` : ''}
+      ${publicProfile && owner.kind !== 'editorial' ? html`<section class="folds"><details class="fold record"><summary>Record</summary>${recordBlock(record, { publicOnly: true })}</details></section>` : ''}
     `, {
       flush: true,
       og: {
@@ -1601,7 +1607,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
     let primary;
     if (canTake) {
       primary = ctx.user ? html`<a class="pill solid big" href="${join}">Bet ${other}</a>`
-        : html`<a class="pill solid big" href="/signin?return=${encodeURIComponent(join)}">${X_MARK}Sign in to bet ${other}</a>`;
+        : html`<a class="pill solid big" href="/signin?return=${encodeURIComponent(join)}">Bet ${other}</a>`;
     } else if (follow) primary = html`<a class="pill solid big" href="${follow}">Follow it</a>`;
     else primary = shareLink(shareUrl, row);
     const sharesFirst = !canTake && !follow;
@@ -1638,8 +1644,10 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
 
   route('GET', /^\/u\/(\w{1,40})$/, async (ctx) => {
     const owner = await personByUsername(db, ctx.params[0]);
-    if (!owner || !canViewProfile(null, owner)) return notFound(ctx);
-    await profilePage(ctx, owner, { base: `/u/${owner.x_username}`, title: `@${owner.x_username}` });
+    if (!owner) return notFound(ctx);
+    const publicBets = await publicBetsForProfile(db, owner.x_username);
+    if (!canViewProfile(null, owner) && !publicBets.length) return notFound(ctx);
+    await profilePage(ctx, owner, { base: `/u/${owner.x_username}`, title: `@${owner.x_username}`, publicBets });
   });
 
   // A save is found by its ID; the handle in the address is only a label. An

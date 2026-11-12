@@ -95,7 +95,7 @@ beforeEach(async () => {
 
 after(async () => { if (s) await s.close(); });
 
-test('the hall counts only verified publications, limits rows and distinguishes paid winnings from credit', async () => {
+test('the hall lists every verified publication and distinguishes paid winnings from credit', async () => {
   const bets = [];
   for (let i = 0; i < 11; i += 1) {
     const bet = await makeBet(creator, { refereeAccount: 'referee.testnet' });
@@ -120,11 +120,11 @@ test('the hall counts only verified publications, limits rows and distinguishes 
   assert.equal(hall.total, 8);
   assert.equal(hall.settled, 8);
   assert.equal(hall.paidYocto, '200000000000000000000000');
-  assert.deepEqual(hall.rows.map((row) => row.id), bets.slice(2, 8).reverse().map((bet) => bet.id));
+  assert.deepEqual(new Set(hall.rows.map((row) => row.id)), new Set(bets.slice(0, 8).map((bet) => bet.id)));
   for (const browser of [s.browser(), await s.signIn(s.fakeX.addUser('81001', 'public_creator'))]) {
     const page = await browser.get('/');
     assert.equal(page.status, 200);
-    assert.match(page.text, /8 bets, 8 settled, [0-9.]+ test NEAR won/);
+    assert.match(page.text, /8 bets<\/a>, 8 settled, [0-9.]+ test NEAR won/);
     assert.match(page.text, /@public_creator won the 0\.2 test NEAR pot/);
     for (const bet of bets.slice(8)) assert.doesNotMatch(page.text, new RegExp(`/bets/${bet.id}`));
     assert.doesNotMatch(page.text, /private fixture note|private\.example\.org/);
@@ -295,7 +295,7 @@ test('public settlement proof requires a matching referee event and publication'
   assert.equal(evidenced.result_evidence.knownAt, input.knownAt);
   assert.ok(evidenced.result_evidence.publishedAt);
   const publicEvidencePage = await s.browser().get(`/bets/${valid.id}`);
-  assert.match(publicEvidencePage.text, /Stated settled this Bet Yes/);
+  assert.match(publicEvidencePage.text, /Verify settlement/);
   assert.match(publicEvidencePage.text, /href="https:\/\/example\.org\/public-outcome"[^>]*>Result source<\/a>/);
   assert.match(publicEvidencePage.text, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.doesNotMatch(publicEvidencePage.text, /<script>alert|private fixture note|private\.example\.org/);
@@ -310,7 +310,7 @@ test('public settlement proof requires a matching referee event and publication'
 
   const privateWinner = await seedSettlement({ outcome: 'no' });
   const privatePage = await s.browser().get(`/bets/${privateWinner.id}`);
-  assert.match(privatePage.text, /<b>Did not come true<\/b>/);
+  assert.match(privatePage.text, /<span class="struck">/);
   const shareText = (response) => new URL(response.text.match(/href="(https:\/\/x\.com\/intent\/post\?[^"]+)"/)[1]
     .replaceAll('&amp;', '&')).searchParams.get('text');
   assert.equal(shareText(privatePage), 'Result: No. The no side won the 0.2 test NEAR pot.');

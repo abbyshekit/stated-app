@@ -44,13 +44,8 @@ export function betBlock(bet, options = {}) {
     if (betState(bet).open || (bet.status === 'offered' && !betState(bet).expired)) head.aside = `Offer closes ${nextBetTime(bet.accept_by)}`;
     else if (bet.status === 'accepted') head.aside = `Result ${nextBetTime(bet.resolve_at)}`;
   }
-  // The shared Marked seats also serve Prediction pages. Keep this Bet-only label here.
-  // DESIGN.md: Bet handles stay whole; only names over twelve characters step down.
-  const seats = raw(String(markedBetBlock(bet, { ...options, lead: false }))
-    .replace(/<b>(@[\w]*(?:<wbr>[\w]*)*)<\/b>/g, (_, name) => {
-      const handle = name.replaceAll('<wbr>', '');
-      return `<b${handle.length > 13 ? ' class="long-handle"' : ''}>${handle}</b>`;
-    }));
+  // DESIGN.md: both seats use the same type size and wrap complete account ids.
+  const seats = markedBetBlock(bet, { ...options, lead: false });
   const ruling = ['accepted', 'proposed', 'disputed'].includes(bet.status) && ['yes', 'no'].includes(options.ruling) ? options.ruling : null;
   const pot = (bet.status === 'settled' && !refereeVoid) || ruling;
   const body = pot ? raw(String(seats).replace(/<div class="pot">[\s\S]*?<\/div>/,
@@ -123,6 +118,7 @@ export function betShareLink(baseUrl, bet, { label = null, ghost = false, mine =
 export function betList(rows, { viewer = null, faces = null, hall = false } = {}) {
   const pic = (username) => face({ url: faces?.get(String(username || '').toLowerCase()) || null, name: username || '?' });
   return html`<ul class="posts">${rows.map((bet) => {
+    const mark = bet.status === 'settled' && (bet.settled_by || bet.chain_state?.resolution?.method) === 'referee' ? bet.outcome : null;
     const status = displayBetStatus(bet);
     const lead = betLead(bet, { viewer }).text;
     const people = [bet.creator_username, bet.acceptor_username].filter(Boolean);
@@ -134,9 +130,9 @@ export function betList(rows, { viewer = null, faces = null, hall = false } = {}
           : ['accepted', 'proposed', 'disputed'].includes(bet.status) ? 'Both sides are in'
             : bet.status === 'settled' && bet.outcome === 'void' ? 'Called off'
             : BET_STATUS[bet.status];
-      return html`<li class="prow note"><p class="said"><a href="/bets/${bet.id}">${bet.claim}</a></p><p class="meta">${phrase}</p></li>`;
+      return html`<li class="prow note"><p class="said"><a href="/bets/${bet.id}">${markedClaim(bet.claim, mark)}</a></p><p class="meta">${phrase}</p></li>`;
     }
-    return html`<li class="prow note"><p class="said"><a href="/bets/${bet.id}">${bet.claim}</a></p>
+    return html`<li class="prow note"><p class="said"><a href="/bets/${bet.id}">${markedClaim(bet.claim, mark)}</a></p>
       <p class="meta">${people.length ? html`<span class="stack">${people.map(pic)}</span>` : ''}<b>${status === 'Not funded' ? status : lead}</b><span>${formatTestNear(bet.stake_yocto)} ${unit()} each</span></p>
     </li>`;
   })}</ul>`;

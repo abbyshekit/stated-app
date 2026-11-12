@@ -5,12 +5,14 @@
 import { html } from './html.mjs';
 import { accountLink } from './near-network.mjs';
 import { cachedView, courtDao, proposalTarget } from './court-dao.mjs';
+import { publicBet } from './bet-public.mjs';
+import { markedClaim } from './bet-view.mjs';
 
 const STATUS = { InProgress: 'open for council votes', Approved: 'approved', Rejected: 'voted down', Removed: 'removed',
   Expired: 'expired', Failed: 'failed', Moved: 'moved' };
 const statusWords = (status) => STATUS[status] || 'status unavailable';
 
-/** "Referee: Stated Court, a Sputnik DAO on NEAR. Proposal <n>: <status>." for a Bet the DAO referees. */
+/** Identify the DAO referee and its latest proposal. */
 export async function courtLine(db, config, chain, bet) {
   const dao = courtDao(config);
   if (!dao || bet?.referee_wallet !== dao) return '';
@@ -21,8 +23,15 @@ export async function courtLine(db, config, chain, bet) {
     try { status = (await cachedView(chain(), dao, 'get_proposal', { id: Number(filed.detail.proposalId) })).status; }
     catch { /* the line still names the referee */ }
   }
-  return html`<p class="gut">Referee: <a class="tl" href="${accountLink(dao)}" rel="noopener noreferrer">Stated Court</a>, a Sputnik DAO on NEAR.${filed
-    ? ` Proposal ${filed.detail.proposalId}: ${statusWords(status)}.` : ''}</p>`;
+  return html`<p class="gut"><a class="tl" href="${accountLink(dao)}" rel="noopener noreferrer">Stated Court</a>, a Sputnik DAO on NEAR, is the referee.${filed
+    ? ` Proposal ${filed.detail.proposalId} is ${statusWords(status)}.` : ''}</p>`;
+}
+
+function duration(seconds) {
+  if (seconds === 600) return 'ten minutes';
+  if (!Number.isFinite(seconds) || seconds < 0) return 'an unavailable amount of time';
+  if (seconds % 60 === 0) return `${seconds / 60} ${seconds === 60 ? 'minute' : 'minutes'}`;
+  return `${seconds} ${seconds === 1 ? 'second' : 'seconds'}`;
 }
 
 function policySentence(policy) {
@@ -44,30 +53,36 @@ export function registerCourtRoutes({ route, db, config, layout, send, notFound,
     } catch {
       return send(ctx.res, 503, await layout(ctx, 'Stated Court', html`<p class="gut">The DAO could not be read from NEAR just now. Try again in a minute.</p>`));
     }
-    const stated = proposals.map((p) => ({ p, target: proposalTarget(config, p) })).filter(({ target }) => target).reverse();
-    const known = stated.length ? new Set((await db.many('select id from bilateral_bets where id = any($1::uuid[])',
-      [stated.map(({ target }) => target.id)])).map((row) => row.id)) : new Set();
+    const stated = proposals.map((p) => ({ p, target: proposalTarget(config, p) })).filter(({ target }) => target).reverse()
+      .sort((a, b) => Number(b.p.status === 'Rejected') - Number(a.p.status === 'Rejected'));
+    // The public projection accepts RFC UUIDs only; other valid on-chain targets still get links.
+    const publicUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const bets = new Map();
+    for (const { target } of stated) {
+      if (publicUuid.test(target.id) && !bets.has(target.id)) bets.set(target.id, await publicBet(db, target.id));
+    }
     const tally = (p) => Object.values(p.votes || {}).reduce((n, vote) => ({ ...n, [vote]: (n[vote] || 0) + 1 }), {});
     const body = html`
-      <h1>Stated Court</h1>
-      <p class="lead"><a class="tl" href="${accountLink(dao)}" rel="noopener noreferrer">${dao}</a> is a Sputnik DAO on NEAR that holds the referee seat of new reply bets.</p>
-      ${config.court?.relay ? html`<p class="gut">The jury files each ruling through a contract that cannot approve it until ${config.play?.settleDelaySeconds === 600 ? 'ten minutes' : `${config.play?.settleDelaySeconds} seconds`} have passed. The council can only vote a ruling down or remove it. Nobody can change these rules.</p>
-        <p class="meta">Relay: <a class="tl" href="${accountLink(config.court.relay)}" rel="noopener noreferrer">${config.court.relay}</a></p>`
-        : html`<p class="gut">The enclave jury files each ruling here as a proposal to settle the bet. The council can vote one down before it pays; otherwise the jury approves it after the correction window and the DAO settles the bet.</p>`}
-      <h2>Members</h2>
-      <ul class="posts evidence-list">${(policy.roles || []).map((role) => html`<li class="prow"><div>
-        <p class="pwho"><b>${role.name}</b></p>
-        <p class="meta">${role.kind?.Group ? role.kind.Group.join(', ') : role.kind === 'Everyone' ? 'everyone' : 'token holders'}</p>
-      </div></li>`)}</ul>
-      <p class="gut">${policySentence(policy)}</p>
-      <h2>Recent proposals</h2>
+      <h1 class="court-title">Stated Court</h1>
+      <p class="gut">Every ruling waits ${duration(config.play?.settleDelaySeconds)} on NEAR. The council can vote it down before anyone is paid.</p>
+      <h2 class="lead">Rulings</h2>
       ${stated.length ? html`<ul class="posts evidence-list">${stated.map(({ p, target }) => {
         const votes = tally(p);
-        return html`<li class="prow"><div>
-          <p class="pwho"><b>Proposal ${p.id}</b><span>${statusWords(p.status)}</span></p>
-          <p class="meta">${known.has(target.id) ? html`<a class="tl" href="/bets/${target.id}">Bet</a>` : 'Bet'} ${target.outcome}<span>${votes.Approve || 0} for, ${votes.Reject || 0} against</span></p>
+        const bet = bets.get(target.id);
+        const mark = bet?.status === 'settled' && bet.settled_by === 'referee' ? bet.outcome : null;
+        return html`<li class="prow court-ruling${p.status === 'Rejected' ? ' rejected' : ''}"><div>
+          <p class="said"><a class="tl" href="/bets/${target.id}">${bet?.claim ? markedClaim(bet.claim, mark) : 'Open bet'}</a></p>
+          <p class="pwho"><b>${p.status === 'Rejected' ? 'Voted down' : target.outcome === 'void' ? 'Undecided' : target.outcome === 'yes' ? 'Yes' : 'No'}</b></p>
+          <p class="meta">Proposal ${p.id} is ${statusWords(p.status)}. ${votes.Approve || 0} for, ${votes.Reject || 0} against.</p>
         </div></li>`;
-      })}</ul>` : html`<p class="gut quiet">No proposals yet.</p>`}`;
-    send(ctx.res, 200, await layout(ctx, 'Stated Court', body));
+      })}</ul>` : html`<p class="gut quiet">No rulings yet.</p>`}
+      <div class="folds"><details class="fold"><summary>How the court is set up</summary>
+        <p><a class="tl" href="${accountLink(dao)}" rel="noopener noreferrer">${dao}</a> is a Sputnik DAO on NEAR that holds the referee seat of new reply bets.</p>
+        ${config.court?.relay ? html`<p>The jury files rulings through <a class="tl" href="${accountLink(config.court.relay)}" rel="noopener noreferrer">${config.court.relay}</a>.</p>` : ''}
+        <h2>Members</h2>
+        ${(policy.roles || []).map((role) => html`<p><b>${role.name}</b><br>${role.kind?.Group ? role.kind.Group.join(', ') : role.kind === 'Everyone' ? 'everyone' : 'token holders'}</p>`)}
+        <p>${policySentence(policy)}</p>
+      </details></div>`;
+    send(ctx.res, 200, await layout(ctx, 'Stated Court', body, { flush: true }));
   });
 }

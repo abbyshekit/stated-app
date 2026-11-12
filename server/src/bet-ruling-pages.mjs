@@ -12,6 +12,7 @@ import { formatTestNear } from './near-escrow.mjs';
 import { unit } from './near-network.mjs';
 import { dstackPasses } from './dstack-verifier.mjs';
 import { MODEL_LOGOS, modelFace, modelName } from './jury-models.mjs';
+import { settlementSentence } from './settlement-view.mjs';
 
 const ID = '([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})';
 const percent = (value) => `${new Decimal(value).times(100).toFixed()}%`;
@@ -50,7 +51,7 @@ export function dstackVerificationLines(record) {
 }
 
 // Public pages never enrich the source identity from the viewer's private save.
-async function postRow(db, bet, outcome) {
+export async function rulingPost(db, bet, outcome) {
   const linked = await db.one('select source_save_id from bilateral_bets where id=$1', [bet.id]);
   const owner = linked?.source_save_id ? await publicPredictionOwner(db, linked.source_save_id) : null;
   const source = owner ? await publicSave(db, owner, linked.source_save_id) : null;
@@ -90,9 +91,12 @@ function rulingLine(record, bet) {
     const split = [...counts.values()].sort((a, b) => b - a);
     return `The NEAR AI enclave jury split ${split[0]} to ${split[1] || 0}. All three must agree, so both stakes ${settled ? 'went' : 'go'} back.`;
   }
-  const creatorWon = record.outcome === bet.creator_side;
+  if (settled && (bet.status === 'refunded' || bet.outcome === 'void')) return 'Both stakes were returned.';
+  const result = settled ? bet.outcome : record.outcome;
+  const creatorWon = result === bet.creator_side;
   const winner = creatorWon ? bet.creator_username : bet.acceptor_username;
   const pot = formatTestNear((BigInt(bet.stake_yocto) * 2n).toString());
+  if (settled) return `${winner ? `@${winner}` : `The ${result} side`} won the ${`${pot} ${unit()}`.replace(/ /g, '\u00a0')} pot.`;
   return `The NEAR AI enclave jury agreed, so ${winner ? `@${winner}, who bet ${record.outcome},` : `the ${record.outcome} side`} ${settled ? 'won' : 'wins'} the ${`${pot} ${unit()}`.replace(/ /g, '\u00a0')} pot.`;
 }
 
@@ -132,7 +136,7 @@ export function registerBetRulingRoutes({ route, db, config, layout, send, notFo
         if (!record) return null;
         quotes = quoteSummary(record);
       } catch { return null; }
-      return { bet, record, quotes, post: await postRow(tx, bet, record.outcome) };
+      return { bet, record, quotes, post: await rulingPost(tx, bet, record.outcome) };
     });
     if (!result) return notFound(ctx);
     const { bet, record, quotes, post } = result;
@@ -142,6 +146,7 @@ export function registerBetRulingRoutes({ route, db, config, layout, send, notFo
     const dstackLines = dstackVerificationLines(record);
     const evidence = evidenceLine(record, bet);
     const line = rulingLine(record, bet);
+    const settlement = await settlementSentence(db, config, bet);
     const majority = record.outcome === 'unclear' ? majorityOutcome(record) : null;
     const body = html`
       <h1 class="visually-hidden">Ruling</h1>
@@ -152,6 +157,8 @@ export function registerBetRulingRoutes({ route, db, config, layout, send, notFo
         ${modelFace(verdict.model)}<b>${modelName(verdict.model)}</b><span>${outcomeWord(verdict.parsed.outcome)}, ${percent(verdict.parsed.confidence)} sure</span>
       </li>`)}</ul>
       ${evidence ? html`<p class="gut">${evidence}</p>` : ''}
+      ${settlement ? html`<p class="gut settlement-line">${settlement}</p>` : ''}
+      <p class="gut"><a class="tl" href="/bets/${bet.id}">Back to bet</a></p>
       <div class="acts"><a class="pill solid big" href="/bets/new?from=${bet.id}">${record.mode === 'ruling' && record.outcome === 'unclear' && ['settled', 'refunded'].includes(bet.status) ? 'Make another bet' : 'Make your own bet'}</a></div>
       <div class="folds">
       ${evidenceFold(record)}
@@ -171,6 +178,6 @@ export function registerBetRulingRoutes({ route, db, config, layout, send, notFo
         ${quotes.map(quote => html`<p class="quiet acct">${quote.role} ${quote.model} <code>${quote.mrtd.slice(0, 16)}</code></p>`)}
       </details>
       </div>`;
-    send(ctx.res, 200, await layout(ctx, 'Ruling', body, { flush: true, back: `/bets/${bet.id}`, signin: false }));
+    send(ctx.res, 200, await layout(ctx, 'Ruling', body, { flush: true, signin: false }));
   });
 }

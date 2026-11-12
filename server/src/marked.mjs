@@ -30,8 +30,7 @@ export function timeLeft(deadline, now = Date.now()) {
   return `${Math.round(days / 365.25)} years to go`;
 }
 
-const shortWallet = (wallet) => (wallet && wallet.length > 20 ? `${wallet.slice(0, 9)}…${wallet.slice(-7)}` : wallet || null);
-const nameOf = (username, wallet) => (username ? `@${username}` : shortWallet(wallet));
+const nameOf = (username, wallet) => (username ? `@${username}` : wallet || null);
 
 export function betState(bet, now = Date.now()) {
   const funded = Boolean(bet.funded ?? bet.chain_state);
@@ -93,8 +92,8 @@ export function betLead(bet, { viewer = null } = {}) {
 // invitation; a signed-out visitor sees an empty circle. `cameTrue` is set by a
 // Prediction page whose own Result is Yes: only then is the winner's ring
 // yellow, because a Bet is settled by agreement and not by the Result.
-// A handle wraps in full and is never cut: it may break after an underscore, the one place a handle has a seam.
-const handleWords = (label) => String(label).split('_').map((part, n) => (n ? html`_<wbr>${part}` : part));
+// DESIGN.md: preserve the complete account id; CSS wraps it anywhere it needs to.
+const handleWords = (label) => String(label);
 
 export function betBlock(bet, { viewer = null, faces = null, joinHref = null, lead = true, cameTrue = false } = {}) {
   const { funded, expired, open, decided } = betState(bet);

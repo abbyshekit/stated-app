@@ -121,15 +121,15 @@ test('betBlock: an agreed result rings the winner in ink; only a Prediction that
   }
 });
 
-test('betBlock escapes names and never prints a long wallet whole', () => {
+test('betBlock escapes names and preserves complete handles and account ids', () => {
   for (const username of ['alexandermorgan', 'alex_morgan_abc']) {
     const long = text(betBlock(bet({ creator_username: username })));
-    assert.ok(long.includes(`<b class="long-handle">@${username}</b>`));
+    assert.ok(long.includes(`<b>@${username}</b>`));
     assert.doesNotMatch(long, /<wbr>/);
   }
   assert.match(text(betBlock(bet({ creator_username: 'abcdefghijkl' }))), /<b>@abcdefghijkl<\/b>/);
   const out = text(betBlock(bet({ creator_username: null, creator_wallet: 'a'.repeat(64) })));
-  assert.match(out, /<b>aaaaaaaaa…aaaaaaa<\/b>/);
+  assert.ok(out.includes(`<b>${'a'.repeat(64)}</b>`));
   const hostile = text(betBlock(bet({ creator_username: '<img src=x>' })));
   assert.doesNotMatch(hostile, /<img src=x>/);
   assert.match(hostile, /@&lt;img src=x&gt;/);

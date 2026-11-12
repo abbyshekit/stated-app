@@ -148,7 +148,7 @@ test('“bet 0.5 no” under a post funds an offer from an account named after t
   assert.equal(page.status, 200, 'the Bet is public: the reply was the public act');
   assert.match(page.text, /@oskar/);
   assert.ok(page.text.includes(`id="bet-link" href="${s.base}/bets/${betId}"`));
-  assert.match(page.text, /data-copy="bet-link" hidden>Copy bet link<\/button>/);
+  assert.match(page.text, /data-copy="bet-link" hidden>Copy link<\/button>/);
   assert.ok(page.text.includes(`https://x.com/intent/tweet?in_reply_to=${offerPost.id}&amp;text=%40statedbot+take`));
   // The bettor's profile and the save made by tagging stay private.
   const user = await one('select profile_visibility, setup_completed_at from users where x_user_id = $1', [X.oskar.id]);

@@ -160,6 +160,7 @@ export async function readPublicBet(tx, id, { evidenceWindowSeconds = 86400 } = 
   bet.enclave = record ? {
     mode: record.mode, outcome: record.outcome, agrees: record.agrees,
     models: record.verdicts.map(verdict => verdict.model), reason: record.verdicts[0].parsed.reason,
+    verdicts: record.verdicts.map(({ parsed }) => ({ outcome: parsed.outcome, confidence: parsed.confidence })),
     source: record.evidence.kind, product: record.plan.parsed.product || null,
     itemCount: record.evidence.kind === 'submitted' ? record.evidence.items.length : 0,
     decidedAt: record.decidedAt, minConfidence: record.minConfidence,
@@ -201,6 +202,16 @@ export async function readPublicBet(tx, id, { evidenceWindowSeconds = 86400 } = 
     bet.settlement_transaction_hash = hash;
     const evidence = await readPublicResultEvidence(tx, bet);
     if (evidence) bet.result_evidence = evidence;
+    // Settlement creates credit. Only a verified winner withdrawal proves payment.
+    if (record?.mode === 'ruling') bet.payout_completed = Boolean(await tx.one(`select 1 from bilateral_near_requests r
+      where r.bet_id=$1 and r.method='withdraw' and r.execution_status='succeeded'
+        and r.transaction_hash is not null and r.execution_checked_at is not null
+        and r.args->>'stated_request_id'=r.id::text and r.created_at >= $2
+        and r.wallet_account=$3 and r.user_id=$4
+        and exists (select 1 from bilateral_bet_events e where e.bet_id=r.bet_id
+          and e.actor_user_id=$5 and e.kind='play_paid_out') limit 1`,
+    [id, row.settled_at, bet.outcome === bet.creator_side ? bet.creator_wallet : bet.acceptor_wallet,
+      bet.outcome === bet.creator_side ? row.creator_user_id : row.acceptor_user_id, row.creator_user_id]));
   }
   return bet;
 }
@@ -219,8 +230,20 @@ export async function recentPublicBets(db, limit = 20) {
   });
 }
 
+// Bet publication is independent of profile/save publication. Only consented
+// identities survive view(), including when a bettor's profile stays private.
+export async function publicBetsForProfile(db, username) {
+  return db.tx(async tx => {
+    const rows = await tx.many(`${SELECT} where p.withdrawn_at is null
+      and (lower(creator.x_username)=lower($1) or lower(acceptor.x_username)=lower($1))
+      order by b.accept_by, p.published_at desc`, [username]);
+    return rows.map(view).filter(bet => bet.funded && [bet.creator_username, bet.acceptor_username]
+      .some(name => name?.toLowerCase() === username.toLowerCase()));
+  });
+}
+
 // DESIGN.md: the hall uses the same allowlisted projection as public Bet pages.
-// Totals cover all current publications, not only the six displayed rows. Credit
+// Totals cover all current publications, and every counted Bet is listed. Credit
 // is not paid: require the collector marker AND the winner's verified withdrawal.
 export async function publicBetHall(db) {
   return db.tx(async (tx) => {
@@ -249,9 +272,16 @@ export async function publicBetHall(db) {
     // "Won" is the pot of every Bet settled yes or no; "paid" stays the stricter figure above.
     const wonYocto = settled.filter((bet) => ['yes', 'no'].includes(bet.outcome))
       .reduce((sum, bet) => sum + BigInt(bet.stake_yocto) * 2n, 0n);
-    // An offer that was cancelled, refunded or ran out is history, not something to show a visitor.
-    const shown = bets.filter((bet) => !['cancelled', 'expired', 'refunded'].includes(bet.status));
-    return { rows: shown.slice(0, 6), total: shown.length, settled: settled.length,
+    const shown = bets;
+    // Open offers lead in closing order. Finished bets follow by settlement date.
+    shown.sort((a, b) => {
+      const openA = a.status === 'offered' && new Date(a.accept_by) > new Date(rows[0]?.read_at);
+      const openB = b.status === 'offered' && new Date(b.accept_by) > new Date(rows[0]?.read_at);
+      if (openA !== openB) return openA ? -1 : 1;
+      return openA ? new Date(a.accept_by) - new Date(b.accept_by)
+        : new Date(b.settled_at || b.published_at) - new Date(a.settled_at || a.published_at);
+    });
+    return { rows: shown, total: shown.length, settled: settled.length,
       paidYocto: paidYocto.toString(), wonYocto: wonYocto.toString() };
   });
 }
@@ -263,7 +293,7 @@ export async function nextOpenPublicBet(db, viewerId = null) {
         and b.invited_user_id is null and b.invited_wallet is null
         and ($1::bigint is null or b.creator_user_id<>$1)
         and b.near_verified_at between clock_timestamp() - ($2::double precision * interval '1 millisecond') and clock_timestamp()
-      order by p.published_at desc, b.id desc limit 20 for share of b,p`, [viewerId, STALE_AFTER_MS]);
+      order by b.accept_by, p.published_at desc, b.id desc limit 20 for share of b,p`, [viewerId, STALE_AFTER_MS]);
     return rows.map(view).find((bet) => bet.status === 'offered' && bet.funded
       && bet.chain_freshness === 'recent' && bet.creator_username) || null;
   });

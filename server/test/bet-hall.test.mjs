@@ -32,21 +32,32 @@ const database = (rows, paid = []) => ({ tx: async (fn) => fn({
   many: async (sql) => sql.startsWith('select distinct b.id') ? paid.map(id => ({ id })) : rows,
 }) });
 
-test('hall uses the public verified projection and totals beyond the six rows', async () => {
+test('hall lists every public verified bet included in its total', async () => {
   const rows = Array.from({ length: 8 }, () => storedBet('settled'));
   const invalid = storedBet(); invalid.chain_state.stake_yocto = '1';
   const unchecked = storedBet(); unchecked.near_verified_at = null;
   const hall = await publicBetHall(database([...rows, invalid, unchecked], [rows[7].id]));
   assert.equal(hall.total, 8);
   assert.equal(hall.settled, 8);
-  assert.equal(hall.rows.length, 6);
+  assert.equal(hall.rows.length, 8);
   assert.equal(hall.paidYocto, '200000000000000000000000');
   const html = String(betList(hall.rows, { hall: true }));
   assert.match(html, /@creator won the 0\.2 test NEAR pot/);
   assert.doesNotMatch(html, /private_identity|<script>/);
   assert.match(html, /&lt;script&gt;/);
-  assert.equal((html.match(/class="prow note"/g) || []).length, 6);
+  assert.equal((html.match(/class="prow note"/g) || []).length, 8);
+  assert.match(html, /<span class="hl">&lt;script&gt;/);
   assert.match(html, new RegExp(`href="/bets/${rows[0].id}"`));
+});
+
+test('hall puts open offers in closing order before settled bets', async () => {
+  const late = storedBet();
+  const soon = storedBet();
+  soon.accept_by = '2026-11-19T00:00:00.000Z';
+  soon.chain_state.accept_by_ns = (BigInt(Date.parse(soon.accept_by)) * 1000000n).toString();
+  const settled = storedBet('settled');
+  const hall = await publicBetHall(database([late, settled, soon]));
+  assert.deepEqual(hall.rows.map(bet => bet.id), [soon.id, late.id, settled.id]);
 });
 
 test('an empty hall has no fabricated totals and plain statuses follow snapshots', async () => {

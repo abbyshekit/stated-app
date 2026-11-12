@@ -162,7 +162,7 @@ test('a jury Result files one proposal at once; after the window the jury approv
   clearCourtCache();
   const page = await s.browser().get(`/bets/${first.betId}`);
   assert.equal(page.status, 200);
-  assert.match(page.text, /Referee: <a class="tl" href="https:\/\/testnet\.nearblocks\.io\/address\/stated-court\.sputnik-v2\.testnet" rel="noopener noreferrer">Stated Court<\/a>, a Sputnik DAO on NEAR\. Proposal 0: approved\./);
+  assert.match(page.text, /<a class="tl" href="https:\/\/testnet\.nearblocks\.io\/address\/stated-court\.sputnik-v2\.testnet" rel="noopener noreferrer">Stated Court<\/a>, a Sputnik DAO on NEAR, is the referee\. Proposal 0 is approved\./);
 });
 
 test('a council Reject before the window leaves the Bet open, records it, and is no error', async () => {

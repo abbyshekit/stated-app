@@ -103,7 +103,7 @@ test('an open Prediction with a Bet waiting leads with the dare, and a signed-ou
   assert.match(page.text, /<b>You\?<\/b><span>bet yes<\/span>/);
   assert.match(page.text, /<b>@priya<\/b><span>bet no<\/span>/);
   const join = encodeURIComponent(`/bets/${openBet.id}?join=1#accept`);
-  assert.match(page.text, new RegExp(`<a class="pill solid big" href="/signin\\?return=${join.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}">[\\s\\S]*?Sign in to bet yes</a>`));
+  assert.match(page.text, new RegExp(`<a class="pill solid big" href="/signin\\?return=${join.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}">Bet yes</a>`));
   assert.equal(signinLinks(page.text.split('<footer')[0].split('<section class="folds"')[0]).length, 1, 'no second sign-in in the header');
   assert.doesNotMatch(page.text, /class="hl|class="struck"/, 'an open prediction carries no mark');
 });
@@ -165,7 +165,7 @@ test('the testnet account used last time is filled in on the next deposit', asyn
 
 test('lists show one line for a Bet on an open Prediction, with a way to take it', async () => {
   const home = await oskarB.get('/');
-  assert.match(home.text, new RegExp(`<p class="meta bet">[\\s\\S]*?@priya bet no\\.</span><a href="/bets/${openBet.id}\\?join=1#accept">Take yes</a></p>`));
+  assert.match(home.text, new RegExp(`<p class="meta bet">[\\s\\S]*?@priya bet no\\.</span><a href="/bets/${openBet.id}\\?join=1#accept">Bet yes</a></p>`));
   const own = await priyaB.get('/');
   assert.match(own.text, new RegExp(`You bet no\\.</span><a href="/bets/${openBet.id}">Open the bet</a>`));
 });
@@ -280,7 +280,7 @@ test('a far-off Prediction asks for the Bet dates beside the button, with the re
 
 test('signed-out home is one line and a button above the list; settings offer no switch for something that is off', async () => {
   const home = await anon.get('/');
-  assert.match(home.text, /<p class="pitch"><b>Sure about that\?<\/b> Reply <b>@statedbot<\/b> under any prediction on X\. Private until you publish\.<\/p>/);
+  assert.match(home.text, /Reply to any post on X with @statedbot bet 0\.1 no\. Three AI models judge it and NEAR pays the winner\./);
   assert.doesNotMatch(home.text, /class="hero"/);
   assert.doesNotMatch(home.text.split('<footer')[1], /<p>/, 'the footer is links only');
   const settings = await lenaB.get('/me/settings');

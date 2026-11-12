@@ -351,6 +351,11 @@ test('public profile HTML and API show bounded pages with a next-page link', asy
     },
     async many(sql, values) {
       if (sql.includes('unnest')) return [];
+      if (sql.includes('lower(creator.x_username)')) {
+        assert.match(sql, /p\.withdrawn_at is null/);
+        assert.deepEqual(values, ['alice']);
+        return [];
+      }
       // The record reads the whole public history (bounded) and the withdrawals, apart from the page.
       if (sql.includes('from public_withdrawals')) return [];
       if (values[1] === RECORD_CAP) return Array.from({ length: PUBLIC_PAGE_SIZE + 1 }, (_, i) => save(1000 - i));
