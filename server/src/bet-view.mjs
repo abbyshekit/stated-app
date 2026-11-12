@@ -68,6 +68,9 @@ export function betCertificate(bet, { joinHref = null, viewer = null, faces = nu
   return html`<p class="prop">${bet.claim}</p>${betBlock(bet, { viewer, faces, joinHref })}`;
 }
 
+// Stated Court is a Sputnik DAO; the server's own referee account is not.
+const courtReferee = (account) => /\.sputnik-v2\.testnet$|\.sputnik-dao\.near$/.test(account || '');
+
 // The terms as a fold. `extra` is more definition-list rows from the caller.
 export function betTerms(bet, { extra = '', open = false, title = 'Rules', juryReview = false } = {}) {
   return html`<details class="fold"${open ? ' open' : ''}><summary>${title}</summary><dl class="bet-terms">
@@ -78,9 +81,11 @@ export function betTerms(bet, { extra = '', open = false, title = 'Rules', juryR
     <dt>Accept before</dt><dd>${nextBetTime(bet.accept_by)}</dd>
     <dt>Result after</dt><dd>${nextBetTime(bet.resolve_at)}</dd>
     <dt>Stake back from</dt><dd>${nextBetTime(new Date(new Date(bet.resolve_at).getTime() + 7 * 86400000))}</dd>
-    <dt>Settlement</dt><dd>${bet.referee_wallet
-      ? html`Stated’s recorded Result for the post decides, and the referee account <span class="mono">${bet.referee_wallet}</span> carries it to the contract. The referee can only choose yes, no or void between the two sides; it cannot take the stakes. With no Result, each side takes its stake back after that date.`
-      : 'Both must agree on the result. A result the other side leaves unanswered for two days stands. Without agreement, each can take their stake back after that date.'}${juryReview ? ' A reviewer can correct a ruling before it pays out.' : ''}</dd>
+    <dt>Settlement</dt><dd>${courtReferee(bet.referee_wallet)
+      ? html`The recorded Result becomes a proposal in Stated Court, the Sputnik DAO <span class="mono">${bet.referee_wallet}</span> that referees this bet. Its council can vote the proposal down for ten minutes; after that the DAO settles the contract. The referee can only choose yes, no or void between the two sides; it cannot take the stakes. With no Result, each side takes its stake back after that date.${juryReview ? ' A reviewer can ask the council to vote a ruling down within those ten minutes.' : ''}`
+      : bet.referee_wallet
+      ? html`Stated’s recorded Result for the post decides, and the referee account <span class="mono">${bet.referee_wallet}</span> carries it to the contract. The referee can only choose yes, no or void between the two sides; it cannot take the stakes. With no Result, each side takes its stake back after that date.${juryReview ? ' A reviewer can correct a ruling before it pays out.' : ''}`
+      : html`Both must agree on the result. A result the other side leaves unanswered for two days stands. Without agreement, each can take their stake back after that date.${juryReview ? ' A reviewer can correct a ruling before it pays out.' : ''}`}</dd>
     ${extra}
   </dl></details>`;
 }

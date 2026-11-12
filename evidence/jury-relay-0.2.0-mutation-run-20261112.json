@@ -1,0 +1,52 @@
+{
+  "date": "2026-11-12",
+  "subject": "contracts/jury-relay version 0.2.0 (not deployed)",
+  "method": "An AI review agent (Claude Sonnet) copied the crate to a scratch directory, applied one mutation at a time to src/lib.rs, ran cargo test after each and restored the file before the next. Two rounds: before and after the fixes from the first adversarial review.",
+  "rounds": [
+    {
+      "code": "relay 0.2.0 before review fixes (uncommitted)",
+      "baseline": "15 passed, 0 failed",
+      "killed": [
+        "delete the deadline comparison in on_bet",
+        "make the deadline comparison strict, refusing approval exactly at resolve_at_ns",
+        "delete the active-status check",
+        "accept any status string",
+        "delete the bet id comparison",
+        "treat a missing bet as passing (let-else that votes)",
+        "delete the promise_results_count check",
+        "call act_proposal from on_proposal, skipping the escrow read and on_bet (call-site deletion)",
+        "use a kind other than the one on_proposal validated",
+        "remove the predecessor assertion in on_bet while keeping #[private]",
+        "ten more: active-status list members, wrong bet_id passed or read, wrong proposal id to act_proposal, challenge-window check removed, deadline compared with 0, callback gas, result-size cap"
+      ],
+      "survived": [
+        {
+          "mutation": "remove #[private] from on_bet alone",
+          "why_harmless": "the explicit predecessor assertion stays and is tested, so an outside caller is still refused"
+        }
+      ]
+    },
+    {
+      "code": "relay 0.2.0 after fixes, commit f4cc092",
+      "baseline": "17 passed, 0 failed",
+      "killed": [
+        "delete the submission_time < resolve_at_ns refusal (killed by early_filing_is_refused_even_after_deadline)",
+        "refuse a filing exactly at the deadline (killed by bet_callback_votes_for_filings_at_deadline_and_after_for_all_active_statuses)",
+        "compare submission_time with block_timestamp instead of resolve_at_ns (4 tests failed)",
+        "pass 0 instead of the real submission_time from on_proposal (3 tests failed)",
+        "delete the referee check (killed by bet_callback_refuses_other_or_null_referee_without_voting)",
+        "accept a null referee (same test)",
+        "accept any referee account (same test)",
+        "run the referee check after building the act_proposal promise (same test)",
+        "delete the block_timestamp < resolve_at_ns refusal (killed by bet_callback_refuses_before_deadline_without_voting)",
+        "accept a filing 1 ns before the deadline (killed by early_filing_is_refused_even_after_deadline)"
+      ],
+      "survived": [
+        {
+          "mutation": "accept block_timestamp equal to resolve_at_ns in on_bet's deadline check",
+          "why_harmless": "unreachable on chain: approval needs submission_time >= resolve_at_ns and block_timestamp >= submission_time + the 600-second window"
+        }
+      ]
+    }
+  ]
+}

@@ -793,8 +793,13 @@ test('two slow attacker links cannot use up the timely opponent read window', as
       opponentRead.resolve();
       return page(url);
     }
-    await Promise.race([opponentRead.promise, new Promise((resolve) => setTimeout(resolve, 50))]);
-    // Let the opponent finish its read before the slow reads consume the grace period.
+    // Wait until the opponent's read has started: a runner that reads links one at a time never
+    // starts it, and fails here. A wall-clock fallback made this test flaky under load.
+    let timer;
+    await Promise.race([opponentRead.promise, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('The opponent read never started.')), 5000);
+    })]).finally(() => clearTimeout(timer));
+    // The opponent's read time is taken on a microtask after its fetch resolves; this runs after it.
     await new Promise((resolve) => setImmediate(resolve));
     now = closesAt + 120_001;
     return page(url);

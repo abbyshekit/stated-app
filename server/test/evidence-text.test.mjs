@@ -10,18 +10,20 @@ const read = (html, options) => evidenceText(html, url, options);
 function boundedRead(html) {
   const childSource = `import { evidenceText } from './server/src/evidence-text.mjs';
     let html = ''; for await (const chunk of process.stdin) html += chunk;
+    const start = performance.now();
     try { const result = evidenceText(html, 'https://example.org/official-record');
-      process.stdout.write(JSON.stringify({ textLength: result.text.length, error: null }));
-    } catch (error) { process.stdout.write(JSON.stringify({ textLength: null, error: error.message })); }`;
-  const started = performance.now();
+      process.stdout.write(JSON.stringify({ textLength: result.text.length, error: null, ms: performance.now() - start }));
+    } catch (error) { process.stdout.write(JSON.stringify({ textLength: null, error: error.message, ms: performance.now() - start })); }`;
+  // The child times the parse itself. This limit only stops a hung child, so a slow
+  // process start under load (a Rust build alongside, say) cannot fail the test.
   const child = spawnSync(process.execPath, ['--input-type=module', '-e', childSource], {
-    input: html, encoding: 'utf8', timeout: 2_000, maxBuffer: 64_000,
+    input: html, encoding: 'utf8', timeout: 30_000, maxBuffer: 64_000,
   });
-  assert.equal(child.error, undefined, `parser exceeded 2 seconds: ${child.error?.message}`);
+  assert.equal(child.error, undefined, `parser did not finish: ${child.error?.message}`);
   assert.equal(child.status, 0, child.stderr);
-  const elapsed = performance.now() - started;
-  assert.ok(elapsed < 2_000, `parser took ${elapsed.toFixed(0)} ms`);
-  return { ...JSON.parse(child.stdout), elapsed };
+  const { textLength, error, ms } = JSON.parse(child.stdout);
+  assert.ok(ms < 2_000, `parser took ${ms.toFixed(0)} ms`);
+  return { textLength, error, elapsed: ms };
 }
 
 test('quoted angle brackets stay in attributes, never in evidence', () => {

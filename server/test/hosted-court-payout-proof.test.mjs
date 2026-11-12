@@ -215,13 +215,13 @@ test('providers may serialize equivalent court responses differently', async () 
 
 test('CLI rejects invalid evidence paths and excess flags before RPC access', () => {
   const preload = 'data:text/javascript,globalThis.fetch=()=>{process.exit(91)}';
-  const invalidPath = spawnSync(process.execPath, ['--import', preload, verifierPath, '/path/that/does/not/exist.json'], { encoding: 'utf8', timeout: 3000 });
+  const invalidPath = spawnSync(process.execPath, ['--import', preload, verifierPath, '/path/that/does/not/exist.json'], { encoding: 'utf8', timeout: 30_000 });
   assert.notEqual(invalidPath.status, 0);
   assert.notEqual(invalidPath.status, 91);
   assert.equal(invalidPath.error, undefined);
   assert.equal(invalidPath.status, 1);
   assert.equal(JSON.parse(invalidPath.stdout).reason, 'invalid_evidence');
-  const tooManyFlags = spawnSync(process.execPath, ['--import', preload, verifierPath, '/tmp/a.json', '/tmp/b.json'], { encoding: 'utf8', timeout: 3000 });
+  const tooManyFlags = spawnSync(process.execPath, ['--import', preload, verifierPath, '/tmp/a.json', '/tmp/b.json'], { encoding: 'utf8', timeout: 30_000 });
   assert.notEqual(tooManyFlags.status, 0);
   assert.notEqual(tooManyFlags.status, 91);
   assert.equal(tooManyFlags.error, undefined);
@@ -247,7 +247,7 @@ test('CLI accepts the optional evidence path with mocked real RPC responses', ()
   const preload = `data:text/javascript,${encodeURIComponent(source)}`;
   const cli = spawnSync(process.execPath, ['--import', preload, verifierPath,
     fileURLToPath(new URL('../../evidence/hosted-court-payout-testnet-20261112.json', import.meta.url))],
-  { encoding: 'utf8', timeout: 5000, maxBuffer: 2_000_000 });
+  { encoding: 'utf8', timeout: 30_000, maxBuffer: 2_000_000 });
   assert.equal(cli.status, 0, cli.stderr || cli.stdout);
   assert.equal(JSON.parse(cli.stdout).overall, 'PASS');
   assert.equal(cli.error, undefined);
@@ -257,7 +257,7 @@ test('CLI retains exit code two when the optional evidence RPCs are unavailable'
   const preload = 'data:text/javascript,globalThis.fetch=async()=>new Response(null,{status:503})';
   const cli = spawnSync(process.execPath, ['--import', preload, verifierPath,
     fileURLToPath(new URL('../../evidence/hosted-court-payout-testnet-20261112.json', import.meta.url))],
-  { encoding: 'utf8', timeout: 3000 });
+  { encoding: 'utf8', timeout: 30_000 });
   assert.equal(cli.error, undefined);
   assert.equal(cli.status, 2, cli.stderr || cli.stdout);
   assert.equal(JSON.parse(cli.stdout).overall, 'UNAVAILABLE');

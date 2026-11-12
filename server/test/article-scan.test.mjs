@@ -10,8 +10,10 @@ function timedRead(html) {
     try { extractArticle(html, 'https://example.org');
       console.log(JSON.stringify({ ms: performance.now() - start, error: null })); }
     catch (error) { console.log(JSON.stringify({ ms: performance.now() - start, error: error.message })); }`;
+  // The child times the extraction itself (result.ms below). This limit only stops a hung
+  // child, so a slow process start under load (a Rust build alongside, say) cannot fail the test.
   const child = spawnSync(process.execPath, ['--input-type=module', '-e', source], {
-    input: html, encoding: 'utf8', timeout: 2000, maxBuffer: 64_000,
+    input: html, encoding: 'utf8', timeout: 30_000, maxBuffer: 64_000,
   });
   assert.equal(child.error, undefined, child.error?.message);
   assert.equal(child.status, 0, child.stderr);

@@ -315,9 +315,9 @@ test('mainnet state and invalid local evidence fail before any network read', as
 test('import has no effects and unsupported CLI arguments fail before network access', () => {
   const script = new URL('../../scripts/verify-hosted-payout.mjs', import.meta.url);
   const imported = spawnSync(process.execPath, ['--input-type=module', '-e',
-    `globalThis.fetch=()=>{process.exit(91)}; await import(${JSON.stringify(script.href)});`], { encoding: 'utf8', timeout: 3000 });
+    `globalThis.fetch=()=>{process.exit(91)}; await import(${JSON.stringify(script.href)});`], { encoding: 'utf8', timeout: 30_000 });
   assert.equal(imported.status, 0, imported.stderr); assert.equal(imported.stdout, '');
   const preload = 'data:text/javascript,globalThis.fetch=()=>{process.exit(91)}';
-  const invalid = spawnSync(process.execPath, ['--import', preload, script.pathname, '--broadcast'], { encoding: 'utf8', timeout: 3000 });
+  const invalid = spawnSync(process.execPath, ['--import', preload, script.pathname, '--broadcast'], { encoding: 'utf8', timeout: 30_000 });
   assert.notEqual(invalid.status, 0); assert.notEqual(invalid.status, 91); assert.equal(invalid.error, undefined);
 });
