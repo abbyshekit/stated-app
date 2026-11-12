@@ -44,8 +44,10 @@ export function betBlock(bet, options = {}) {
     if (betState(bet).open || (bet.status === 'offered' && !betState(bet).expired)) head.aside = `Offer closes ${nextBetTime(bet.accept_by)}`;
     else if (bet.status === 'accepted') head.aside = `Result ${nextBetTime(bet.resolve_at)}`;
   }
-  // DESIGN.md: both seats use the same type size and wrap complete account ids.
-  const seats = markedBetBlock(bet, { ...options, lead: false });
+  // DESIGN.md: Bet handles stay whole; only names over twelve characters step down.
+  // Account ids are shown in full and wrap anywhere.
+  const seats = raw(String(markedBetBlock(bet, { ...options, lead: false }))
+    .replace(/<b>(@\w+)<\/b>/g, (_, handle) => `<b${handle.length > 13 ? ' class="long-handle"' : ''}>${handle}</b>`));
   const ruling = ['accepted', 'proposed', 'disputed'].includes(bet.status) && ['yes', 'no'].includes(options.ruling) ? options.ruling : null;
   const pot = (bet.status === 'settled' && !refereeVoid) || ruling;
   const body = pot ? raw(String(seats).replace(/<div class="pot">[\s\S]*?<\/div>/,

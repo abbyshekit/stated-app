@@ -124,7 +124,7 @@ test('betBlock: an agreed result rings the winner in ink; only a Prediction that
 test('betBlock escapes names and preserves complete handles and account ids', () => {
   for (const username of ['alexandermorgan', 'alex_morgan_abc']) {
     const long = text(betBlock(bet({ creator_username: username })));
-    assert.ok(long.includes(`<b>@${username}</b>`));
+    assert.ok(long.includes(`<b class="long-handle">@${username}</b>`), 'a handle over twelve characters steps down and stays whole');
     assert.doesNotMatch(long, /<wbr>/);
   }
   assert.match(text(betBlock(bet({ creator_username: 'abcdefghijkl' }))), /<b>@abcdefghijkl<\/b>/);

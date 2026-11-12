@@ -476,6 +476,8 @@ input.bad[aria-invalid="true"],
 .bet-seats .versus { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); padding-left: 16px; padding-right: 16px; }
 .bet-seats .pot small { white-space: nowrap; overflow-wrap: normal; text-wrap: nowrap; }
 .seat b { white-space: normal; word-break: normal; overflow-wrap: anywhere; overflow: visible; text-overflow: clip; text-wrap: wrap; }
+.bet-seats .seat b.long-handle { font-size: 13px; white-space: nowrap; overflow-wrap: normal; max-width: 100%; }
+@media (max-width: 359px) { .bet-seats .seat b.long-handle { white-space: normal; overflow-wrap: anywhere; } }
 @media (max-width: 420px) { .seat b { font-size: 15px; } }
 .bet-seats .seat b { overflow-wrap: anywhere; }
 /* DESIGN.md: below 360 the stake sits above two half-width seats and the jury uses rows. */

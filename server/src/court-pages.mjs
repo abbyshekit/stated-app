@@ -71,7 +71,7 @@ export function registerCourtRoutes({ route, db, config, layout, send, notFound,
         const bet = bets.get(target.id);
         const mark = bet?.status === 'settled' && bet.settled_by === 'referee' ? bet.outcome : null;
         return html`<li class="prow court-ruling${p.status === 'Rejected' ? ' rejected' : ''}"><div>
-          <p class="said"><a class="tl" href="/bets/${target.id}">${bet?.claim ? markedClaim(bet.claim, mark) : 'Open bet'}</a></p>
+          <p class="said">${bet?.claim ? html`<a class="tl" href="/bets/${target.id}">${markedClaim(bet.claim, mark)}</a>` : html`<span class="quiet">A bet with no public page here.</span>`}</p>
           <p class="pwho"><b>${p.status === 'Rejected' ? 'Voted down' : target.outcome === 'void' ? 'Undecided' : target.outcome === 'yes' ? 'Yes' : 'No'}</b></p>
           <p class="meta">Proposal ${p.id} is ${statusWords(p.status)}. ${votes.Approve || 0} for, ${votes.Reject || 0} against.</p>
         </div></li>`;

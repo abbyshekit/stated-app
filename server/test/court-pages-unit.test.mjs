@@ -34,10 +34,12 @@ test('/court links every valid chain target, puts rejected rulings first and kee
   assert.equal(response.status, 200);
   assert.match(response.body, /Every ruling waits ten minutes on NEAR\. The council can vote it down before anyone is paid\./);
   assert.match(response.body, /A public claim &lt;safe&gt;/);
-  for (const id of [published, missing, unusual]) assert.ok(response.body.includes(`href="/bets/${id}"`));
+  assert.ok(response.body.includes(`href="/bets/${published}"`));
+  for (const id of [missing, unusual]) assert.ok(!response.body.includes(`href="/bets/${id}"`), 'a bet with no page gets no link');
+  assert.equal(response.body.split('A bet with no public page here.').length - 1, 2);
   assert.doesNotMatch(response.body, /not-a-uuid/);
   assert.deepEqual(lookedUp.sort(), [published, missing].sort());
-  assert.ok(response.body.indexOf(`/bets/${published}`) < response.body.indexOf(`/bets/${missing}`));
+  assert.ok(response.body.indexOf('Proposal 0 is voted down.') < response.body.indexOf('Proposal 1 is approved.'));
   assert.match(response.body, /<b>Voted down<\/b>/);
   assert.match(response.body, /Proposal 0 is voted down\./);
   assert.match(response.body, /<details class="fold"><summary>How the court is set up<\/summary>/);
