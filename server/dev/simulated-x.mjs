@@ -99,7 +99,7 @@ class SimulatedX extends FakeX {
     if (url.pathname === '/as') {
       const id = url.searchParams.get('id') || '';
       const back = /^\d+$/.test(url.searchParams.get('c') || '')
-        ? `/?c=${url.searchParams.get('c')}${url.searchParams.get('take') === '1' ? '&take=1' : ''}` : '/';
+        ? `/?c=${url.searchParams.get('c')}${url.searchParams.get('take') === '1' ? '&take=1' : ''}${url.searchParams.get('say') ? `&say=${encodeURIComponent(url.searchParams.get('say'))}` : ''}` : '/';
       res.writeHead(303, { location: back, 'set-cookie': `simas=${this.users.has(id) ? id : ''}; Path=/; SameSite=Lax` });
       return res.end();
     }
@@ -119,7 +119,7 @@ class SimulatedX extends FakeX {
     if (url.pathname === '/') {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
       return res.end(threadPage(this, req, { app: process.env.STATED_PUBLIC_URL || `http://127.0.0.1:${APP_PORT}`,
-        only: url.searchParams.get('c'), take: url.searchParams.get('take') === '1' }));
+        only: url.searchParams.get('c'), take: url.searchParams.get('take') === '1', say: url.searchParams.get('say') || '' }));
     }
     return super.handle(req, res);
   }

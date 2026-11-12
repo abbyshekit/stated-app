@@ -4,6 +4,7 @@
 import { baseDecode } from 'near-api-js';
 import { isAccount } from './near-network.mjs';
 import { idOf, UserError } from './store.mjs';
+import { readPublicResultEvidence } from './bet-result-evidence.mjs';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const HASH = /^[a-f0-9]{64}$/;
@@ -136,7 +137,7 @@ function view(row) {
   };
 }
 
-async function readPublic(tx, id) {
+export async function readPublicBet(tx, id) {
   const row = await tx.one(`${SELECT} where b.id=$1 and p.withdrawn_at is null for share of b,p`, [id]);
   if (!row) return null;
   const bet = view(row);
@@ -150,13 +151,15 @@ async function readPublic(tx, id) {
   const hash = proof?.hash;
   if (hash && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(hash) && baseDecode(hash).length === 32) {
     bet.settlement_transaction_hash = hash;
+    const evidence = await readPublicResultEvidence(tx, bet);
+    if (evidence) bet.result_evidence = evidence;
   }
   return bet;
 }
 
 export async function publicBet(db, id) {
   const ref = reference(id);
-  return db.tx((tx) => readPublic(tx, ref));
+  return db.tx((tx) => readPublicBet(tx, ref));
 }
 
 export async function recentPublicBets(db, limit = 20) {
@@ -232,7 +235,7 @@ export async function publishBet(db, user, id) {
       values ($1,$2,clock_timestamp()) on conflict (bet_id) do update
       set withdrawn_at=null, published_at=case when bilateral_bet_publications.withdrawn_at is null
         then bilateral_bet_publications.published_at else excluded.published_at end`, [ref, owner]);
-    return readPublic(tx, ref);
+    return readPublicBet(tx, ref);
   });
 }
 
@@ -252,7 +255,7 @@ export async function followPublicBet(db, user, id) {
   const ref = reference(id);
   return db.tx(async (tx) => {
     const follower = await actor(tx, user);
-    const bet = await readPublic(tx, ref);
+    const bet = await readPublicBet(tx, ref);
     if (!bet) throw new UserError('This public bet is unavailable.', 404);
     await tx.query(`insert into bilateral_bet_follows (bet_id,user_id) values ($1,$2)
       on conflict (bet_id,user_id) do nothing`, [ref, follower]);

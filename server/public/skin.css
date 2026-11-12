@@ -498,3 +498,24 @@ h1.send .sel { font-weight: inherit; user-select: all; -webkit-user-select: all;
 .lead.bal > span:last-child { margin-left: auto; }
 .pays a > span:last-child { color: var(--dim); font-size: 14px; grid-column: 2; }
 .fold form.takekey button { margin-top: 10px; }
+
+/* Make a bet: the reply as it will be sent. Its side and stake follow the two choices below it. */
+.cmd b { font-weight: 400; color: var(--x); }
+.cmd i { display: none; font-style: normal; }
+.cmd .unset { color: var(--dim); }
+form:has(#side-yes:checked) .cmd .yes,
+form:has(#side-no:checked) .cmd .no,
+form:not(:has(input[name="side"]:checked)) .cmd .unset,
+form:has(#stake-0:checked) .cmd .k0,
+form:has(#stake-1:checked) .cmd .k1,
+form:has(#stake-2:checked) .cmd .k2,
+form:has(#stake-3:checked) .cmd .k3 { display: inline; }
+.send .go { display: none; align-items: center; gap: 8px; }
+form:has(input[name="side"]:checked) .send .go { display: inline-flex; }
+form:has(input[name="side"]:checked) .send .need { display: none; }
+form:not(:has(input[name="side"]:checked)) .send { opacity: 0.45; }
+.seg.quiet label { font-size: 14px; font-weight: 500; }
+.seg.quiet input:checked + label { font-weight: 600; border-width: 1px; }
+.tl.unread { font-size: 14px; overflow-wrap: anywhere; }
+/* The paste button appears once the field holds a link. */
+form:not(:has(#bet-link:valid)) .acts.paste { display: none; }

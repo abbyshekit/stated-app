@@ -12,6 +12,8 @@ The [original prediction](https://x.com/ChainAbstracted/status/21205900420746652
 
 Verify the [referee transaction](https://testnet.nearblocks.io/txns/4Gix2npAw4PGEfCDTnifCByGagz4FZdG5mArTtA6kazt) separately from the [completed payout](https://testnet.nearblocks.io/txns/8gqtVGRBxghhqnTveMrjW2X6AW89GUGvV6azmebWMr6B). Public RPC verification confirmed the exact transfer and successful withdrawal callback; settlement alone does not prove delivery. [Public proof record](evidence/hosted-real-x-testnet-20261111.json)
 
+**Start a bet from a finished one.** Open the completed test bet signed out and choose **Make your own bet**. Pick a listed post or paste a link to any post on X, choose a side and a stake, and **Reply on X** opens X's reply composer with the command already typed, for example `@statedforecast bet 0.1 no`. Sending that reply is what makes the offer. The page stores nothing and needs no sign-in or wallet. [Real X run](evidence/make-a-bet-real-x-20261111.json)
+
 ## Verify the hosted payout
 
 From a checkout with Node.js 22.9 or later and outbound HTTPS:
@@ -51,6 +53,7 @@ For the quickest live round, open `http://127.0.0.1:4310/demo-challenge` while s
 | Set "Posting as" to `@sim_carol`, press "Reply" under that bot reply and send `@sim_statedbot take` | "It’s on. 0.4 test NEAR is held on NEAR testnet until 30 Jun 2027. @sim_bob says no; @sim_carol says yes." |
 | Sign in as `@sim_reviewer`, open `/admin`, and record the Nvidia post as "Came true" with an HTTPS evidence link | The bot replies that Carol wins 0.4 test NEAR. The Bet page, linked from the home page, shows the winner and "Settled". |
 | Sign in as `@sim_carol` and open `/me/wallet` | Her testnet account, its balance, and the step that makes the account hers: her key goes on, the server's comes off. |
+| Open a settled Bet while signed out and press **Make your own bet** | A list of open posts and a field for any post's link. Pick one, choose a side and a stake: the reply is drawn as it will be sent, and **Reply in simulated X** opens the thread with it typed. |
 | Press "Bet on it" on any open prediction | The other way to bet: an offer signed in your own wallet (Meteor) instead of from a reply. |
 | Sign in as `@sim_reviewer` and open `/admin` | Where an outcome is recorded with its evidence, and the product metrics. |
 
@@ -104,11 +107,12 @@ curl -fsS https://test.rpc.fastnear.com -H 'content-type: application/json' \
 
 ## NEAR HACKATHON notes
 
-The recording evidence records the test run at filming. The release verification ran 490 app tests; the existing contract verification passed 71 tests separately. `npm audit --omit=dev` flags four high-severity entries in the Meteor SDK dependency tree. The reply-to-payout demo uses app-managed testnet accounts.
+The recording evidence records the test run at filming. The combined release verification ran 498 app tests; the existing contract verification passed 71 tests separately. `npm audit --omit=dev` flags four high-severity entries in the Meteor SDK dependency tree. The reply-to-payout demo uses app-managed testnet accounts.
 
 - **Development dates.** The first recorded Stated development snapshot is dated 9 November 2026, after the hackathon announcement. It includes the standalone forecasting prototype. The judge walkthrough uses the Node app and its NEAR integration.
 - **NEAR integration.** The escrow contract (Rust, `near-sdk` 5.29.0; version 2 adds the referee and the unanswered-result rule), live dry-run quotes from NEAR Intents for paying a stake from another chain (the mainnet payment path is implemented and unverified), named accounts per X handle with a claim step that swaps keys, wallet signing through the self-hosted Meteor SDK, exact finalized-transaction verification, and a bounded testnet reconciler that keeps Bet pages current without a browser. A full reply-to-settlement run on testnet is recorded in `evidence/reply-bets-testnet-live.json` (`node scripts/reply-bets-live.mjs` repeats it).
 - **Libraries.** The app uses `@meteorwallet/sdk`, `near-api-js`, `@near-js/transactions`, `@near-js/keystores`, `pg`, `@resvg/resvg-js`, `decimal.js`, `qrcode-generator`, `buffer`, and `util`. `esbuild` bundles the wallet script. The typeface in share images is Archivo (SIL Open Font License). Pages use server-rendered HTML and ordinary forms.
+- **AI assistance.** The code was written with AI coding agents (OpenAI Codex and Claude Code) under the author's direction, then reviewed and tested as described here.
 - **Limits.** The local walkthrough uses simulated X. The hosted test uses actual X, test NEAR and operator-controlled participants. Intents quotes are dry runs. The mainnet pilot is private, and live cross-chain payment and mainnet payout are unverified. The server holds an unclaimed managed account's key. Stated referees reply Bets from a human-recorded Result. A direct Bet without a referee can settle by agreement. [Demo walkthrough](docs/DEMO.md)
 
 Predictions can seed a separate bilateral Bet. Participants review their own proposition and terms, then deposit equal native test NEAR stakes into the testnet escrow. The source author participates only if they join. A funded Bet can be deliberately published; visitors can take the opposite side or follow its outcome without a wallet. Public invitations remain readable after acceptance and settlement and have downloadable share cards. Sharing opens X's composer for the user to submit.
