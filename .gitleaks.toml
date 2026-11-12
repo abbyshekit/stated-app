@@ -1,9 +1,13 @@
 # Default gitleaks rules, plus one generated file: server/public/wallet.js is the minified
 # third-party Meteor wallet SDK bundle (scripts/build-wallet.mjs). Its identifier names, such as
 # "this.secp256k1Key||this.mlDsa65Key", match the generic-api-key rule; it holds no secrets.
+# evidence/enclave-ruling-<bet>.json is a saved copy of a public ruling the app serves at
+# /bets/<id>/enclave-ruling.json: quotes, signatures and base64 bodies on one long line.
+# evidence/jury-models-policy-check-<date>.json holds attested NEAR AI records of the same kind; its
+# enclave compose text names environment variables ("${NAME}") and holds no values.
 [extend]
 useDefault = true
 
 [allowlist]
 description = "Generated wallet SDK bundle"
-paths = ['''^server/public/wallet\.js$''']
+paths = ['''^server/public/wallet\.js$''', '''^evidence/enclave-ruling-[0-9a-f]{8}\.json$''', '''^evidence/jury-models-policy-check-[0-9]{8}\.json$''']

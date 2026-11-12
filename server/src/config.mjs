@@ -15,6 +15,11 @@ function nearaiConfig(env, list) {
   if (dstackVerifierUrl.startsWith('http:') && env.STATED_FETCH_ALLOW_LOOPBACK !== '1') {
     throw new Error('STATED_DSTACK_VERIFIER_URL requires https (loopback http is for tests only).');
   }
+  // Production policy: a ruling needs the signing model's GPU evidence and the dstack boot check.
+  // Only test stacks, whose fake NEAR AI has no GPU, run rulings without them (STATED_REQUIRE_GPU_EVIDENCE=0).
+  if (Boolean(apiKey) && env.STATED_ENCLAVE_RULINGS === '1' && env.STATED_REQUIRE_GPU_EVIDENCE !== '0' && !dstackVerifierUrl) {
+    throw new Error('STATED_ENCLAVE_RULINGS=1 needs STATED_DSTACK_VERIFIER_URL: a ruling is checked against the published dstack image.');
+  }
   return {
     apiKey,
     dstackVerifierUrl,

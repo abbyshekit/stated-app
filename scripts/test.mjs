@@ -40,5 +40,8 @@ const need = 'need PostgreSQL 15+ with initdb and pg_ctl on PATH';
 if (problem) console.log(`${why} Running the ${run.length} test files that need no database; skipping the ${skipped} that ${need}.\n`);
 const result = spawnSync(process.execPath, ['--test', '--test-concurrency=1', ...process.argv.slice(2), ...run],
   { cwd: root, stdio: 'inherit' });
-if (problem) console.log(`\n${why} Ran the ${run.length} test files that need no database; skipped the ${skipped} that ${need}.`);
+if (problem) {
+  const names = files.filter(file => !run.includes(file));
+  console.log(`\n${why} Ran the ${run.length} test files that need no database; skipped the ${skipped} that ${need}:\n  ${names.join('\n  ')}`);
+}
 process.exit(result.status ?? 1);

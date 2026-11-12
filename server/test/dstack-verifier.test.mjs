@@ -122,6 +122,13 @@ test('native fetch rejects a verifier redirect without following it or softening
   assert.equal(followed, false);
 });
 
+test('production rulings need the dstack verifier; only GPU-less test stacks run without it', () => {
+  assert.throws(() => loadConfig({ NEARAI_API_KEY: 'k', STATED_ENCLAVE_RULINGS: '1' }), /STATED_DSTACK_VERIFIER_URL/);
+  assert.equal(loadConfig({ NEARAI_API_KEY: 'k', STATED_ENCLAVE_RULINGS: '1', STATED_DSTACK_VERIFIER_URL: URL }).nearai.rulings, true);
+  assert.equal(loadConfig({ NEARAI_API_KEY: 'k', STATED_ENCLAVE_RULINGS: '1', STATED_REQUIRE_GPU_EVIDENCE: '0' }).nearai.rulings, true);
+  assert.equal(loadConfig({ STATED_ENCLAVE_RULINGS: '1' }).nearai.rulings, false, 'no key, no rulings, no requirement');
+});
+
 test('config is opt-in and restricts plaintext verification to test loopback', () => {
   assert.equal(loadConfig({}).nearai.dstackVerifierUrl, '');
   assert.equal(loadConfig({ STATED_DSTACK_VERIFIER_URL: URL }).nearai.dstackVerifierUrl, URL);

@@ -222,7 +222,7 @@ async function offer(db, config, chain, cmd, deps) {
     const bet = await createBet(db, user, {
       requestId: requestIdFor(cmd.event_id),
       claim: cmd.words,
-      criteria: `Yes if what the post says has happened by ${dayMonth(row.deadline, { year: true })}. ` + (config.nearai?.rulings
+      criteria: `Yes if what the post says has happened by ${replyDeadline(row.deadline)}. ` + (config.nearai?.rulings
         ? 'Either side can post a link as evidence. A NEAR AI enclave jury rules on it: without credible evidence that it happened, it counts as not having happened. If the jury cannot decide, both stakes go back.'
         : 'Stated’s recorded Result for this post, with its evidence link, decides.'),
       evidenceSourceUrl: row.url,

@@ -110,6 +110,7 @@ test('plausible but mismatched settlement or payout data cannot pass either endp
     ['wrong bet', d => { d.bet.id = '00000000-0000-4000-8000-000000000001'; }],
     ['contract with an access key', d => { d.access.keys = [{ public_key: 'ed25519:11111111111111111111111111111111', access_key: { nonce: 0, permission: 'FullAccess' } }]; }],
     ['contract without code', d => { d.account.code_hash = '11111111111111111111111111111111'; }],
+    ['contract with other code', d => { d.account.code_hash = '6vSbm6dg1F6gyEggDNtd5t3MrDmGZBgSgE4NjHwEmS33'; }],
     ['wrong outcome', d => { d.bet.resolution.outcome = 'yes'; }],
     ['wrong stake', d => { d.bet.stake_yocto = '100000000000000000000001'; }],
     ['wrong winner', d => { d.bet.creator_side = 'no'; }],

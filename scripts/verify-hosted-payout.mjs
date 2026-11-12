@@ -12,6 +12,8 @@ import { isAccount, isNamedAccount, network } from '../server/src/near-network.m
 // November payout stops answering there within days. Both endpoints below still return it.
 const ENDPOINTS = ['https://archival-rpc.testnet.fastnear.com', 'https://archival-rpc.testnet.near.org'];
 const NO_CODE = '11111111111111111111111111111111';
+// The code the hosted escrow ran when it paid (view_account, 12 November 2026). Any other code fails.
+const PINNED_CODE = { 'stated-escrow-52081551be.testnet': 'Bqr2TsgyFRNDw2GZ6q9aT7cMAnjZNERKdzaBstRgKaAg' };
 const DEFAULT_EVIDENCE = Symbol('default evidence');
 const HASH = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const UINT = /^(?:0|[1-9][0-9]{0,38})$/;
@@ -253,6 +255,7 @@ async function provider(endpoint, record, fetchImpl, timeoutMs) {
     const account = await rpc('query', { request_type: 'view_account', finality: 'final', account_id: record.contract }, options);
     requireThat(object(account) && typeof account.code_hash === 'string' && HASH.test(account.code_hash)
       && account.code_hash !== NO_CODE, 'contract_code_missing');
+    requireThat(!PINNED_CODE[record.contract] || account.code_hash === PINNED_CODE[record.contract], 'contract_code_mismatch');
     const access = await rpc('query', { request_type: 'view_access_key_list', finality: 'final', account_id: record.contract }, options);
     requireThat(object(access) && Array.isArray(access.keys), 'invalid_access_key_list');
     requireThat(access.keys.length === 0, 'contract_has_access_keys');

@@ -1,9 +1,16 @@
 // INTEGRATION: standalone verifier output with injected dstack and NVIDIA transports; no database.
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, sign } from 'node:crypto';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { DEFAULT_DSTACK_VERIFIER, parseVerifierArguments, verifyRulingAttestations, verifyCourtProposal } from '../../scripts/verify-enclave-ruling.mjs';
+import { DEFAULT_DSTACK_VERIFIER, parseVerifierArguments, verifyRulingAttestations, verifyCourtProposal,
+  verifyHostedEnclaveRuling, verifyOfflineEnclaveRuling } from '../../scripts/verify-enclave-ruling.mjs';
 import { fingerprint } from '../src/canonical.mjs';
+import { sha256 } from '../src/attested-signature.mjs';
 import { proposalKind } from '../src/court-dao.mjs';
 import { enclaveRulingFixture, keyFor, testReport } from './support/enclave.mjs';
 
@@ -211,4 +218,175 @@ test('court anchor reports no proposal separately and RPC outage never passes', 
     { fetchImpl: async () => { throw new Error('offline'); } });
   assert.equal(checks[0].status, 'FAIL');
   assert.match(checks[0].detail, /offline/);
+});
+
+const savedFile = fileURLToPath(new URL('../../evidence/enclave-ruling-c171de89.json', import.meta.url));
+const scriptFile = fileURLToPath(new URL('../../scripts/verify-enclave-ruling.mjs', import.meta.url));
+const savedDocument = async () => JSON.parse(await readFile(savedFile, 'utf8'));
+const flipByte = text => `${text[0] === '0' ? '1' : '0'}${text.slice(1)}`;
+
+function forbiddenTransport() {
+  let calls = 0;
+  return { fetchImpl: async () => { calls++; throw new Error('Fetch must never be called offline'); },
+    assertUnused: () => assert.equal(calls, 0, 'offline verification made a fetch call') };
+}
+
+async function offlineDocument(document, options = {}) {
+  const transport = forbiddenTransport();
+  const result = await verifyHostedEnclaveRuling(undefined, undefined, { document, offline: true,
+    ...options, fetchImpl: transport.fetchImpl });
+  transport.assertUnused();
+  return result;
+}
+
+function offlineCli(file) {
+  // Catch accidental global fetch calls in the child too, including errors that
+  // the verifier might swallow. No preload file or network service is needed.
+  const guard = `let calls = 0; globalThis.fetch = async () => { calls++; throw new Error('Forbidden fetch'); };
+    process.on('exit', () => { if (calls) { console.error('Unexpected fetch calls: ' + calls); process.exitCode = 97; } });`;
+  return spawnSync(process.execPath, ['--import', `data:text/javascript,${encodeURIComponent(guard)}`,
+    scriptFile, '--offline', ...(file === undefined ? [] : [file])], { encoding: 'utf8', timeout: 10_000 });
+}
+
+test('offline saved ruling passes every local check with zero fetch calls and unchanged input', async () => {
+  const bytes = await readFile(savedFile);
+  const transport = forbiddenTransport();
+  const result = await verifyOfflineEnclaveRuling(savedFile, { fetchImpl: transport.fetchImpl });
+  transport.assertUnused();
+  assert.equal(result.exitCode, 2, 'offline is incomplete by design');
+  assert.equal(result.summary, '9 checks passed, 0 failed, 21 not checked');
+  assert.equal(result.firstLine, `Record read from file ${JSON.stringify(savedFile)}; sha256:${sha256(bytes)}`);
+  assert.deepEqual(result.checks.filter(c => c.status === 'PASS').map(c => c.check), [
+    'Arguments', 'Signed ruling', 'Intel TDX quotes', 'Bet coverage', 'Jury policy',
+    'Signed model verdict', 'Signed model verdict', 'Signed model verdict', 'Stored Coinbase evidence',
+  ]);
+  assert.match(result.checks.find(c => c.check === 'Intel TDX quotes').detail, /event logs replay against RTMR3/);
+  assert.match(result.checks.find(c => c.check === 'Bet coverage').detail, /0e83fba51534df5bbfcd94d949fcd90f1e3a7532bcae2474a8d27c4357164fd8/);
+  const skipped = result.checks.filter(c => c.status === 'NOT CHECKED');
+  assert.deepEqual([...new Set(skipped.map(c => c.check))], ['Dstack verifier', 'Court proposal',
+    'Quote measurements', 'GPU attestation', 'Intel collateral', 'Coinbase source', 'Coinbase evidence hash',
+    'Public claim', 'Public deadline', 'Public terms hash', 'Public outcome']);
+  assert.ok(skipped.every(c => c.detail.endsWith('(offline: needs the network)')));
+  assert.equal(skipped.filter(c => c.check === 'Quote measurements').length, 8);
+  assert.equal(skipped.filter(c => c.check === 'GPU attestation').length, 4);
+  const document = await savedDocument();
+  const before = structuredClone(document);
+  assert.equal((await offlineDocument(document)).exitCode, 2);
+  assert.deepEqual(document, before);
+  const cli = offlineCli(savedFile);
+  assert.equal(cli.error, undefined);
+  assert.equal(cli.status, 2, cli.stderr || cli.stdout);
+  assert.equal(cli.stderr, '');
+  assert.ok(cli.stdout.startsWith(`${result.firstLine}\n`));
+  assert.ok(cli.stdout.endsWith(`${result.summary}\n`));
+});
+
+test('offline CLI rejects a single changed model-signature or response byte with exit 1', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'stated-offline-'));
+  try {
+    for (const field of ['signature', 'responseBody']) {
+      const document = await savedDocument();
+      const call = document.record.verdicts[0];
+      if (field === 'signature') call.signature.signature = flipByte(call.signature.signature);
+      else {
+        const bytes = Buffer.from(call.responseBody, 'base64');
+        bytes[0] ^= 1;
+        call.responseBody = bytes.toString('base64');
+      }
+      const file = join(directory, `${field}.json`);
+      await writeFile(file, JSON.stringify(document));
+      const transport = forbiddenTransport();
+      const result = await verifyOfflineEnclaveRuling(file, { fetchImpl: transport.fetchImpl });
+      transport.assertUnused();
+      assert.equal(result.exitCode, 1);
+      const cli = offlineCli(file);
+      assert.equal(cli.error, undefined);
+      assert.equal(cli.status, 1, cli.stderr || cli.stdout);
+      assert.match(cli.stdout, field === 'signature' ? /FAIL Signed ruling: Ed25519 signature verification failed/
+        : /FAIL Signed ruling: responseHash does not match exact response bytes/);
+      assert.match(cli.stdout, /1 failed/);
+    }
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('offline retains core validation of evidence, outcome, policy, quotes and attachments', async () => {
+  const mutations = [
+    [d => { d.record.evidence.text += ' '; }, /evidence textHash/],
+    [d => { d.record.outcome = 'yes'; }, /outcome does not follow/],
+    [d => { d.record.jury.minConfidence = 0.7; }, /jury.minConfidence/],
+    [d => { d.record.material.bets[0].termsHash = '0'.repeat(64); }, /materialHash/],
+    [d => { d.record.plan.extra = true; }, /plan has unexpected fields/],
+    [d => { d.record.plan.dstack = {}; }, /dstack/],
+    [d => { d.record.plan.attestation.gateway_attestation.request_nonce = '0'.repeat(64); }, /request_nonce/],
+    [d => {
+      const report = d.record.plan.attestation.gateway_attestation;
+      const events = typeof report.event_log === 'string' ? JSON.parse(report.event_log) : report.event_log;
+      events.find(event => event.imr === 3).digest = '0'.repeat(48);
+      report.event_log = events;
+    }, /event log|digest/],
+  ];
+  for (const [mutate, message] of mutations) {
+    const document = await savedDocument();
+    mutate(document);
+    const result = await offlineDocument(document);
+    assert.equal(result.exitCode, 1, mutate.toString());
+    assert.match(result.checks.find(c => c.status === 'FAIL').detail, message);
+  }
+  for (const document of [null, {}, { record: {}, recipe: '' }]) {
+    assert.equal((await offlineDocument(document)).exitCode, 1);
+  }
+});
+
+test('offline stored GPU tokens require explicit trusted keys and preserve local validation', async () => {
+  const document = await savedDocument();
+  const call = document.record.plan;
+  const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'secp384r1' });
+  const jwks = { keys: [{ ...publicKey.export({ format: 'jwk' }), kid: 'offline-test', alg: 'ES384' }] };
+  const token = (claims = {}) => {
+    const input = [{ alg: 'ES384', kid: 'offline-test' }, { iss: 'https://nras.attestation.nvidia.com',
+      eat_nonce: call.nonce, 'x-nvidia-overall-att-result': true, ...claims }]
+      .map(value => Buffer.from(JSON.stringify(value)).toString('base64url')).join('.');
+    return `${input}.${sign('sha384', Buffer.from(input), { key: privateKey, dsaEncoding: 'ieee-p1363' }).toString('base64url')}`;
+  };
+  call.gpu = { jwt: token(), verdict: true, checkedAt: call.attestedAt };
+  const before = structuredClone(document);
+  const skipped = await offlineDocument(document);
+  assert.equal(skipped.exitCode, 2);
+  assert.deepEqual(document, before);
+  const gpu = skipped.checks.filter(c => c.check === 'GPU attestation');
+  assert.equal(gpu[0].status, 'NOT CHECKED');
+  assert.match(gpu[0].detail, /signing keys are not supplied/);
+  const verified = await offlineDocument(document, { jwks });
+  assert.equal(verified.exitCode, 2);
+  assert.equal(verified.checks.filter(c => c.check === 'GPU attestation' && c.status === 'PASS').length, 1);
+  for (const mutate of [
+    gpu => { gpu.jwt = `${gpu.jwt.slice(0, -128)}${flipByte(gpu.jwt.slice(-128))}`; },
+    gpu => { gpu.jwt = token({ eat_nonce: '0'.repeat(64) }); },
+    gpu => { gpu.jwt = token({ 'x-nvidia-overall-att-result': false }); },
+    gpu => { gpu.checkedAt = '2000-01-01T00:00:00.000Z'; },
+  ]) {
+    const changed = structuredClone(document);
+    mutate(changed.record.plan.gpu);
+    assert.equal((await offlineDocument(changed, { jwks })).exitCode, 1, mutate.toString());
+  }
+  for (const mutate of [gpu => { gpu.verdict = false; }, gpu => { gpu.jwt = 'bad'; },
+    gpu => { gpu.checkedAt = '2000-01-01T00:00:00.000Z'; }]) {
+    const changed = structuredClone(document);
+    mutate(changed.record.plan.gpu);
+    assert.equal((await offlineDocument(changed)).exitCode, 1, mutate.toString());
+  }
+});
+
+test('offline argument and file errors are clear, nonzero, and independent of verifier environment', async () => {
+  assert.deepEqual(parseVerifierArguments(['--offline', savedFile], { DSTACK_VERIFIER_URL: 'invalid' }), { offlineFile: savedFile });
+  for (const args of [['--offline'], ['--offline', '--unknown'], ['--offline', savedFile, '--offline', savedFile],
+    ['--offline', savedFile, 'extra'], ['--offline', savedFile, '--dstack-verifier', verifier]]) {
+    assert.throws(() => parseVerifierArguments(args, {}), /offline/);
+  }
+  const missingArgument = offlineCli();
+  assert.equal(missingArgument.status, 1);
+  assert.match(missingArgument.stdout, /FAIL Arguments: --offline requires one file path/);
+  const missingFile = offlineCli(join(tmpdir(), `stated-missing-${process.pid}`, 'missing.json'));
+  assert.equal(missingFile.status, 1);
+  assert.match(missingFile.stdout, /FAIL Offline file: Cannot verify .*ENOENT/);
 });
