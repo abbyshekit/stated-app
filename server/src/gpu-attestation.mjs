@@ -20,8 +20,10 @@ function nonce(value, name) {
   return value.toLowerCase();
 }
 
-function requestSignal(signal) {
-  const timeout = AbortSignal.timeout(20_000);
+function requestSignal(signal, timeoutMs = 20_000) {
+  // null delegates the deadline to the offline-screening transport, which
+  // buffers the complete body and reports each attempt before returning it.
+  const timeout = timeoutMs === null ? new AbortController().signal : AbortSignal.timeout(timeoutMs);
   return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
 
@@ -41,7 +43,7 @@ async function readJson(response, signal) {
 }
 
 /** Fetch at most once per hour; never follow a token-supplied URL or a redirect. */
-export async function getGpuJwks({ fetchImpl = fetch, signal } = {}) {
+export async function getGpuJwks({ fetchImpl = fetch, signal, timeoutMs = 20_000 } = {}) {
   const cached = keyCache.get(fetchImpl);
   signal?.throwIfAborted();
   if (cached?.value && cached.expiresAt > Date.now()) {
@@ -51,7 +53,7 @@ export async function getGpuJwks({ fetchImpl = fetch, signal } = {}) {
   if (cached?.pending) return cached.pending;
   const entry = {};
   entry.pending = (async () => {
-    const boundedSignal = requestSignal(signal);
+    const boundedSignal = requestSignal(signal, timeoutMs);
     const jwks = object(await readJson(await fetchImpl(JWKS_URL, {
       headers: { accept: 'application/json' }, redirect: 'error', signal: boundedSignal,
     }), boundedSignal), 'NVIDIA JWKS');
@@ -110,14 +112,14 @@ export function verifyGpuJwt(jwt, { jwks = cachedGpuJwks() } = {}) {
 }
 
 /** Submit the decoded payload unchanged, after checking its request nonce. */
-export async function verifyGpuPayload(nvidiaPayloadString, nonceHex, { fetchImpl = fetch, signal } = {}) {
+export async function verifyGpuPayload(nvidiaPayloadString, nonceHex, { fetchImpl = fetch, signal, timeoutMs = 20_000 } = {}) {
   const expectedNonce = nonce(nonceHex, 'request nonce');
   if (typeof nvidiaPayloadString !== 'string' || Buffer.byteLength(nvidiaPayloadString) > MAX_BYTES) {
     throw new Error('nvidia_payload must be a JSON string of at most 1 MB');
   }
   const payload = object(JSON.parse(nvidiaPayloadString), 'nvidia_payload');
   if (nonce(payload.nonce, 'nvidia_payload nonce') !== expectedNonce) throw new Error('NVIDIA payload nonce does not match request nonce');
-  const boundedSignal = requestSignal(signal);
+  const boundedSignal = requestSignal(signal, timeoutMs);
   boundedSignal.throwIfAborted();
   const result = await readJson(await fetchImpl(`${NRAS}/v3/attest/gpu`, {
     method: 'POST', headers: { accept: 'application/json', 'content-type': 'application/json' },
@@ -126,7 +128,7 @@ export async function verifyGpuPayload(nvidiaPayloadString, nonceHex, { fetchImp
   if (!Array.isArray(result) || !Array.isArray(result[0]) || result[0].length !== 2 || result[0][0] !== 'JWT') {
     throw new Error('NVIDIA NRAS response must begin with a JWT entry');
   }
-  const jwks = await getGpuJwks({ fetchImpl, signal: boundedSignal });
+  const jwks = await getGpuJwks({ fetchImpl, signal: boundedSignal, timeoutMs });
   const verified = verifyGpuJwt(result[0][1], { jwks });
   if (nonce(verified.claims.eat_nonce, 'GPU JWT eat_nonce') !== expectedNonce) throw new Error('GPU JWT nonce does not match request nonce');
   return verified;

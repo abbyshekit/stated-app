@@ -279,7 +279,8 @@ test('a stalled endpoint is bounded instead of silently omitted', { timeout: 200
     if (options.signal.aborted) return reject(new Error('synthetic aborted'));
     options.signal.addEventListener('abort', () => reject(new Error('synthetic aborted')), { once: true });
   }) });
-  const report = await verifyHostedPayout({ fetchImpl: rpc.fetchImpl, timeoutMs: 30 });
+  const report = await verifyHostedPayout({ fetchImpl: rpc.fetchImpl, timeoutMs: 30,
+    networkOptions: { sleep: async () => {} } });
   assert.equal(report.overall, 'UNAVAILABLE');
   assert.equal(report.providers[1].status, 'UNAVAILABLE');
 });

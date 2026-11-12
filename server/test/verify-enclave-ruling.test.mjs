@@ -217,7 +217,7 @@ test('court anchor reports no proposal separately and RPC outage never passes', 
   await verifyCourtProposal(fixture(), fixture().material.bets[0].id, (status, check, detail) => checks.push({ status, check, detail }),
     { fetchImpl: async () => { throw new Error('offline'); } });
   assert.equal(checks[0].status, 'FAIL');
-  assert.match(checks[0].detail, /offline/);
+  assert.match(checks[0].detail, /get_last_proposal_id.*deadline 30000ms.*request failed/);
 });
 
 const savedFile = fileURLToPath(new URL('../../evidence/enclave-ruling-c171de89.json', import.meta.url));

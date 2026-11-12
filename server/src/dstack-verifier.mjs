@@ -95,14 +95,16 @@ async function readResponse(response, signal) {
   catch { throw new Error('Malformed dstack JSON response'); }
 }
 
-export async function verifyWithDstack(report, { url, fetchImpl = fetch, signal } = {}) {
+export async function verifyWithDstack(report, { url, fetchImpl = fetch, signal, timeoutMs = 90_000 } = {}) {
   const verifier = validateDstackVerifierUrl(url);
   object(report, 'report');
   object(report.info, 'report.info');
   if (typeof report.intel_quote !== 'string' || !report.intel_quote || typeof report.info.vm_config !== 'string'
       || !(typeof report.event_log === 'string' || Array.isArray(report.event_log))) throw new Error('Invalid dstack report');
   const body = JSON.stringify({ quote: report.intel_quote, event_log: typeof report.event_log === 'string' ? report.event_log : JSON.stringify(report.event_log), vm_config: report.info.vm_config });
-  const timeout = AbortSignal.timeout(90_000);
+  // A verifier with a fully buffered, deadline-owning transport disables this
+  // outer timer so retries cannot leave the body reader with an expired signal.
+  const timeout = timeoutMs === null ? new AbortController().signal : AbortSignal.timeout(timeoutMs);
   const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
   requestSignal.throwIfAborted();
   let response;

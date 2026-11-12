@@ -8,6 +8,7 @@ import { getGpuJwks, verifyGpuPayload } from '../server/src/gpu-attestation.mjs'
 import { verifyWithDstack, dstackPasses, validateDstackVerifierUrl } from '../server/src/dstack-verifier.mjs';
 import { fingerprint } from '../server/src/canonical.mjs';
 import { proposalKind } from '../server/src/court-dao.mjs';
+import { verificationFetch } from './verification-network.mjs';
 
 const DEFAULT_BASE = 'https://stated-production.up.railway.app';
 // The first hosted bet paid on a jury ruling through Stated Court (12 November 2026, both sides operator-run).
@@ -24,7 +25,7 @@ async function archivalCourtView(dao, method, args, fetchImpl) {
   const errors = [];
   for (const url of COURT_RPC) {
     try {
-      const response = await fetchImpl(url, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(30_000),
+      const response = await fetchImpl(url, { method: 'POST', redirect: 'error',
         headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 'court-ruling', method: 'query',
           params: { request_type: 'call_function', finality: 'final', account_id: dao, method_name: method,
             args_base64: Buffer.from(JSON.stringify(args)).toString('base64') } }) });
@@ -46,11 +47,12 @@ async function archivalCourtView(dao, method, args, fetchImpl) {
 
 /** Anchors the exact fetched document.record, using canonicalJson UTF-8 with
  * sorted object keys and no trailing newline, just as court-dao.mjs does. */
-export async function verifyCourtProposal(record, betId, add, { fetchImpl = fetch, dao = COURT_DAO, escrow = COURT_ESCROW, offline = false } = {}) {
+export async function verifyCourtProposal(record, betId, add, { fetchImpl = fetch, dao = COURT_DAO, escrow = COURT_ESCROW, offline = false, networkOptions = {} } = {}) {
   if (offline) {
     add('NOT CHECKED', 'Court proposal', `Cannot read the on-chain proposal for Bet ${betId} ${OFFLINE_REASON}`);
     return;
   }
+  fetchImpl = verificationFetch(fetchImpl, networkOptions);
   try {
     let end = Number(await archivalCourtView(dao, 'get_last_proposal_id', {}, fetchImpl));
     if (!Number.isSafeInteger(end) || end < 0) throw new Error('Invalid court proposal count');
@@ -191,7 +193,8 @@ function pageMaterial(page) {
   return { outcome, claim, deadline, termsHash: attributes.get('data-bet-terms-hash') };
 }
 
-export async function verifyRulingAttestations(record, add, { fetchImpl = fetch, jwks, offline = false, dstackVerifierUrl = process.env.DSTACK_VERIFIER_URL || DEFAULT_DSTACK_VERIFIER } = {}) {
+export async function verifyRulingAttestations(record, add, { fetchImpl = fetch, jwks, offline = false, dstackVerifierUrl = process.env.DSTACK_VERIFIER_URL || DEFAULT_DSTACK_VERIFIER, networkOptions = {} } = {}) {
+  if (!offline) fetchImpl = verificationFetch(fetchImpl, networkOptions);
   const failures = [];
   const unavailable = [];
   for (const [role, call] of [['plan', record.plan], ...record.verdicts.map(call => ['verdict', call])]) {
@@ -216,7 +219,8 @@ export async function verifyRulingAttestations(record, add, { fetchImpl = fetch,
         continue;
       }
       try {
-        const result = await verifyWithDstack(report, { url: dstackVerifierUrl, fetchImpl, signal: AbortSignal.timeout(90_000) });
+        // verificationFetch owns and reports every complete request deadline.
+        const result = await verifyWithDstack(report, { url: dstackVerifierUrl, fetchImpl, timeoutMs: null });
         if (!dstackPasses(result) || !result.osImageHash || !result.osImageVersion) {
           const reason = result.reason || `policy status: isValid=${result.isValid}, quote=${result.quoteVerified}, eventLog=${result.eventLogVerified}, image=${result.osImageHashVerified}, ACPI=${result.acpiTablesVerified}, dev=${result.osImageIsDev}, TCB=${result.tcbStatus}, imageVersion=${result.osImageVersion}, imageHash=${result.osImageHash}`;
           add('FAIL', 'Quote measurements', `Checked now: ${label}; ${reason}`);
@@ -244,7 +248,7 @@ export async function verifyRulingAttestations(record, add, { fetchImpl = fetch,
     } else if (call.gpu) add('PASS', 'GPU attestation', `NVIDIA NRAS verdict true, signed token verified; ${name}`);
     else if (Object.hasOwn(matches[0], 'nvidia_payload')) {
       try {
-        await verifyGpuPayload(matches[0].nvidia_payload, call.nonce, { fetchImpl });
+        await verifyGpuPayload(matches[0].nvidia_payload, call.nonce, { fetchImpl, timeoutMs: null });
         add('PASS', 'GPU attestation', `NVIDIA NRAS verifies the stored evidence (checked now); ${name}`);
       } catch (error) { add('FAIL', 'GPU attestation', `${name}; ${error.message}`); }
     } else add('NOT CHECKED', 'GPU attestation', `no GPU evidence stored; ${name}`);
@@ -256,7 +260,7 @@ export async function verifyRulingAttestations(record, add, { fetchImpl = fetch,
 }
 async function readText(url, limit, fetchImpl) {
   let response;
-  try { response = await fetchImpl(url, { redirect: 'error', signal: AbortSignal.timeout(30_000) }); }
+  try { response = await fetchImpl(url, { redirect: 'error' }); }
   catch (error) { throw Object.assign(new Error(error.message), { unavailable: true }); }
   if (!response.ok) throw Object.assign(new Error(`HTTP ${response.status}`), { unavailable: true });
   if (!response.body) throw new Error('Response has no body');
@@ -275,7 +279,8 @@ async function readText(url, limit, fetchImpl) {
   return new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks));
 }
 
-export async function verifyHostedEnclaveRuling(base = DEFAULT_BASE, betId, { fetchImpl = fetch, document: suppliedDocument, offline = false, jwks, dstackVerifierUrl = process.env.DSTACK_VERIFIER_URL || DEFAULT_DSTACK_VERIFIER } = {}) {
+export async function verifyHostedEnclaveRuling(base = DEFAULT_BASE, betId, { fetchImpl = fetch, document: suppliedDocument, offline = false, jwks, dstackVerifierUrl = process.env.DSTACK_VERIFIER_URL || DEFAULT_DSTACK_VERIFIER, networkOptions = {} } = {}) {
+  if (!offline) fetchImpl = verificationFetch(fetchImpl, networkOptions);
   // A supplied record defaults to its own Bet; otherwise check the default hosted Bet.
   betId ??= suppliedDocument?.record?.material?.bets?.[0]?.id ?? DEFAULT_BET;
   const checks = [];
@@ -313,7 +318,7 @@ export async function verifyHostedEnclaveRuling(base = DEFAULT_BASE, betId, { fe
     }
     const calls = [document.record.plan, ...(document.record.verdicts || [])];
     if (!offline && jwks === undefined && calls.some(call => call && Object.hasOwn(call, 'gpu'))) {
-      jwks = await getGpuJwks({ fetchImpl });
+      jwks = await getGpuJwks({ fetchImpl, timeoutMs: null });
     }
     // GPU tokens are unsigned supplemental attachments, not part of the model's
     // signed bytes. Without independently supplied NVIDIA keys, defer only that

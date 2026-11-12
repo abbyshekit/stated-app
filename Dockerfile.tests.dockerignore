@@ -1,0 +1,27 @@
+# Allowlist the suite's source and public evidence. No local configuration enters the image.
+**
+!package.json
+!package-lock.json
+!*.mjs
+!scripts/
+!scripts/**
+!server/
+!server/**
+!evidence/
+!evidence/*.json
+!evidence/jury-eval-20261112/
+!evidence/jury-eval-20261112/*.json
+!contracts/
+!contracts/**
+!README.md
+!docs/
+!docs/**
+**/node_modules
+**/target
+**/.env
+**/.env.*
+**/*.pem
+**/credentials.json
+**/.keys
+**/.ssh
+**/.near-credentials

@@ -8,6 +8,7 @@ import { NEAR_CALL_GAS, rpc, viewEscrowSnapshot } from '../server/src/near-escro
 import { deliveryFromReceipts } from '../server/src/near-delivery.mjs';
 import { isAccount, isNamedAccount, network } from '../server/src/near-network.mjs';
 import { normalizePolicy } from './create-court-dao.mjs';
+import { verificationFetch } from './verification-network.mjs';
 
 // Archival endpoints: ordinary testnet nodes drop transactions after about five epochs, so the
 // November payout stops answering there within days. Both endpoints below still return it.
@@ -294,46 +295,13 @@ function withdrawal(result, record, args) {
   return graph;
 }
 
-// rpc still owns size limits and parsing. Only failures at the transport stream
-// boundary become Unavailable; malformed response or argument JSON remains FAIL.
-function transportResponse(response) {
-  if (!response.body) return response;
-  const reader = response.body.getReader();
-  const body = new ReadableStream({
-    async pull(controller) {
-      let chunk;
-      try { chunk = await reader.read(); }
-      catch {
-        reader.releaseLock();
-        controller.error(new Unavailable('rpc_unavailable'));
-        return;
-      }
-      if (chunk.done) { reader.releaseLock(); controller.close(); }
-      else controller.enqueue(chunk.value);
-    },
-    async cancel(reason) {
-      try { await reader.cancel(reason); }
-      catch { throw new Unavailable('rpc_unavailable'); }
-      finally { reader.releaseLock(); }
-    },
-  }, { highWaterMark: 0 });
-  return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
-}
-
-async function provider(endpoint, record, fetchImpl, timeoutMs) {
-  const controller = new AbortController();
-  let timer;
+async function provider(endpoint, record, fetchImpl) {
   const work = async () => {
     const boundedFetch = async (url, init) => {
       requireThat(url === endpoint, 'unexpected_rpc_endpoint');
-      try {
-        const response = await fetchImpl(url, { ...init, signal: AbortSignal.any([init.signal, controller.signal]) });
-        if (!response.ok) throw new Unavailable('rpc_unavailable');
-        return transportResponse(response);
-      } catch (error) {
-        if (error instanceof Mismatch) throw error;
-        throw new Unavailable('rpc_unavailable');
-      }
+      const response = await fetchImpl(url, init);
+      if (response.status === 429 || response.status >= 500) throw new Unavailable(`HTTP ${response.status}`);
+      return response;
     };
     const options = { fetchImpl: boundedFetch, urls: [endpoint] };
     const snapshot = await viewEscrowSnapshot(record.contract, record.id, options);
@@ -367,18 +335,17 @@ async function provider(endpoint, record, fetchImpl, timeoutMs) {
           withdraw: executionFingerprint(withdrawn, withdrawalGraph) } } };
   };
   try {
-    return await Promise.race([work(), new Promise((_, reject) => {
-      timer = setTimeout(() => { controller.abort(); reject(new Unavailable('provider_deadline')); }, timeoutMs);
-    })]);
+    return await work();
   } catch (error) {
-    const unavailable = error instanceof Unavailable || controller.signal.aborted
+    const unavailable = error instanceof Unavailable || error.unavailable
       || typeof error?.message === 'string' && error.message.startsWith('NEAR RPC error:');
     return { endpoint, status: unavailable ? 'UNAVAILABLE' : 'FAIL',
-      reason: unavailable ? 'rpc_unavailable' : error instanceof Mismatch ? error.message : 'invalid_rpc_response' };
-  } finally { clearTimeout(timer); controller.abort(); }
+      reason: unavailable ? 'rpc_unavailable' : error instanceof Mismatch ? error.message : 'invalid_rpc_response',
+      ...(typeof error.unavailable === 'boolean' ? { detail: error.message } : {}) };
+  }
 }
 
-export async function verifyHostedPayout({ fetchImpl = fetch, evidence = DEFAULT_EVIDENCE, timeoutMs = 30000 } = {}) {
+export async function verifyHostedPayout({ fetchImpl = fetch, evidence = DEFAULT_EVIDENCE, timeoutMs = 30000, networkOptions = {} } = {}) {
   const report = { overall: 'FAIL', network: 'NEAR testnet', providers: [], limitations: [...LIMITS] };
   let record;
   try {
@@ -389,7 +356,8 @@ export async function verifyHostedPayout({ fetchImpl = fetch, evidence = DEFAULT
     report.reason = error instanceof Mismatch ? error.message : 'invalid_evidence';
     return report;
   }
-  report.providers = await Promise.all(ENDPOINTS.map(endpoint => provider(endpoint, record, fetchImpl, timeoutMs)));
+  const request = verificationFetch(fetchImpl, { ...networkOptions, timeoutMs, maxBytes: 1024 * 1024 });
+  report.providers = await Promise.all(ENDPOINTS.map(endpoint => provider(endpoint, record, request)));
   if (report.providers.some(result => result.status === 'FAIL')) return report;
   if (report.providers.some(result => result.status === 'UNAVAILABLE')) { report.overall = 'UNAVAILABLE'; return report; }
   if (canonicalJson(report.providers[0].evidence) !== canonicalJson(report.providers[1].evidence)) {

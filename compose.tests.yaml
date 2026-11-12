@@ -1,0 +1,14 @@
+# Separate from the connected demo: no environment file, host mounts, keys or network.
+# PostgreSQL clusters are started and stopped by server/test/support/pg.mjs.
+services:
+  tests:
+    profiles: [tests]
+    build:
+      context: .
+      dockerfile: Dockerfile.tests
+    network_mode: none
+    environment:
+      STATED_TEST_REQUIRE_PG: "1"
+      LC_ALL: C
+    shm_size: 256mb
+    command: ["npm", "test", "--", "--test-reporter=tap"]

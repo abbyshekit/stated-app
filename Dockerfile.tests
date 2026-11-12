@@ -1,0 +1,15 @@
+FROM node:26-bookworm-slim AS node
+FROM postgres:17-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends libstdc++6 libatomic1 openssl \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci && npm cache clean --force
+COPY --chown=postgres:postgres . .
+USER postgres
+ENV STATED_TEST_REQUIRE_PG=1 LC_ALL=C
+ENTRYPOINT []
+CMD ["npm", "test", "--", "--test-reporter=tap"]

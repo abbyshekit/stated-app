@@ -12,7 +12,9 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const ROOT_FILES = ['score.test.mjs', 'domain.test.mjs', 'xpost.test.mjs', 'sim.test.mjs'];
 const serverFiles = readdirSync(join(root, 'server/test')).filter(name => name.endsWith('.test.mjs')).sort()
   .map(name => `server/test/${name}`);
-const files = [...ROOT_FILES, ...serverFiles];
+const scriptFiles = readdirSync(join(root, 'scripts')).filter(name => name.endsWith('.test.mjs')).sort()
+  .map(name => `scripts/${name}`);
+const files = [...ROOT_FILES, ...serverFiles, ...scriptFiles];
 
 // A file needs a database when it starts the app stack or a cluster of its own.
 const needsDatabase = text => /support\/(?:app|pg)\.mjs['"]/.test(text);
