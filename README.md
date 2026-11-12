@@ -10,7 +10,7 @@ Status on 12 November 2026: running on NEAR testnet with test NEAR. At 19:31 UTC
 | --- | --- |
 | Tracks | Open Innovation `open`; Privacy & Private AI `privacy`; Social Money `social`; AI Security & Defense `security` |
 | Hosted app | https://stated-production.up.railway.app (NEAR testnet, test NEAR) |
-| Demo video | [docs/stated-demo-70s.mp4](docs/stated-demo-70s.mp4) (recorded before the jury; a new cut follows the first live jury payout) |
+| Demo video | [docs/stated-demo-70s.mp4](docs/stated-demo-70s.mp4) (recorded on 11 November, before the jury ruled on a bet) |
 | Quick check | `npm ci`, then `node scripts/verify-enclave-ruling.mjs` and `node scripts/verify-hosted-payout.mjs evidence/hosted-court-payout-testnet-20261112.json` |
 | Tests | `npm test`: the whole suite with PostgreSQL 15+, otherwise the files that need no database |
 | Security | [docs/SECURITY.md](docs/SECURITY.md): a security review of the code and the hosted app, each finding and its fix |
