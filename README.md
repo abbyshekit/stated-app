@@ -9,7 +9,7 @@ Bet on anything said on X. A NEAR AI enclave jury decides who won, and a NEAR co
 | Demo video | [docs/stated-demo-70s.mp4](docs/stated-demo-70s.mp4) (recorded before the jury; a new cut follows the first live jury payout) |
 | Quick check | `npm ci`, then `node scripts/verify-enclave-ruling.mjs` and `node scripts/verify-hosted-payout.mjs` |
 | Tests | `npm test`: the whole suite with PostgreSQL 15+, otherwise the files that need no database |
-| Security | [docs/SECURITY.md](docs/SECURITY.md): an outside review of the code and the hosted app, each finding and its fix |
+| Security | [docs/SECURITY.md](docs/SECURITY.md): a security review of the code and the hosted app, each finding and its fix |
 
 ## Try it
 
@@ -57,7 +57,7 @@ The import-price bet is settled from links: after the release, whoever is right 
 - **The AI holds no keys.** A ruling reaches money only through the [jury relay](contracts/jury-relay) and the DAO. The relay's operator can only file a `referee_resolve` for one bet and outcome; the relay approves only its own filing, exactly as filed, ten minutes after the DAO recorded it. The escrow lets its referee choose only Yes, No or Void between the two bettors. Neither contract has an access key or an upgrade path.
 - **Spending limits that follow reputation.** A new handle can stake at most 0.25 test NEAR; after one settled bet, 0.5; after three, 1.
 - **TEE attestation, checked twice.** Inside the app before a verdict counts, and from outside by anyone with the verify script.
-- **Reviewed.** An outside review found a crash, a page-parsing denial of service, an escrow that a deleted post could orphan, a court that one key could run and a private-evidence leak. Each is fixed with a test; see [docs/SECURITY.md](docs/SECURITY.md).
+- **Reviewed.** A security review of the code and the hosted app, run with automated tools rather than an independent auditor, found a crash, a page-parsing denial of service, an escrow that a deleted post could orphan, a court that one key could run and a private-evidence leak. Each is fixed with a test; see [docs/SECURITY.md](docs/SECURITY.md).
 
 ### Social Money (`social`)
 

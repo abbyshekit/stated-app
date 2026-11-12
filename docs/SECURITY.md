@@ -1,6 +1,6 @@
 # Security review and fixes
 
-An outside review of commit `af6d2bc` (12 November 2026) read the code, ran probes against a local copy of the app, ran a signed scan against the hosted app and checked the dependencies. It found one critical issue, four high ones and a list of important ones. This file lists each finding, what changed and the test or on-chain evidence that covers it. Each code fix ships with a test that fails without it.
+A security review of commit `af6d2bc` (12 November 2026), run by the author with automated tools rather than an independent auditor, read the code, ran probes against a local copy of the app, ran a signed scan against the hosted app and checked the dependencies. It found one critical issue, four high ones and a list of important ones. This file lists each finding, what changed and the test or on-chain evidence that covers it. Each code fix ships with a test that fails without it.
 
 ## Fixed
 
