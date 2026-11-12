@@ -23,12 +23,16 @@ test('signed-out home exposes only an eligible testnet Bet', async () => {
     evidenceSourceUrl: 'https://example.org/result', creatorSide: 'yes', stakeNear: '0.1',
     acceptBy: new Date(Date.now() + 86400000).toISOString(), resolveAt: new Date(Date.now() + 172800000).toISOString(),
   });
-  const page = async (visible) => {
+  // The demo button is gone. A signed-out visitor reaches a Bet through the home list of published,
+  // chain-verified Bets, and never sees an acceptor who has not consented to be named.
+  const page = async (visible, { acceptorNamed = false } = {}) => {
     const res = await s.browser().get('/');
     assert.equal(res.status, 200);
-    assert.equal(res.text.includes('View test bet'), visible);
-    assert.equal(res.text.includes('Operator-controlled test on NEAR testnet'), visible);
-    if (visible) assert.match(res.text, new RegExp(`href="/bets/${bet.id}">View test bet</a>`));
+    assert.doesNotMatch(res.text, /View test bet|Operator-controlled test on NEAR testnet/, 'the demo button and its line are gone');
+    assert.equal(res.text.includes(`<a href="/bets/${bet.id}">`), visible);
+    assert.equal(res.text.includes('Synthetic claim'), visible);
+    if (visible) assert.match(res.text, new RegExp(`<section id="public-bets">[\\s\\S]*<a href="/bets/${bet.id}">Synthetic claim`));
+    if (!acceptorNamed) assert.doesNotMatch(res.text, /fixture_acceptor|acceptor\.testnet/);
     assert.doesNotMatch(res.text, /private fixture note|Paid to your account/);
     assert.match(res.text, /Sign in with X/);
   };
@@ -53,17 +57,20 @@ test('signed-out home exposes only an eligible testnet Bet', async () => {
     acceptor_user_id=$5,status='accepted',near_height=321,near_verified_at=clock_timestamp(),accepted_at=clock_timestamp() where id=$1`,
   [bet.id, chain, chain.creator, chain.acceptor, String(acceptor.id)]);
   await publishBet(s.db, creator, bet.id);
-  await page(false); // accepted, not settled
+  await page(true); // published and verified: listed, acceptor unnamed
   chain.status = 'settled'; chain.proposal = { outcome: 'yes', proposer: chain.creator, revision: '1' };
   await s.db.query("update bilateral_bets set chain_state=$2,status='settled',outcome='yes',settled_at=clock_timestamp() where id=$1", [bet.id, chain]);
-  await page(false); // acceptor has not consented to identity publication
+  await page(true); // acceptor has not consented to identity publication: still unnamed
   await consentToPublicBet(s.db, acceptor, bet.id);
-  await page(true);
+  await page(true, { acceptorNamed: true });
   assert.equal((await s.browser().get(`/bets/${bet.id}`)).status, 200);
-  s.config.near.real = true; await page(false); s.config.near.real = false;
+  s.config.near.real = true;
+  await page(true, { acceptorNamed: true });
+  assert.doesNotMatch((await s.browser().get('/')).text, /join=1/, 'real NEAR offers no take link from home');
+  s.config.near.real = false;
   chain.proposal.outcome = 'void';
   await s.db.query('update bilateral_bets set chain_state=$2 where id=$1', [bet.id, chain]);
-  await page(false);
+  await page(true, { acceptorNamed: true });
   chain.proposal.outcome = 'yes';
   await s.db.query('update bilateral_bets set chain_state=$2,near_height=null where id=$1', [bet.id, chain]);
   await page(false); // unverified

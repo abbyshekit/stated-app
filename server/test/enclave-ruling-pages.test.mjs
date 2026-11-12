@@ -291,8 +291,12 @@ test('private Bets expose neither the ruling nor submitted evidence, even to a b
   assert.equal((await s.browser().get(jsonPath())).status, 404);
   const privatePage = await creatorBrowser.get(path());
   assert.equal(privatePage.status, 200);
-  assert.doesNotMatch(privatePage.text, /NEAR AI enclave|enclave_ruling|enclave-ruling\.json|Add a link|Links, 1|Official report|news\.example\.org/);
-  assert.doesNotMatch(privatePage.text, new RegExp(HIDDEN_TEXT));
+  // Every page carries the same generic site description; it names enclaves but holds no Bet content.
+  const siteDescription = '<meta name="description" content="Bet on what is said on X. Three AI models in NEAR AI enclaves decide the result.">';
+  assert.equal(privatePage.text.split(siteDescription).length - 1, 1, 'the head carries only the generic site description');
+  const privateBody = privatePage.text.replace(siteDescription, '');
+  assert.doesNotMatch(privateBody, /NEAR AI enclave|enclave_ruling|enclave-ruling\.json|Add a link|Links, 1|Official report|news\.example\.org/);
+  assert.doesNotMatch(privateBody, new RegExp(HIDDEN_TEXT));
 });
 
 test('private evidence read by the jury is counted without exposing its metadata or signed text', async () => {

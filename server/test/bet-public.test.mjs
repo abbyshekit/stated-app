@@ -267,7 +267,10 @@ test('public settlement proof requires a matching referee event and publication'
   const page = await s.browser().get(`/bets/${valid.id}`);
   assert.equal(page.status, 200);
   assert.match(page.text, new RegExp(`<a[^>]+href="https://testnet\\.nearblocks\\.io/txns/${hash}"[^>]*>Verify settlement</a>`));
-  assert.match(page.text, /<b>Came true<\/b>/);
+  assert.match(page.text, /<h1[^>]+data-bet-outcome="yes"/, 'the settled outcome stays on the page');
+  assert.match(page.text, /<p class="lead">@public_creator won</, 'the lead names the winner');
+  assert.match(page.text, /<div class="seat won">[\s\S]*?bet yes/);
+  assert.doesNotMatch(page.text, /Came true/);
   assert.doesNotMatch(page.text, /private\.example\.org\/evidence|private fixture note|Paid to your account/);
 
   const evidencePath = `/admin/bets/${valid.id}/evidence`;
@@ -351,16 +354,16 @@ test('a taken bet offers Follow and a closed bet links to a takeable offer', asy
   await publishBet(s.db, creator, bet.id);
   const path = `/bets/${bet.id}`;
   const anonymous = await s.browser().get(`${path}?done=following`);
-  assert.match(anonymous.text, /Follow the result/);
+  assert.match(anonymous.text, /Follow result/);
   assert.doesNotMatch(anonymous.text, /Updates will appear in your Inbox/);
   const followerBrowser = await s.signIn(s.fakeX.addUser('81003', 'public_follower'));
   const confirmation = await followerBrowser.get(`${path}?follow=1`);
-  assert.match(confirmation.text, /<button class="primary big" type="submit">Follow the result<\/button>/);
+  assert.match(confirmation.text, /<button class="primary big" type="submit">Follow result<\/button>/);
   await followerBrowser.submit(`${path}/follow`, {}, { from: `${path}?follow=1` });
   await followerBrowser.submit(`${path}/follow`, {}, { from: path });
   const followed = await followerBrowser.get(path);
   assert.match(followed.text, /Updates will appear in your Inbox/);
-  assert.doesNotMatch(followed.text, /Follow the result/);
+  assert.doesNotMatch(followed.text, /Follow result/);
   assert.equal((await publicBet(s.db, bet.id)).follower_count, '1');
 
   const closed = await makeBet();

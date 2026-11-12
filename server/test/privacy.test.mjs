@@ -42,6 +42,32 @@ function surfaces() {
   ];
 }
 
+// Only the home page carries a preview while records are private, and only the generic site text.
+// Everything else on the page, and every other surface, must have no preview tag at all.
+const SITE_PREVIEW = {
+  'og:title': 'Stated: bets on what is said on X',
+  'og:description': 'Bet on what is said on X, decided by three AI models in NEAR AI enclaves.',
+  'twitter:title': 'Stated: bets on what is said on X',
+  'twitter:description': 'Bet on what is said on X, decided by three AI models in NEAR AI enclaves.',
+};
+const previewTags = (text) => [...text.matchAll(/<meta (?:property|name)="((?:og|twitter):[a-z:]+)" content="([^"]*)">/g)];
+function assertGenericPreviewOnly(name, res, label) {
+  const tags = previewTags(res.text);
+  if (name === 'home page') {
+    assert.deepEqual(tags.filter(([, key]) => key === 'og:title').map(([, , c]) => c), [SITE_PREVIEW['og:title']], `${label}: home carries the generic title`);
+    for (const [, key, content] of tags) {
+      if (key in SITE_PREVIEW) assert.equal(content, SITE_PREVIEW[key], `${label}: ${key} is the generic site text`);
+      else assert.ok(['og:type', 'og:url', 'twitter:card'].includes(key), `${label}: unexpected ${key}`);
+      assert.doesNotMatch(content, /alice|Bitcoin|Fed|SECRET/i, `${label}: ${key} carries no user content`);
+    }
+    assert.ok(!tags.some(([, key]) => /image/.test(key)), `${label}: home has no per-record image`);
+    return res.text.replace(/<meta (?:property|name)="(?:og|twitter):[a-z:]+" content="[^"]*">/g, '');
+  }
+  assert.deepEqual(tags, [], `${label}: has a preview`);
+  assert.doesNotMatch(res.text, /og:title/, `${label}: has a preview`);
+  return res.text;
+}
+
 async function readAll(browser) {
   const out = {};
   for (const [name, path] of surfaces()) out[name] = await browser.request('GET', path, { headers: { 'user-agent': 'Twitterbot/1.0' } });
@@ -106,7 +132,8 @@ test('a private profile: the owner sees everything, another user and an anonymou
     for (const [name, res] of Object.entries(pages)) {
       assert.doesNotMatch(res.text, new RegExp(NOTE), `${who}: ${name} leaked the note`);
       assert.doesNotMatch(res.text, /Bitcoin will close above|The Fed will raise/, `${who}: ${name} leaked a private record`);
-      assert.doesNotMatch(res.text, /og:title/, `${who}: ${name} has a preview`);
+      const rest = assertGenericPreviewOnly(name, res, `${who}: ${name}`);
+      assert.doesNotMatch(rest, /og:title|twitter:title/, `${who}: ${name} has a preview`);
     }
     assert.equal(pages['profile page'].status, 404);
     assert.equal(pages['profile API'].status, 404);
@@ -194,7 +221,8 @@ test('going private withdraws every public page, preview, export and search resu
   const pages = await readAll(anon);
   for (const [name, res] of Object.entries(pages)) {
     assert.doesNotMatch(res.text, /Bitcoin will close above|The Fed will raise/, `${name} still shows a record`);
-    assert.doesNotMatch(res.text, /og:title/, `${name} still has a preview`);
+    const rest = assertGenericPreviewOnly(name, res, `${name} still`);
+    assert.doesNotMatch(rest, /og:title|twitter:title/, `${name} still has a preview`);
   }
   assert.equal(pages['profile page'].status, 404);
   assert.equal(pages['saved prediction page'].status, 404);

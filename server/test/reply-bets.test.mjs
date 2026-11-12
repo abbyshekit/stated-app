@@ -155,7 +155,17 @@ test('“bet 0.5 no” under a post funds an offer from an account named after t
   assert.equal(user.profile_visibility, 'private');
   assert.ok(user.setup_completed_at);
   assert.equal((await one('select visibility from saves where owner_x_user_id = $1', [X.oskar.id])).visibility, 'private');
-  assert.equal((await s.browser().get('/u/oskar')).status, 404);
+  // The profile stays private, but the published Bet is public: /u/<handle> shows it under the handle only.
+  await s.db.query('update users set x_name = $2 where x_user_id = $1', [X.oskar.id, 'Oskar Private-Display-Name']);
+  const profile = await s.browser().get('/u/oskar');
+  assert.equal(profile.status, 200, 'a published Bet makes the handle page reachable');
+  assert.match(profile.text, /<h2 class="lead">Public bets<\/h2>/);
+  assert.ok(profile.text.includes(`<a href="/bets/${betId}">Nightjar 2.0 ships a stable release before March 1, ${NEXT}.</a>`), 'the published Bet is listed');
+  assert.match(profile.text, /<b>oskar<\/b><span>@oskar<\/span>/, 'the handle is the only name');
+  assert.doesNotMatch(profile.text, /Private-Display-Name/, 'the display name stays private');
+  assert.doesNotMatch(profile.text, /Predictions|Following|Saved|\/u\/oskar\/\d+/, 'no save is listed');
+  assert.equal((await s.browser().get('/api/u/oskar')).status, 404, 'the profile API stays closed');
+  await s.db.query('update users set x_name = x_username where x_user_id = $1', [X.oskar.id]);
 });
 
 test('a Bet’s page says what its stake would cost from another chain, as a quote and nothing more', async () => {
