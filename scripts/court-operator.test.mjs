@@ -103,6 +103,57 @@ test('deployment fake round-trip verifies hash, keys, config and records public 
   assert.doesNotMatch(JSON.stringify(result), /FAKE_TEST_ONLY/);
 });
 
+test('deployment evidence is scoped to relay account and never overwritten', async (t) => {
+  const projectRoot = await temp(t);
+  const run = (parent) => deployRelay({ argv: ['--name', 'jury', '--yes'], env: { STATED_PLAY_TREASURY: parent, STATED_PLAY_TREASURY_KEY: 'FAKE' },
+    projectRoot, log: quiet, build: async () => Buffer.from('wasm'), encodeHash: () => 'HASH',
+    chain: { balance: async (id) => id === parent ? '10000000000000000000000000' : null, view: async () => config },
+    query: async (_method, args) => args.request_type === 'view_account' ? { code_hash: 'HASH' } : { keys: [] },
+    send: async () => ({ ok: true, hash: 'TX' }) });
+  const first = await run('one.testnet');
+  const path = join(projectRoot, `evidence/jury-relay-deploy-testnet-jury.one.testnet-${first.deployedAt.slice(0, 10).replaceAll('-', '')}.json`);
+  const bytes = await readFile(path);
+  await assert.rejects(run('one.testnet'), { code: 'EEXIST' });
+  assert.deepEqual(await readFile(path), bytes);
+  const second = await run('two.testnet');
+  assert.equal((JSON.parse(await readFile(join(projectRoot, `evidence/jury-relay-deploy-testnet-jury.two.testnet-${second.deployedAt.slice(0, 10).replaceAll('-', '')}.json`)))).relay, 'jury.two.testnet');
+});
+
+test('creation evidence is scoped to DAO and never overwritten', async (t) => {
+  const evidenceRoot = await temp(t);
+  const run = (name) => createCourt({ argv: ['--name', name, '--relay', relay, '--council', H.council, '--yes'],
+    env: { COURT_CREATOR_ACCOUNT: 'creator.testnet', COURT_CREATOR_KEY: 'FAKE' }, evidenceRoot, log: quiet,
+    chain: { balance: async (id) => id === 'creator.testnet' ? '100000000000000000000000000' : null,
+      call: async () => ({ ok: true, hash: 'TX' }), view: async () => policy() } });
+  const first = await run('one');
+  const path = join(evidenceRoot, `evidence/court-dao-one.sputnik-v2.testnet-${first.createdAt.slice(0, 10)}.json`);
+  const bytes = await readFile(path);
+  await assert.rejects(run('one'), { code: 'EEXIST' });
+  assert.deepEqual(await readFile(path), bytes);
+  const second = await run('two');
+  assert.equal(JSON.parse(await readFile(join(evidenceRoot, `evidence/court-dao-two.sputnik-v2.testnet-${second.createdAt.slice(0, 10)}.json`))).dao, second.dao);
+});
+
+test('hardening evidence is scoped to DAO and never overwritten', async (t) => {
+  const evidenceRoot = await temp(t);
+  const run = async (dao) => {
+    let final = false; let kind;
+    return hardenCourt({ argv: ['--relay', relay, '--dao', dao, '--yes'], env: councilEnv, evidenceRoot, log: quiet,
+      chain: { view: async ({ method }) => method === 'get_config' ? { ...config, dao } : method === 'get_policy' ? (final ? policy() : oldPolicy())
+        : { kind, status: final ? 'Approved' : 'InProgress' }, call: async (args) => {
+        if (args.method === 'add_proposal') { kind = args.args.proposal.kind; return { ok: true, value: 3, hash: 'ADD' }; }
+        final = true; return { ok: true, hash: 'VOTE' };
+      } } });
+  };
+  const first = await run('one.testnet');
+  const path = join(evidenceRoot, `evidence/court-harden-testnet-one.testnet-${first.hardenedAt.slice(0, 10).replaceAll('-', '')}.json`);
+  const bytes = await readFile(path);
+  await assert.rejects(run('one.testnet'), { code: 'EEXIST' });
+  assert.deepEqual(await readFile(path), bytes);
+  const second = await run('two.testnet');
+  assert.equal(JSON.parse(await readFile(join(evidenceRoot, `evidence/court-harden-testnet-two.testnet-${second.hardenedAt.slice(0, 10).replaceAll('-', '')}.json`))).dao, 'two.testnet');
+});
+
 test('deployment fails closed on mainnet, absent signer and already-existing account', async () => {
   const build = async () => Buffer.from('wasm'); const send = () => assert.fail('sent');
   const base = { argv: ['--yes'], env: { STATED_PLAY_TREASURY: 'treasury.testnet' }, build, send, log: quiet };
@@ -194,15 +245,16 @@ test('error reporting strips private key text and environment secrets', () => {
   assert.equal(operatorError(Error('bad ed25519:abcdefgh and hidden'), { COURT_COUNCIL_KEY: 'hidden' }), 'bad [redacted] and [redacted]');
 });
 
-test('live fake chain proves timing, negative permissions, veto, settlement and withdrawal', async (t) => {
-  let time = 1_800_000_000_000; let next = 0; let credit = 0n; let withdrawn = false;
+for (const windowSeconds of [60, 600]) for (const enforceDeadline of [true, false]) test(
+  `live rehearsal with ${windowSeconds}s window ${enforceDeadline ? 'checks timing, permissions, veto and payout' : 'detects an unsafe relay'}`, async (t) => {
+  let time = 1_800_000_000_000; let next = 0; let credit = 0n; let withdrawn = false; let dao = H.dao;
   const proposals = new Map(); const bets = new Map(); const calls = [];
   const ok = (value) => ({ ok: true, value, hash: `TX${calls.length}` });
   const fail = (failure) => ({ ok: false, failure, hash: `TX${calls.length}` });
   const chain = {
     balance: async () => String(10n ** 24n + (withdrawn ? 2n * STAKE : 0n)),
     view: async ({ method, args }) => {
-      if (method === 'get_config') return config;
+      if (method === 'get_config') return { ...config, dao, window_ns: String(BigInt(windowSeconds) * 1_000_000_000n) };
       if (method === 'get_policy') return policy();
       if (method === 'version') return 2;
       if (method === 'get_proposal') return proposals.get(args.id);
@@ -212,7 +264,7 @@ test('live fake chain proves timing, negative permissions, veto, settlement and 
     },
     call: async (c) => {
       calls.push(c);
-      if (c.method === 'create_bet') { bets.set(c.args.id, { status: 'open' }); return ok(); }
+      if (c.method === 'create_bet') { bets.set(c.args.id, { id: c.args.id, status: 'offered', resolve_at_ns: c.args.resolve_at_ns, referee: c.args.referee, resolution: null }); return ok(); }
       if (c.method === 'accept_bet') { bets.get(c.args.id).status = 'accepted'; return ok(); }
       if (c.method === 'file') {
         if (c.signerId !== H.operator) return fail('Operator only');
@@ -228,19 +280,43 @@ test('live fake chain proves timing, negative permissions, veto, settlement and 
         assert.equal(c.gas, 300_000_000_000_000n);
         const p = proposals.get(c.args.id);
         if (p.status !== 'InProgress') return fail('proposal is terminal');
-        if (time < Number(BigInt(p.submission_time) / 1_000_000n) + 600_000) return fail('correction window not elapsed');
-        p.status = 'Approved'; bets.set(p.bet, { status: 'settled', resolution: { method: 'referee', outcome: 'yes' } }); credit = 2n * STAKE; return ok();
+        if (time < Number(BigInt(p.submission_time) / 1_000_000n) + windowSeconds * 1000) return fail('correction window not elapsed');
+        const bet = bets.get(p.bet);
+        if (enforceDeadline && BigInt(time) * 1_000_000n < BigInt(bet.resolve_at_ns)) return fail('Bet deadline has not arrived');
+        if (enforceDeadline && bet.referee !== dao) return fail('Escrow bet referee is not this DAO');
+        if (enforceDeadline && BigInt(p.submission_time) < BigInt(bet.resolve_at_ns)) return fail('Ruling filed before the bet deadline');
+        p.status = 'Approved'; bet.status = 'settled';
+        bet.resolution = { method: 'referee', outcome: 'yes', resolved_at_ns: String(BigInt(time) * 1_000_000n) }; credit = 2n * STAKE; return ok();
       }
       if (c.method === 'withdraw') { credit = 0n; withdrawn = true; return ok(); }
       throw Error(`Unexpected call ${c.method}`);
     },
   };
   const STAKE = 10n ** 23n;
-  const result = await courtLiveCheck({ argv: ['--relay', relay, '--yes'], env: {}, chain, log: quiet, evidenceRoot: await temp(t),
+  const options = { argv: ['--relay', relay, '--window-seconds', String(windowSeconds), '--yes'], env: {}, chain, log: quiet, evidenceRoot: await temp(t),
     now: () => time, sleep: async (ms) => { time += ms; }, makeAccount: async (name) => ({ id: `${name}.testnet`, secret: 'FAKE' }),
-    read: async (file) => JSON.stringify({ account_id: file.includes(H.operator) ? H.operator : H.council, private_key: 'ed25519:FAKE' }) });
+    read: async (file) => JSON.stringify({ account_id: file.includes(H.operator) ? H.operator : H.council, private_key: 'ed25519:FAKE' }) };
+  if (!enforceDeadline) {
+    await assert.rejects(courtLiveCheck(options), /Live check failed: permissionless approval blocked before bet deadline/);
+    return;
+  }
+  const result = await courtLiveCheck(options);
   assert.equal(result.passed, true); assert.equal(result.steps.every((s) => s.pass), true);
-  assert.equal(calls.filter((c) => c.method === 'file' && c.signerId === H.operator).length, 2);
+  assert.equal(calls.filter((c) => c.method === 'file' && c.signerId === H.operator).length, 3);
   assert.equal(calls.filter((c) => c.method === 'approve').every((c) => c.signerId === 'b.testnet'), true);
+  assert.equal(calls.filter((c) => c.method === 'approve').length, 5);
+  for (const name of ['permissionless approval blocked before bet deadline', 'deadline refusal leaves proposal open',
+    'deadline refusal leaves bet unsettled', 'early filing rejected after bet deadline', 'early filing remains open after deadline',
+    'early filing leaves bet unsettled after deadline', 'permissionless approval succeeds after bet deadline', 'escrow settlement timestamp reaches bet deadline']) {
+    assert.equal(result.steps.find((s) => s.name === name)?.pass, true, name);
+  }
   assert.doesNotMatch(JSON.stringify(result), /ed25519|FAKE/);
+  const path = join(options.evidenceRoot, `evidence/court-relay-live-hosted-${H.dao}-${result.startedAt.slice(0, 10)}.json`);
+  const bytes = await readFile(path);
+  withdrawn = false;
+  await assert.rejects(courtLiveCheck(options), { code: 'EEXIST' });
+  assert.deepEqual(await readFile(path), bytes);
+  dao = 'other.sputnik-v2.testnet'; withdrawn = false;
+  const other = await courtLiveCheck({ ...options, argv: [...options.argv, '--dao', dao] });
+  assert.equal(JSON.parse(await readFile(join(options.evidenceRoot, `evidence/court-relay-live-test-${dao}-${other.startedAt.slice(0, 10)}.json`))).dao, dao);
 });

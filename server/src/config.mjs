@@ -2,6 +2,14 @@ import { isNamedAccount, useNetwork } from './near-network.mjs';
 import { parseReputationTiers } from './reputation.mjs';
 import { validateDstackVerifierUrl } from './dstack-verifier.mjs';
 
+// A test stack's fake NEAR AI answers on a loopback or reserved .test host and has no GPU.
+function testNearAi(url) {
+  try {
+    const { hostname } = new URL(url);
+    return ['localhost', '127.0.0.1', '[::1]'].includes(hostname) || hostname.endsWith('.test');
+  } catch { return false; }
+}
+
 // Enclave rulings decide a Result with no human step, so they run only when asked
 // for in so many words (STATED_ENCLAVE_RULINGS=1) and a key is set. A ruling is
 // decisive only when every listed model gives the same answer at this confidence.
@@ -16,8 +24,14 @@ function nearaiConfig(env, list) {
     throw new Error('STATED_DSTACK_VERIFIER_URL requires https (loopback http is for tests only).');
   }
   // Production policy: a ruling needs the signing model's GPU evidence and the dstack boot check.
-  // Only test stacks, whose fake NEAR AI has no GPU, run rulings without them (STATED_REQUIRE_GPU_EVIDENCE=0).
-  if (Boolean(apiKey) && env.STATED_ENCLAVE_RULINGS === '1' && env.STATED_REQUIRE_GPU_EVIDENCE !== '0' && !dstackVerifierUrl) {
+  // Only test stacks, whose fake NEAR AI has no GPU, run rulings without them (STATED_REQUIRE_GPU_EVIDENCE=0),
+  // and the switch is refused against any other NEAR AI host.
+  const rulings = Boolean(apiKey) && env.STATED_ENCLAVE_RULINGS === '1';
+  const baseUrl = String(env.NEARAI_BASE_URL || 'https://cloud-api.near.ai/v1').replace(/\/$/, '');
+  if (rulings && env.STATED_REQUIRE_GPU_EVIDENCE === '0' && !testNearAi(baseUrl)) {
+    throw new Error('STATED_REQUIRE_GPU_EVIDENCE=0 is only for test stacks with a fake NEAR AI on a loopback or .test host; rulings against NEAR AI Cloud need GPU evidence and the dstack check.');
+  }
+  if (rulings && env.STATED_REQUIRE_GPU_EVIDENCE !== '0' && !dstackVerifierUrl) {
     throw new Error('STATED_ENCLAVE_RULINGS=1 needs STATED_DSTACK_VERIFIER_URL: a ruling is checked against the published dstack image.');
   }
   return {
@@ -26,9 +40,9 @@ function nearaiConfig(env, list) {
     // A model call counts only with the signing model's own NVIDIA GPU evidence, verified by NRAS.
     // Off only for test stacks whose fake NEAR AI has no GPU (STATED_REQUIRE_GPU_EVIDENCE=0).
     requireGpu: env.STATED_REQUIRE_GPU_EVIDENCE !== '0',
-    baseUrl: String(env.NEARAI_BASE_URL || 'https://cloud-api.near.ai/v1').replace(/\/$/, ''),
+    baseUrl,
     model,
-    rulings: Boolean(apiKey) && env.STATED_ENCLAVE_RULINGS === '1',
+    rulings,
     rulingModels: models.length ? models : [model],
     rulingMinConfidence: Number.isFinite(confidence) && confidence > 0 && confidence <= 1 ? confidence : 0.8,
   };

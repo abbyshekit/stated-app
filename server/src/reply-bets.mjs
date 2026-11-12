@@ -368,18 +368,24 @@ async function usableCourt(config, chain, judge) {
 }
 
 /**
- * The Stated Court path for one locked Bet and Result. The proposal is filed at
- * once (fileRuling never files twice). After the correction window the proposal
+ * The Stated Court path for one locked Bet and Result. After the Bet's deadline,
+ * the proposal is filed once. After the correction window the proposal
  * is read: in progress with no Reject vote, the jury member approves it and the
  * DAO executes referee_resolve; approved, the Bet is synced from the chain and
  * paid as usual; rejected, removed, expired or failed, the Bet stays open and a
  * 'court_rejected' event says so. Returns the settled decision or null.
  */
 async function courtStep(db, config, chain, { bet, creator, outcome, reviewer, windowClosed, fetchImpl }) {
+  // Defense in depth: neither filing nor approving is allowed before the Bet's deadline.
+  if (!(new Date(bet.resolve_at).getTime() <= Date.now())) return null;
   const filed = await fileRuling(db, config, chain, bet, outcome, { rulingUrl: `${config.baseUrl}/bets/${bet.id}`, actorId: creator.id, reviewer });
   if (!windowClosed) return null;
   let proposal = await readProposal(chain, filed.dao, filed.proposalId);
   if (proposal.status === 'InProgress') {
+    // An early reviewer Result may already be old when the deadline arrives.
+    // The Court's window still starts at this proposal's on-chain filing time.
+    const readyAt = BigInt(proposal.submissionTime) + BigInt(config.play.settleDelaySeconds) * 1_000_000_000n;
+    if (BigInt(Date.now()) * 1_000_000n < readyAt) return null;
     // A council member has voted it down, or is about to: the jury member never outvotes them.
     if (hasReject(proposal)) return null;
     // One vote per proposal: after an earlier approval, a lagging RPC is read again on a later pass.
@@ -426,11 +432,12 @@ export async function settleReplyBets(db, config, chain, { limit = 5, fetchImpl 
   const due = await db.many(`select b.id
     from bilateral_bets b join saves s on s.id = b.source_save_id join statements st on st.id = s.statement_id
     where b.referee_wallet = any($1::text[]) and b.chain_state is not null and b.status in ('accepted', 'proposed', 'disputed')
-      -- A reviewer's Yes can be known early (it happened before the date); a No, a void or a jury ruling cannot.
+      -- Only a non-Court reviewer's Yes can settle before the Bet's deadline.
       and (b.resolve_at <= clock_timestamp() or (st.status = 'yes'
+        and b.referee_wallet is distinct from $5
         and st.resolved_by is distinct from (select id from users where x_user_id = $4)))
       and st.status in ('yes', 'no', 'ambiguous', 'annulled')
-      -- A Stated Court Bet's proposal is filed at once; the window applies to its approval.
+      -- Court filings wait for the Bet deadline above; the window applies to approval.
       and (b.referee_wallet = $5 or st.resolved_at <= clock_timestamp() - make_interval(secs => $3))
       and (b.settle_checked_at is null or b.settle_checked_at < clock_timestamp() - interval '60 seconds')
     order by b.settle_checked_at asc nulls first, b.created_at limit $2`, [referees, limit, config.play.settleDelaySeconds, JURY_X_ID, courtDao(config)]);
@@ -498,10 +505,9 @@ export async function settleReplyBets(db, config, chain, { limit = 5, fetchImpl 
         if (!jury && statement.status === 'yes' && statement.outcome_at
           && new Date(statement.outcome_at).toISOString().slice(0, 10) > new Date(bet.resolve_at).toISOString().slice(0, 10)) return null;
         const creator = await tx.one('select * from users where id = $1', [bet.creator_user_id]);
-        // Before the Bet's own deadline only a reviewer's Yes settles it: the thing happened early.
-        // A No, a void and every jury ruling wait for the deadline.
+        // Court always waits; only a non-Court reviewer's Yes can settle early.
         const due = new Date(bet.resolve_at).getTime() <= Date.now();
-        if (!due && !(statement.status === 'yes' && !jury)) return null;
+        if (!due && (court || statement.status !== 'yes' || jury)) return null;
         // Chain sync also opens transactions; keep those reads and writes on
         // this connection so they cannot wait on locks held by this settlement.
         const locked = { ...tx, tx: (fn) => fn(locked) };

@@ -1,0 +1,138 @@
+{
+  "network": "NEAR testnet",
+  "date": "2026-11-12",
+  "betUrl": "https://stated-production.up.railway.app/bets/3668aa04-7009-4b85-b19d-debfabebbf96",
+  "contract": "stated-escrow-52081551be.testnet",
+  "actors": {
+    "creator": "chainabstracted.stated-play-6cf0876dd7.testnet",
+    "acceptor": "court-check-647f36b3-b.testnet",
+    "independence": "Both sides are controlled by the operator; this is a functional demonstration."
+  },
+  "social": {
+    "source": "https://x.com/ChainAbstracted/status/2120950017922150650",
+    "command": "https://x.com/ChainAbstracted/status/2120950152902881409",
+    "offer": "https://x.com/statedforecast/status/2120950531283878171"
+  },
+  "stakeYoctoEach": "10000000000000000000000",
+  "outcome": "yes",
+  "evidence": {
+    "url": "https://api.exchange.coinbase.com/products/NEAR-USD/candles?granularity=60&start=2026-11-12T19%3A15%3A00.000Z&end=2026-11-12T19%3A16%3A00.000Z",
+    "rulingUrl": "https://stated-production.up.railway.app/bets/3668aa04-7009-4b85-b19d-debfabebbf96/enclave-ruling.json",
+    "candleStart": "2026-11-12T19:15:00.000Z",
+    "openingPriceUsd": "3.4206",
+    "thresholdUsd": "3.30",
+    "rule": "Opening price strictly above the threshold",
+    "resolution": "The hosted enclave jury recorded Yes using the Coinbase candle. The payout verifier does not independently verify the jury or price feed.",
+    "textHash": "5773e18d02dffc30c56c8db9b23a30a600f23d6921d4f0db5abe404a80f59300",
+    "materialHash": "5bff1ec5f506b954b744d8184a66b959a2283ad261200b8eefc8c08c4bd30acc",
+    "decidedAt": "2026-11-12T19:17:07.032Z"
+  },
+  "court": {
+    "dao": "stated-court.sputnik-v2.testnet",
+    "relay": "jury.stated-court-relay.testnet",
+    "proposalId": 3,
+    "file": "CPQRjG5QUDCnjAwEedJSnAMz9v3FVjEy7yc5iZ7ij6eV",
+    "approve": "EVMv1Lzj1VQtTTbCtY7xFnuGi2raFMAj3uAFiYH3dzQz",
+    "approveSigner": "referee.stated-play-6cf0876dd7.testnet",
+    "submissionTimeNs": "1794511244131484043",
+    "windowNs": "600000000000",
+    "proposalStatus": "Approved",
+    "resolveReceipt": "8KkDuN7qXt5x4Rq4MMskdqWKYcsSJuPhZeJnJtDy6KEU",
+    "refusedEarlyAttempts": [
+      {
+        "transaction": "8TnCkn9vwVWhDXsWAdXJqhzpyQyGH3g1jzsSFKfdh2BS",
+        "finalExecutionStatus": "FINAL",
+        "status": {
+          "Failure": {
+            "ActionError": {
+              "index": 0,
+              "kind": {
+                "FunctionCallError": {
+                  "ExecutionError": "Smart contract panicked: panicked at src/lib.rs:220:9:\nChallenge window is open"
+                }
+              }
+            }
+          }
+        },
+        "reason": "Challenge window is open"
+      },
+      {
+        "transaction": "8piuU6jGaBpSpM8FSzTJ38pJsE1wVnDoWf3xocw4vU9Z",
+        "finalExecutionStatus": "FINAL",
+        "status": {
+          "Failure": {
+            "ActionError": {
+              "index": 0,
+              "kind": {
+                "FunctionCallError": {
+                  "ExecutionError": "Smart contract panicked: panicked at src/lib.rs:220:9:\nChallenge window is open"
+                }
+              }
+            }
+          }
+        },
+        "reason": "Challenge window is open"
+      },
+      {
+        "transaction": "HqAtodLz7VdY8Q36ZuBJcjFncucj6oNPwnH9ShcvmAh4",
+        "finalExecutionStatus": "FINAL",
+        "status": {
+          "Failure": {
+            "ActionError": {
+              "index": 0,
+              "kind": {
+                "FunctionCallError": {
+                  "ExecutionError": "Smart contract panicked: panicked at src/lib.rs:220:9:\nChallenge window is open"
+                }
+              }
+            }
+          }
+        },
+        "reason": "Challenge window is open"
+      }
+    ]
+  },
+  "transactions": {
+    "create": "2uD55tNT8ojxygbZkdQ8am6dq99KLSrpkC6iKidp8LE4",
+    "accept": "AMRDa7HiexFijsbRF9eZ5AjU4XnUQg9K3KD9RgvtcoiV",
+    "approve": "EVMv1Lzj1VQtTTbCtY7xFnuGi2raFMAj3uAFiYH3dzQz",
+    "withdraw": "3AHVhvtS1jxhXBvS9XPRJyKcHVVivVo4zzK2eePiWMSK"
+  },
+  "payout": {
+    "recipient": "chainabstracted.stated-play-6cf0876dd7.testnet",
+    "amountYocto": "20000000000000000000000",
+    "transferReceipt": "HctQzY1eXGLQ5eho94jfQXym7rAytqAEhnHXx6pYXYWx",
+    "callbackReceipt": "6WK1edXJsdjezrcCwFEJ4eBgXUCMm8wzhGK7GguM8tig",
+    "finalExecutionStatus": "FINAL",
+    "transferSucceeded": true,
+    "withdrawalReturnedTrue": true
+  },
+  "verification": {
+    "providers": [
+      "https://archival-rpc.testnet.fastnear.com",
+      "https://archival-rpc.testnet.near.org"
+    ],
+    "checkedAt": "2026-11-12T19:36:15.261Z",
+    "scope": "Final settled bet, pinned escrow code and zero access keys, keyless relay and DAO jury policy, Approved relay proposal, rooted approve/act_proposal/referee_resolve receipt graph, exact native payout and successful on_withdraw callback. Creation, acceptance, filing and the refused early approvals additionally read from both archival RPCs.",
+    "output": "evidence/hosted-court-payout-testnet-20261112.verification.json"
+  },
+  "notes": [
+    {
+      "context": "Operator reports that the referee account could not pay for the first filing attempts (NotEnoughBalanceError) before this top-up. This funding transaction is separate from the bet.",
+      "transaction": "6p5vUQmBGnfu5FgiY2Nk8qkuH2Js2bd1GXJ6tVHD2qMm",
+      "sender": "court-check-647f36b3-b.testnet",
+      "recipient": "referee.stated-play-6cf0876dd7.testnet",
+      "amountYocto": "3000000000000000000000000",
+      "transferReceipt": "HyoqKkyFyw1S98iDEGE6nxE93cwTnsNt3NekSVXhf9vo",
+      "transferTimestampNs": "1794511218632821661",
+      "finalExecutionStatus": "FINAL"
+    }
+  ],
+  "limits": [
+    "Test tokens have no monetary value.",
+    "The server signs for unclaimed managed accounts.",
+    "Both sides belong to the operator; this run establishes functionality, not independent adoption or mainnet readiness.",
+    "RPC corroboration only; no light-client, social-identity, enclave-attestation or independent Coinbase verification is performed by the payout command.",
+    "No current withdrawal credit is asserted. The reported insufficient-balance filing attempts were not included on chain."
+  ]
+}

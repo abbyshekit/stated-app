@@ -10,7 +10,8 @@ import { fingerprint } from '../server/src/canonical.mjs';
 import { proposalKind } from '../server/src/court-dao.mjs';
 
 const DEFAULT_BASE = 'https://stated-production.up.railway.app';
-const DEFAULT_BET = 'c171de89-f223-4309-886e-180ad69af092';
+// The first hosted bet paid on a jury ruling through Stated Court (12 November 2026, both sides operator-run).
+const DEFAULT_BET = '3668aa04-7009-4b85-b19d-debfabebbf96';
 export const DEFAULT_DSTACK_VERIFIER = 'https://dstack-verifier-production.up.railway.app';
 const UUID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
 const COURT_RPC = ['https://archival-rpc.testnet.fastnear.com', 'https://archival-rpc.testnet.near.org'];
@@ -274,7 +275,9 @@ async function readText(url, limit, fetchImpl) {
   return new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks));
 }
 
-export async function verifyHostedEnclaveRuling(base = DEFAULT_BASE, betId = DEFAULT_BET, { fetchImpl = fetch, document: suppliedDocument, offline = false, jwks, dstackVerifierUrl = process.env.DSTACK_VERIFIER_URL || DEFAULT_DSTACK_VERIFIER } = {}) {
+export async function verifyHostedEnclaveRuling(base = DEFAULT_BASE, betId, { fetchImpl = fetch, document: suppliedDocument, offline = false, jwks, dstackVerifierUrl = process.env.DSTACK_VERIFIER_URL || DEFAULT_DSTACK_VERIFIER } = {}) {
+  // A supplied record defaults to its own Bet; otherwise check the default hosted Bet.
+  betId ??= suppliedDocument?.record?.material?.bets?.[0]?.id ?? DEFAULT_BET;
   const checks = [];
   const add = (status, check, detail) => checks.push({ status, check, detail });
   let origin;

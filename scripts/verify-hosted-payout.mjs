@@ -7,6 +7,7 @@ import { canonicalJson, fingerprint } from '../server/src/canonical.mjs';
 import { NEAR_CALL_GAS, rpc, viewEscrowSnapshot } from '../server/src/near-escrow.mjs';
 import { deliveryFromReceipts } from '../server/src/near-delivery.mjs';
 import { isAccount, isNamedAccount, network } from '../server/src/near-network.mjs';
+import { normalizePolicy } from './create-court-dao.mjs';
 
 // Archival endpoints: ordinary testnet nodes drop transactions after about five epochs, so the
 // November payout stops answering there within days. Both endpoints below still return it.
@@ -19,6 +20,7 @@ const HASH = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const UINT = /^(?:0|[1-9][0-9]{0,38})$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const HEX_HASH = /^[0-9a-f]{64}$/;
+const sputnikDao = account => typeof account === 'string' && account.endsWith('.sputnik-v2.testnet');
 const LIMITS = [
   'RPC corroboration only; this command does not verify a light-client proof.',
   'Social X links and the human outcome decision are not checked.',
@@ -81,10 +83,23 @@ function evidenceRecord(proof) {
     && uint(proof.payout.amountYocto) && BigInt(proof.stakeYoctoEach) * 2n === BigInt(proof.payout.amountYocto)
     && hash(proof.payout.transferReceipt) && hash(proof.payout.callbackReceipt)
     && proof.payout.transferReceipt !== proof.payout.callbackReceipt
-    && object(proof.transactions) && hash(proof.transactions.refereeResolve) && hash(proof.transactions.withdraw), 'invalid_evidence');
+    && object(proof.transactions) && hash(proof.transactions.withdraw), 'invalid_evidence');
+  let resolution;
+  if (proof.court !== undefined) {
+    const court = proof.court;
+    requireThat(object(court) && isNamedAccount(court.dao) && sputnikDao(court.dao) && isNamedAccount(court.relay)
+      && court.relay !== court.dao && isAccount(court.approveSigner)
+      && Number.isSafeInteger(court.proposalId) && court.proposalId >= 0
+      && hash(proof.transactions.approve) && court.approve === proof.transactions.approve, 'invalid_court_evidence');
+    resolution = { court: { dao: court.dao, relay: court.relay, proposalId: court.proposalId, approveSigner: court.approveSigner },
+      approve: proof.transactions.approve };
+  } else {
+    requireThat(hash(proof.transactions.refereeResolve), 'invalid_evidence');
+    resolution = { refereeResolve: proof.transactions.refereeResolve };
+  }
   return { id, contract: proof.contract, stakeYoctoEach: proof.stakeYoctoEach, outcome: proof.outcome,
     winner: proof.payout.recipient, amountYocto: proof.payout.amountYocto,
-    refereeResolve: proof.transactions.refereeResolve, withdraw: proof.transactions.withdraw,
+    ...resolution, withdraw: proof.transactions.withdraw,
     transferReceipt: proof.payout.transferReceipt, callbackReceipt: proof.payout.callbackReceipt };
 }
 function settledBet(snapshot, record) {
@@ -98,6 +113,8 @@ function settledBet(snapshot, record) {
     && typeof bet.creator_binding_hash === 'string' && HEX_HASH.test(bet.creator_binding_hash)
     && typeof bet.acceptor_binding_hash === 'string' && HEX_HASH.test(bet.acceptor_binding_hash), 'settled_bet_mismatch');
   requireThat((bet.creator_side === record.outcome ? bet.creator : bet.acceptor) === record.winner, 'winner_mismatch');
+  requireThat(Boolean(record.court) === sputnikDao(bet.referee)
+    && (!record.court || bet.referee === record.court.dao), 'court_referee_mismatch');
   return { id: bet.id, creator: bet.creator, acceptor: bet.acceptor, referee: bet.referee,
     creatorSide: bet.creator_side, stakeYoctoEach: bet.stake_yocto, status: bet.status,
     outcome: bet.resolution.outcome, resolutionMethod: bet.resolution.method,
@@ -107,12 +124,12 @@ function settledBet(snapshot, record) {
 
 // Require a complete, successful receipt graph rooted in the requested transaction.
 // An isolated success-shaped transfer or callback cannot satisfy this check.
-function execution(result, { transactionHash, signer, contract, method, args, finalValue }) {
+function execution(result, { transactionHash, signer, contract, method, args, finalValue, gas = NEAR_CALL_GAS }) {
   const tx = result?.transaction;
   requireThat(result?.final_execution_status === 'FINAL' && keys(result.status, ['SuccessValue'])
     && base64(result.status.SuccessValue) && (finalValue === undefined || result.status.SuccessValue === finalValue), 'execution_not_final_success');
   requireThat(tx?.hash === transactionHash && tx.signer_id === signer && tx.receiver_id === contract, 'transaction_identity_mismatch');
-  const call = functionCall(tx.actions, method, args);
+  const call = functionCall(tx.actions, method, args, gas);
   requireThat(Array.isArray(result.receipts) && result.receipts.length > 0 && result.receipts.length <= 256
     && Array.isArray(result.receipts_outcome) && result.receipts_outcome.length === result.receipts.length, 'invalid_receipt_graph');
   const receipts = new Map();
@@ -135,7 +152,7 @@ function execution(result, { transactionHash, signer, contract, method, args, fi
   const rootId = txOutcome.outcome.status.SuccessReceiptId;
   const root = receipts.get(rootId);
   requireThat(root?.receiver_id === contract && root.predecessor_id === signer, 'root_receipt_mismatch');
-  functionCall(root.receipt?.Action?.actions, method, args);
+  functionCall(root.receipt?.Action?.actions, method, args, gas);
   requireThat(root.receipt.Action.signer_id === signer, 'root_receipt_mismatch');
   const visited = new Set();
   const visit = (id) => {
@@ -174,6 +191,76 @@ function executionFingerprint(result, graph) {
         outcome: outcome(graph.outcomes.get(id)) };
     }),
   });
+}
+
+function courtProposal(proposal, record) {
+  const court = record.court;
+  requireThat(object(proposal) && proposal.id === court.proposalId && proposal.status === 'Approved'
+    && proposal.proposer === court.relay && uint(proposal.submission_time), 'court_proposal_mismatch');
+  const kind = proposal.kind;
+  requireThat(keys(kind, ['FunctionCall']) && keys(kind.FunctionCall, ['receiver_id', 'actions'])
+    && kind.FunctionCall.receiver_id === record.contract && Array.isArray(kind.FunctionCall.actions)
+    && kind.FunctionCall.actions.length === 1, 'court_proposal_kind_mismatch');
+  // RESOLVE_GAS in contracts/jury-relay: the DAO must execute this single, zero-deposit action.
+  functionCall(kind.FunctionCall.actions.map(action => ({ FunctionCall: action })), 'referee_resolve',
+    { id: record.id, outcome: record.outcome }, 100000000000000n);
+  return proposal;
+}
+
+function juryPolicy(policy, relay) {
+  requireThat(object(policy) && Array.isArray(policy.roles) && policy.roles.every(object), 'court_policy_mismatch');
+  const normalized = normalizePolicy(policy);
+  const jury = normalized.roles.filter(role => role?.name === 'jury');
+  requireThat(jury.length === 1 && keys(jury[0].kind, ['Group'])
+    && canonicalJson(jury[0].kind.Group) === canonicalJson([relay])
+    && Array.isArray(jury[0].permissions) && jury[0].permissions.includes('call:VoteApprove'), 'court_policy_mismatch');
+  // A second role with wildcard voting would defeat the exclusive jury seat.
+  requireThat(normalized.roles.every(role => object(role) && Array.isArray(role.permissions)
+    && (role.name === 'jury' || !role.permissions.some(permission =>
+      ['call:VoteApprove', '*:VoteApprove', 'call:*', '*:*'].includes(permission)))), 'court_policy_mismatch');
+  return normalized;
+}
+
+function courtApproval(result, record, proposal) {
+  const court = record.court;
+  const graph = execution(result, { transactionHash: record.approve, signer: court.approveSigner,
+    contract: court.relay, method: 'approve', args: { id: court.proposalId }, gas: 300000000000000n });
+  const calls = (receiver, method) => [...graph.receipts.values()].filter(receipt => receipt.receiver_id === receiver
+    && receipt.receipt?.Action?.actions?.some(action => action.FunctionCall?.method_name === method));
+  const votes = calls(court.dao, 'act_proposal');
+  const resolutions = calls(record.contract, 'referee_resolve');
+  requireThat(votes.length === 1 && votes[0].predecessor_id === court.relay, 'court_vote_receipt_mismatch');
+  const vote = votes[0];
+  // ACT_GAS in contracts/jury-relay includes the 100-Tgas escrow action.
+  functionCall(vote.receipt.Action.actions, 'act_proposal',
+    { id: court.proposalId, action: 'VoteApprove', proposal: proposal.kind }, 200000000000000n);
+  requireThat(resolutions.length === 1 && resolutions[0].predecessor_id === court.dao, 'court_resolution_receipt_mismatch');
+  const resolution = resolutions[0];
+  functionCall(resolution.receipt.Action.actions, 'referee_resolve',
+    { id: record.id, outcome: record.outcome }, 100000000000000n);
+  requireThat(graph.outcomes.get(vote.receipt_id).receipt_ids.includes(resolution.receipt_id), 'court_resolution_unlinked');
+  return graph;
+}
+
+async function viewJson(accountId, method, args, options) {
+  const result = await rpc('query', { request_type: 'call_function', finality: 'final', account_id: accountId,
+    method_name: method, args_base64: Buffer.from(JSON.stringify(args)).toString('base64') }, options);
+  requireThat(Array.isArray(result?.result) && result.result.every(byte => Number.isInteger(byte) && byte >= 0 && byte <= 255),
+    'invalid_view_result');
+  return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(result.result)));
+}
+
+async function courtSettlement(record, options) {
+  const court = record.court;
+  const proposal = courtProposal(await viewJson(court.dao, 'get_proposal', { id: court.proposalId }, options), record);
+  const policy = juryPolicy(await viewJson(court.dao, 'get_policy', {}, options), court.relay);
+  const access = await rpc('query', { request_type: 'view_access_key_list', finality: 'final', account_id: court.relay }, options);
+  requireThat(object(access) && Array.isArray(access.keys), 'invalid_access_key_list');
+  requireThat(access.keys.length === 0, 'relay_has_access_keys');
+  const approved = await rpc('tx_status', { tx_hash: record.approve, sender_account_id: court.approveSigner, wait_until: 'FINAL' }, options);
+  const graph = courtApproval(approved, record, proposal);
+  return { facts: { courtProposal: proposal, courtPolicy: policy, relayAccessKeys: 0 },
+    fingerprints: { approve: executionFingerprint(approved, graph) } };
 }
 
 function withdrawal(result, record, args) {
@@ -259,9 +346,14 @@ async function provider(endpoint, record, fetchImpl, timeoutMs) {
     const access = await rpc('query', { request_type: 'view_access_key_list', finality: 'final', account_id: record.contract }, options);
     requireThat(object(access) && Array.isArray(access.keys), 'invalid_access_key_list');
     requireThat(access.keys.length === 0, 'contract_has_access_keys');
-    const referee = await rpc('tx_status', { tx_hash: record.refereeResolve, sender_account_id: bet.referee, wait_until: 'FINAL' }, options);
-    const refereeGraph = execution(referee, { transactionHash: record.refereeResolve, signer: bet.referee,
-      contract: record.contract, method: 'referee_resolve', args: { id: record.id, outcome: record.outcome } });
+    let settlement;
+    if (record.court) settlement = await courtSettlement(record, options);
+    else {
+      const referee = await rpc('tx_status', { tx_hash: record.refereeResolve, sender_account_id: bet.referee, wait_until: 'FINAL' }, options);
+      const refereeGraph = execution(referee, { transactionHash: record.refereeResolve, signer: bet.referee,
+        contract: record.contract, method: 'referee_resolve', args: { id: record.id, outcome: record.outcome } });
+      settlement = { facts: {}, fingerprints: { refereeResolve: executionFingerprint(referee, refereeGraph) } };
+    }
     const withdrawn = await rpc('tx_status', { tx_hash: record.withdraw, sender_account_id: record.winner, wait_until: 'FINAL' }, options);
     const args = argumentsOf(withdrawn?.transaction?.actions?.[0]?.FunctionCall?.args);
     // The optional public tag is reported by the transaction, not evidence of a
@@ -271,7 +363,7 @@ async function provider(endpoint, record, fetchImpl, timeoutMs) {
     const withdrawalGraph = withdrawal(withdrawn, record, args);
     return { endpoint, status: 'PASS', blockHeight: snapshot.blockHeight,
       evidence: { ...record, bet, contractCodeHash: account.code_hash, contractAccessKeys: 0, withdrawalReturnedTrue: true, deliveryKind: 'native',
-        executionFingerprints: { refereeResolve: executionFingerprint(referee, refereeGraph),
+        ...settlement.facts, executionFingerprints: { ...settlement.fingerprints,
           withdraw: executionFingerprint(withdrawn, withdrawalGraph) } } };
   };
   try {
@@ -310,8 +402,14 @@ export async function verifyHostedPayout({ fetchImpl = fetch, evidence = DEFAULT
 }
 
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
-  const report = process.argv.length === 2 ? await verifyHostedPayout()
-    : { overall: 'FAIL', reason: 'unsupported_arguments', providers: [], limitations: [...LIMITS] };
+  let report;
+  const args = process.argv.slice(2);
+  if (args.length === 0) report = await verifyHostedPayout();
+  else if (args.length === 1 && args[0] && !args[0].startsWith('-')) {
+    let evidence;
+    try { evidence = JSON.parse(readFileSync(args[0], 'utf8')); } catch { evidence = null; }
+    report = await verifyHostedPayout({ evidence });
+  } else report = { overall: 'FAIL', reason: 'unsupported_arguments', providers: [], limitations: [...LIMITS] };
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   process.exitCode = report.overall === 'PASS' ? 0 : report.overall === 'UNAVAILABLE' ? 2 : 1;
 }

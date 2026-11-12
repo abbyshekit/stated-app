@@ -1,0 +1,250 @@
+{
+  "overall": "PASS",
+  "network": "NEAR testnet",
+  "providers": [
+    {
+      "endpoint": "https://archival-rpc.testnet.fastnear.com",
+      "status": "PASS",
+      "blockHeight": "277407457",
+      "evidence": {
+        "id": "3668aa04-7009-4b85-b19d-debfabebbf96",
+        "contract": "stated-escrow-52081551be.testnet",
+        "stakeYoctoEach": "10000000000000000000000",
+        "outcome": "yes",
+        "winner": "chainabstracted.stated-play-6cf0876dd7.testnet",
+        "amountYocto": "20000000000000000000000",
+        "court": {
+          "dao": "stated-court.sputnik-v2.testnet",
+          "relay": "jury.stated-court-relay.testnet",
+          "proposalId": 3,
+          "approveSigner": "referee.stated-play-6cf0876dd7.testnet"
+        },
+        "approve": "EVMv1Lzj1VQtTTbCtY7xFnuGi2raFMAj3uAFiYH3dzQz",
+        "withdraw": "3AHVhvtS1jxhXBvS9XPRJyKcHVVivVo4zzK2eePiWMSK",
+        "transferReceipt": "HctQzY1eXGLQ5eho94jfQXym7rAytqAEhnHXx6pYXYWx",
+        "callbackReceipt": "6WK1edXJsdjezrcCwFEJ4eBgXUCMm8wzhGK7GguM8tig",
+        "bet": {
+          "id": "3668aa04-7009-4b85-b19d-debfabebbf96",
+          "creator": "chainabstracted.stated-play-6cf0876dd7.testnet",
+          "acceptor": "court-check-647f36b3-b.testnet",
+          "referee": "stated-court.sputnik-v2.testnet",
+          "creatorSide": "yes",
+          "stakeYoctoEach": "10000000000000000000000",
+          "status": "settled",
+          "outcome": "yes",
+          "resolutionMethod": "referee",
+          "resolvedAtNs": "1794511858824085334",
+          "termsHash": "8f06ed74a62904889ad69e3d1f00ed31a40f8db4e03b097ff1f3bf6e5bed4c04",
+          "creatorBindingHash": "5948b3b6a95cfd67395ca0903c6b5477b0cf2d40042ea2477cbae80e6b9b788e",
+          "acceptorBindingHash": "c34092a99fc795c7e85e587e60d70b99d83d0249205a46006265cacb6ea4b981"
+        },
+        "contractCodeHash": "Bqr2TsgyFRNDw2GZ6q9aT7cMAnjZNERKdzaBstRgKaAg",
+        "contractAccessKeys": 0,
+        "withdrawalReturnedTrue": true,
+        "deliveryKind": "native",
+        "courtProposal": {
+          "id": 3,
+          "proposer": "jury.stated-court-relay.testnet",
+          "description": "Stated enclave jury: yes on bet 3668aa04-7009-4b85-b19d-debfabebbf96. Ruling: https://stated-production.up.railway.app/bets/3668aa04-7009-4b85-b19d-debfabebbf96 Result revision:18 ruling sha256:41866a5fbcc493e0663d781f5ddf24cc1515b099d073c21d1909a3c38289b280",
+          "kind": {
+            "FunctionCall": {
+              "receiver_id": "stated-escrow-52081551be.testnet",
+              "actions": [
+                {
+                  "method_name": "referee_resolve",
+                  "args": "eyJpZCI6IjM2NjhhYTA0LTcwMDktNGI4NS1iMTlkLWRlYmZhYmViYmY5NiIsIm91dGNvbWUiOiJ5ZXMifQ==",
+                  "deposit": "0",
+                  "gas": "100000000000000"
+                }
+              ]
+            }
+          },
+          "status": "Approved",
+          "vote_counts": {
+            "jury": [
+              1,
+              0,
+              0
+            ]
+          },
+          "votes": {
+            "jury.stated-court-relay.testnet": "Approve"
+          },
+          "submission_time": "1794511244131484043"
+        },
+        "courtPolicy": {
+          "roles": [
+            {
+              "name": "jury",
+              "kind": {
+                "Group": [
+                  "jury.stated-court-relay.testnet"
+                ]
+              },
+              "permissions": [
+                "call:AddProposal",
+                "call:VoteApprove"
+              ],
+              "vote_policy": {}
+            },
+            {
+              "name": "council",
+              "kind": {
+                "Group": [
+                  "stated-court-18ecdebd.testnet"
+                ]
+              },
+              "permissions": [
+                "call:VoteReject",
+                "call:VoteRemove"
+              ],
+              "vote_policy": {}
+            }
+          ],
+          "default_vote_policy": {
+            "weight_kind": "RoleWeight",
+            "quorum": "0",
+            "threshold": [
+              1,
+              2
+            ]
+          },
+          "proposal_bond": "0",
+          "proposal_period": "604800000000000",
+          "bounty_bond": "0",
+          "bounty_forgiveness_period": "86400000000000"
+        },
+        "relayAccessKeys": 0,
+        "executionFingerprints": {
+          "approve": "8dffd26f842bd15981d78ca78a3de2c653bec97daa3fb14cb07b8159754d2b45",
+          "withdraw": "e0327465421cde90e7752e3736cdc76883033294f1b6750dec1d456390077a6e"
+        }
+      }
+    },
+    {
+      "endpoint": "https://archival-rpc.testnet.near.org",
+      "status": "PASS",
+      "blockHeight": "277407463",
+      "evidence": {
+        "id": "3668aa04-7009-4b85-b19d-debfabebbf96",
+        "contract": "stated-escrow-52081551be.testnet",
+        "stakeYoctoEach": "10000000000000000000000",
+        "outcome": "yes",
+        "winner": "chainabstracted.stated-play-6cf0876dd7.testnet",
+        "amountYocto": "20000000000000000000000",
+        "court": {
+          "dao": "stated-court.sputnik-v2.testnet",
+          "relay": "jury.stated-court-relay.testnet",
+          "proposalId": 3,
+          "approveSigner": "referee.stated-play-6cf0876dd7.testnet"
+        },
+        "approve": "EVMv1Lzj1VQtTTbCtY7xFnuGi2raFMAj3uAFiYH3dzQz",
+        "withdraw": "3AHVhvtS1jxhXBvS9XPRJyKcHVVivVo4zzK2eePiWMSK",
+        "transferReceipt": "HctQzY1eXGLQ5eho94jfQXym7rAytqAEhnHXx6pYXYWx",
+        "callbackReceipt": "6WK1edXJsdjezrcCwFEJ4eBgXUCMm8wzhGK7GguM8tig",
+        "bet": {
+          "id": "3668aa04-7009-4b85-b19d-debfabebbf96",
+          "creator": "chainabstracted.stated-play-6cf0876dd7.testnet",
+          "acceptor": "court-check-647f36b3-b.testnet",
+          "referee": "stated-court.sputnik-v2.testnet",
+          "creatorSide": "yes",
+          "stakeYoctoEach": "10000000000000000000000",
+          "status": "settled",
+          "outcome": "yes",
+          "resolutionMethod": "referee",
+          "resolvedAtNs": "1794511858824085334",
+          "termsHash": "8f06ed74a62904889ad69e3d1f00ed31a40f8db4e03b097ff1f3bf6e5bed4c04",
+          "creatorBindingHash": "5948b3b6a95cfd67395ca0903c6b5477b0cf2d40042ea2477cbae80e6b9b788e",
+          "acceptorBindingHash": "c34092a99fc795c7e85e587e60d70b99d83d0249205a46006265cacb6ea4b981"
+        },
+        "contractCodeHash": "Bqr2TsgyFRNDw2GZ6q9aT7cMAnjZNERKdzaBstRgKaAg",
+        "contractAccessKeys": 0,
+        "withdrawalReturnedTrue": true,
+        "deliveryKind": "native",
+        "courtProposal": {
+          "id": 3,
+          "proposer": "jury.stated-court-relay.testnet",
+          "description": "Stated enclave jury: yes on bet 3668aa04-7009-4b85-b19d-debfabebbf96. Ruling: https://stated-production.up.railway.app/bets/3668aa04-7009-4b85-b19d-debfabebbf96 Result revision:18 ruling sha256:41866a5fbcc493e0663d781f5ddf24cc1515b099d073c21d1909a3c38289b280",
+          "kind": {
+            "FunctionCall": {
+              "receiver_id": "stated-escrow-52081551be.testnet",
+              "actions": [
+                {
+                  "method_name": "referee_resolve",
+                  "args": "eyJpZCI6IjM2NjhhYTA0LTcwMDktNGI4NS1iMTlkLWRlYmZhYmViYmY5NiIsIm91dGNvbWUiOiJ5ZXMifQ==",
+                  "deposit": "0",
+                  "gas": "100000000000000"
+                }
+              ]
+            }
+          },
+          "status": "Approved",
+          "vote_counts": {
+            "jury": [
+              1,
+              0,
+              0
+            ]
+          },
+          "votes": {
+            "jury.stated-court-relay.testnet": "Approve"
+          },
+          "submission_time": "1794511244131484043"
+        },
+        "courtPolicy": {
+          "roles": [
+            {
+              "name": "jury",
+              "kind": {
+                "Group": [
+                  "jury.stated-court-relay.testnet"
+                ]
+              },
+              "permissions": [
+                "call:AddProposal",
+                "call:VoteApprove"
+              ],
+              "vote_policy": {}
+            },
+            {
+              "name": "council",
+              "kind": {
+                "Group": [
+                  "stated-court-18ecdebd.testnet"
+                ]
+              },
+              "permissions": [
+                "call:VoteReject",
+                "call:VoteRemove"
+              ],
+              "vote_policy": {}
+            }
+          ],
+          "default_vote_policy": {
+            "weight_kind": "RoleWeight",
+            "quorum": "0",
+            "threshold": [
+              1,
+              2
+            ]
+          },
+          "proposal_bond": "0",
+          "proposal_period": "604800000000000",
+          "bounty_bond": "0",
+          "bounty_forgiveness_period": "86400000000000"
+        },
+        "relayAccessKeys": 0,
+        "executionFingerprints": {
+          "approve": "8dffd26f842bd15981d78ca78a3de2c653bec97daa3fb14cb07b8159754d2b45",
+          "withdraw": "e0327465421cde90e7752e3736cdc76883033294f1b6750dec1d456390077a6e"
+        }
+      }
+    }
+  ],
+  "limitations": [
+    "RPC corroboration only; this command does not verify a light-client proof.",
+    "Social X links and the human outcome decision are not checked.",
+    "Both recorded social identities are operator controlled; this demonstrates functionality, not independent adoption.",
+    "Testnet tokens only. No transactions are submitted and no current withdrawal credit is asserted."
+  ]
+}

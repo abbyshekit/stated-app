@@ -8,10 +8,12 @@ use near_sdk::{env, near, AccountId, Gas, NearToken, PanicOnDefault, Promise};
 const NS_PER_SECOND: u64 = 1_000_000_000;
 const MAX_DESCRIPTION_BYTES: usize = 1_000;
 const MAX_PROPOSAL_BYTES: usize = 65_536;
+const MAX_BET_BYTES: usize = 16_384;
 const RESOLVE_GAS: &str = "100000000000000";
 const FILE_GAS: Gas = Gas::from_tgas(100);
-const READ_GAS: Gas = Gas::from_tgas(20);
-const CALLBACK_GAS: Gas = Gas::from_tgas(250);
+const READ_GAS: Gas = Gas::from_tgas(10);
+const CALLBACK_GAS: Gas = Gas::from_tgas(260);
+const BET_CALLBACK_GAS: Gas = Gas::from_tgas(220);
 const ACT_GAS: Gas = Gas::from_tgas(200);
 const APPROVE_GAS: Gas = Gas::from_tgas(300);
 
@@ -33,14 +35,14 @@ struct FunctionCallAction {
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(crate = "near_sdk::serde", deny_unknown_fields)]
-struct FunctionCall {
+pub struct FunctionCall {
     receiver_id: AccountId,
     actions: Vec<FunctionCallAction>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(crate = "near_sdk::serde", deny_unknown_fields)]
-enum ProposalKind {
+pub enum ProposalKind {
     FunctionCall(FunctionCall),
 }
 
@@ -77,6 +79,16 @@ struct DaoProposal {
     status: String,
     kind: ProposalKind,
     submission_time: Timestamp,
+}
+
+// Only the escrow fields needed for approval. Its BetView includes other fields.
+#[derive(Deserialize)]
+#[serde(crate = "near_sdk::serde")]
+struct EscrowBet {
+    id: String,
+    status: String,
+    resolve_at_ns: U64,
+    referee: Option<AccountId>,
 }
 
 #[derive(Serialize)]
@@ -127,6 +139,10 @@ impl Contract {
         }
     }
 
+    pub fn version(&self) -> String {
+        env!("CARGO_PKG_VERSION").to_owned()
+    }
+
     /// Forward the attached DAO proposal bond. The promise returns add_proposal's
     /// final JSON u64 proposal ID directly to the caller.
     #[payable]
@@ -163,9 +179,13 @@ impl Contract {
         )
     }
 
-    /// Anyone may trigger the relay vote after the immutable challenge window.
-    /// Attach 300 Tgas: 20 for the read and 250 for the callback. The callback's
-    /// 200-Tgas act_proposal allowance includes the 100-Tgas escrow action.
+    /// Anyone may trigger the vote after the frozen window and bet deadline.
+    /// Attach 300 Tgas, allocated through nested receipts:
+    /// approve: 30 own + 10 DAO read + 260 on_proposal;
+    /// on_proposal: 30 own + 10 escrow read + 220 on_bet;
+    /// on_bet: 20 own + 200 act_proposal (including the 100-Tgas escrow action).
+    /// The two reads total 20, relay execution reserves total 80, and act uses
+    /// 200 Tgas. Callback allowances include their descendants, not extra gas.
     pub fn approve(&mut self, id: u64) -> Promise {
         assert!(env::prepaid_gas() >= APPROVE_GAS, "Attach 300 Tgas");
         Promise::new(self.dao.clone())
@@ -212,24 +232,83 @@ impl Contract {
         let resolution: Resolution = near_sdk::serde_json::from_slice(&action.args.0)
             .unwrap_or_else(|_| env::panic_str("Invalid resolution arguments"));
         validate_resolution(&resolution);
-        let eligible_at = proposal
-            .submission_time
-            .value()
+        let submission_time = proposal.submission_time.value();
+        let eligible_at = submission_time
             .checked_add(self.window_ns)
             .unwrap_or_else(|| env::panic_str("Submission timestamp overflow"));
         assert!(
             env::block_timestamp() >= eligible_at,
             "Challenge window is open"
         );
+        Promise::new(self.escrow.clone())
+            .function_call(
+                "get_bet",
+                json(&near_sdk::serde_json::json!({"id": resolution.id})),
+                NearToken::from_yoctonear(0),
+                READ_GAS,
+            )
+            .then(Promise::new(env::current_account_id()).function_call(
+                "on_bet",
+                json(&near_sdk::serde_json::json!({
+                    "id": id, "bet_id": resolution.id, "kind": proposal.kind,
+                    "submission_time": U64(submission_time)
+                })),
+                NearToken::from_yoctonear(0),
+                BET_CALLBACK_GAS,
+            ))
+    }
+
+    #[private]
+    pub fn on_bet(
+        &mut self,
+        id: u64,
+        bet_id: String,
+        kind: ProposalKind,
+        submission_time: U64,
+    ) -> Promise {
+        assert_eq!(
+            env::predecessor_account_id(),
+            env::current_account_id(),
+            "Private callback"
+        );
+        if env::promise_results_count() != 1 {
+            refuse("Expected one escrow result");
+        }
+        let raw = env::promise_result_checked(0, MAX_BET_BYTES)
+            .unwrap_or_else(|_| refuse("Escrow read failed or result too large"));
+        let bet: Option<EscrowBet> = near_sdk::serde_json::from_slice(&raw)
+            .unwrap_or_else(|_| refuse("Invalid escrow bet result"));
+        let bet = bet.unwrap_or_else(|| refuse("Escrow bet does not exist"));
+        if bet.id != bet_id {
+            refuse("Escrow bet ID mismatch");
+        }
+        // Mirror bilateral-escrow's assert_active, used by referee_resolve.
+        if !matches!(bet.status.as_str(), "accepted" | "proposed" | "disputed") {
+            refuse("Escrow bet is not active");
+        }
+        if env::block_timestamp() < bet.resolve_at_ns.0 {
+            refuse("Bet deadline has not arrived");
+        }
+        if submission_time.0 < bet.resolve_at_ns.0 {
+            refuse("Ruling filed before the bet deadline");
+        }
+        if bet.referee.as_ref() != Some(&self.dao) {
+            refuse("Escrow bet referee is not this DAO");
+        }
         Promise::new(self.dao.clone()).function_call(
             "act_proposal",
             json(&near_sdk::serde_json::json!({
-                "id": id, "action": "VoteApprove", "proposal": proposal.kind
+                "id": id, "action": "VoteApprove", "proposal": kind
             })),
             NearToken::from_yoctonear(0),
             ACT_GAS,
         )
     }
+}
+
+fn refuse(reason: &str) -> ! {
+    env::log_str(reason);
+    env::panic_str(reason)
 }
 
 fn json(value: &impl Serialize) -> Vec<u8> {

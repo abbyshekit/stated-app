@@ -125,8 +125,20 @@ test('native fetch rejects a verifier redirect without following it or softening
 test('production rulings need the dstack verifier; only GPU-less test stacks run without it', () => {
   assert.throws(() => loadConfig({ NEARAI_API_KEY: 'k', STATED_ENCLAVE_RULINGS: '1' }), /STATED_DSTACK_VERIFIER_URL/);
   assert.equal(loadConfig({ NEARAI_API_KEY: 'k', STATED_ENCLAVE_RULINGS: '1', STATED_DSTACK_VERIFIER_URL: URL }).nearai.rulings, true);
-  assert.equal(loadConfig({ NEARAI_API_KEY: 'k', STATED_ENCLAVE_RULINGS: '1', STATED_REQUIRE_GPU_EVIDENCE: '0' }).nearai.rulings, true);
+  assert.equal(loadConfig({ NEARAI_API_KEY: 'k', STATED_ENCLAVE_RULINGS: '1', STATED_REQUIRE_GPU_EVIDENCE: '0',
+    NEARAI_BASE_URL: 'https://nearai.test/v1' }).nearai.rulings, true);
+  assert.equal(loadConfig({ NEARAI_API_KEY: 'k', STATED_ENCLAVE_RULINGS: '1', STATED_REQUIRE_GPU_EVIDENCE: '0',
+    NEARAI_BASE_URL: 'http://127.0.0.1:4317/v1' }).nearai.rulings, true);
   assert.equal(loadConfig({ STATED_ENCLAVE_RULINGS: '1' }).nearai.rulings, false, 'no key, no rulings, no requirement');
+});
+
+test('the GPU switch is refused for rulings against any NEAR AI host but a local or .test fake', () => {
+  for (const NEARAI_BASE_URL of [undefined, 'https://cloud-api.near.ai/v1', 'https://nearai.test.example.com/v1', 'https://127.0.0.2/v1', 'not a url']) {
+    assert.throws(() => loadConfig({ NEARAI_API_KEY: 'k', STATED_ENCLAVE_RULINGS: '1', STATED_REQUIRE_GPU_EVIDENCE: '0',
+      ...(NEARAI_BASE_URL ? { NEARAI_BASE_URL } : {}) }), /only for test stacks/, String(NEARAI_BASE_URL));
+  }
+  assert.equal(loadConfig({ STATED_REQUIRE_GPU_EVIDENCE: '0' }).nearai.requireGpu, false, 'no rulings, nothing to refuse');
+  assert.equal(loadConfig({ NEARAI_API_KEY: 'k', STATED_REQUIRE_GPU_EVIDENCE: '0' }).nearai.rulings, false, 'rulings off, nothing to refuse');
 });
 
 test('config is opt-in and restricts plaintext verification to test loopback', () => {

@@ -1,5 +1,5 @@
 // INTEGRATION: Explicit testnet synthetic check. Dry-run default; --yes creates faucet
-// accounts and sends test transactions. A full run waits through the on-chain 600s window.
+// accounts and sends test transactions. A full run waits through the on-chain window and bet deadline.
 // node scripts/court-live-check.mjs --relay relay.parent.testnet [--yes]
 // COURT_OPERATOR_CREDENTIALS / COURT_COUNCIL_CREDENTIALS select near-cli credential files.
 // New synthetic keys are saved with mode 600; no secret is printed or recorded as evidence.
@@ -37,7 +37,8 @@ export async function courtLiveCheck({ argv = process.argv.slice(2), env = proce
     ...(flag(argv, '--operator') ? { operator: flag(argv, '--operator') } : {}), ...(window !== null ? { windowSeconds: Number(window) } : {}) });
   if (!testnetAccount(court.dao) || !testnetAccount(court.operator)) throw new Error('--dao and --operator take .testnet accounts.');
   const plan = { network: 'testnet', relay, ...court, checks: ['operator files through relay', 'council cannot propose or approve',
-    'permissionless approval rejected before window', 'permissionless approval settles after window', 'council veto keeps another bet active'] };
+    'permissionless approval rejected before window', 'permissionless approval rejected after window before bet deadline',
+    'early filing rejected after bet deadline', 'post-deadline filing settles after challenge window', 'council veto keeps another bet active'] };
   log(JSON.stringify(plan, null, 2));
   if (!argv.includes('--yes') || argv.includes('--dry-run')) { log('Dry run: no credentials read, faucet requests or transactions sent. Pass --yes for the live check.'); return { dryRun: true, plan }; }
   chain ||= (await import('../server/src/play.mjs')).nearChain();
@@ -74,7 +75,8 @@ export async function courtLiveCheck({ argv = process.argv.slice(2), env = proce
     const id = randomUUID();
     const created = await send(a, court.escrow, 'create_bet', { id, terms_hash: createHash('sha256').update(`court-relay-check:${id}`).digest('hex'),
       creator_side: 'yes', stake_yocto: String(STAKE), accept_by_ns: String(BigInt(now() + 180_000) * 1_000_000n),
-      resolve_at_ns: String(BigInt(now() + 300_000) * 1_000_000n), invited_account: null, binding_hash: randomBytes(32).toString('hex'), referee: court.dao }, String(STAKE + 10n ** 22n));
+      // Leave five minutes after the challenge window for a distinct deadline refusal.
+      resolve_at_ns: String(BigInt(now() + court.windowSeconds * 1000 + 300_000) * 1_000_000n), invited_account: null, binding_hash: randomBytes(32).toString('hex'), referee: court.dao }, String(STAKE + 10n ** 22n));
     check(`${label}: create bet`, created.ok, { hash: created.hash, betId: id });
     const accepted = await send(b, court.escrow, 'accept_bet', { id, binding_hash: randomBytes(32).toString('hex') }, String(STAKE));
     check(`${label}: accept bet`, accepted.ok, { hash: accepted.hash });
@@ -112,12 +114,36 @@ export async function courtLiveCheck({ argv = process.argv.slice(2), env = proce
     const readyAt = Number(BigInt(proposal.submission_time) / 1_000_000n) + court.windowSeconds * 1000 + 2000;
     if (!Number.isSafeInteger(readyAt)) throw new Error('Invalid proposal timestamp.');
     while (now() < readyAt) { const remaining = readyAt - now(); log(`Waiting for on-chain window: ${Math.ceil(remaining / 1000)}s remaining.`); await sleep(Math.min(30_000, remaining)); }
-    const approved = await send(b, relay, 'approve', { id: proposalId });
-    check('permissionless approval succeeds after window', approved.ok, { hash: approved.hash });
-    check('approved DAO proposal is final', (await view(court.dao, 'get_proposal', { id: proposalId })).status === 'Approved');
+    const pending = await view(court.escrow, 'get_bet', { id: bet });
+    const resolveAt = BigInt(pending.resolve_at_ns);
+    check('challenge window elapsed before bet deadline', BigInt(now()) * 1_000_000n < resolveAt,
+      { betId: bet, resolveAtNs: String(resolveAt) });
+    const beforeDeadline = await send(b, relay, 'approve', { id: proposalId });
+    check('permissionless approval blocked before bet deadline', !beforeDeadline.ok && /Bet deadline has not arrived/i.test(beforeDeadline.failure || ''),
+      { hash: beforeDeadline.hash });
+    check('deadline refusal leaves proposal open', (await view(court.dao, 'get_proposal', { id: proposalId })).status === 'InProgress');
+    const unsettled = await view(court.escrow, 'get_bet', { id: bet });
+    check('deadline refusal leaves bet unsettled', unsettled?.status === 'accepted' && !unsettled.resolution);
+    const deadlineReadyAt = Number(resolveAt / 1_000_000n) + 2000;
+    if (!Number.isSafeInteger(deadlineReadyAt)) throw new Error('Invalid bet deadline.');
+    while (now() < deadlineReadyAt) { const remaining = deadlineReadyAt - now(); log(`Waiting for bet deadline: ${Math.ceil(remaining / 1000)}s remaining.`); await sleep(Math.min(30_000, remaining)); }
+    const earlyAfterDeadline = await send(b, relay, 'approve', { id: proposalId });
+    check('early filing rejected after bet deadline', !earlyAfterDeadline.ok && /Ruling filed before the bet deadline/i.test(earlyAfterDeadline.failure || ''),
+      { hash: earlyAfterDeadline.hash });
+    check('early filing remains open after deadline', (await view(court.dao, 'get_proposal', { id: proposalId })).status === 'InProgress');
+    const stillUnsettled = await view(court.escrow, 'get_bet', { id: bet });
+    check('early filing leaves bet unsettled after deadline', stillUnsettled?.status === 'accepted' && !stillUnsettled.resolution);
+    const valid = await file(bet, 'yes');
+    const validReadyAt = Number(BigInt(valid.proposal.submission_time) / 1_000_000n) + court.windowSeconds * 1000 + 2000;
+    if (!Number.isSafeInteger(validReadyAt)) throw new Error('Invalid proposal timestamp.');
+    while (now() < validReadyAt) { const remaining = validReadyAt - now(); log(`Waiting for on-chain window: ${Math.ceil(remaining / 1000)}s remaining.`); await sleep(Math.min(30_000, remaining)); }
+    const approved = await send(b, relay, 'approve', { id: valid.proposalId });
+    check('permissionless approval succeeds after bet deadline', approved.ok, { hash: approved.hash });
+    check('approved DAO proposal is final', (await view(court.dao, 'get_proposal', { id: valid.proposalId })).status === 'Approved');
     const settled = await view(court.escrow, 'get_bet', { id: bet });
     check('escrow settled yes through DAO', settled?.status === 'settled' && String(settled?.resolution?.method).toLowerCase() === 'referee'
       && String(settled?.resolution?.outcome).toLowerCase() === 'yes');
+    check('escrow settlement timestamp reaches bet deadline', BigInt(settled.resolution.resolved_at_ns) >= resolveAt);
     const blocked = await send(b, relay, 'approve', { id: veto.proposalId });
     check('permissionless approval cannot revive veto', !blocked.ok && /InProgress|Rejected|terminal/i.test(blocked.failure || ''), { hash: blocked.hash });
     const active = await view(court.escrow, 'get_bet', { id: rejectedBet });
@@ -129,14 +155,14 @@ export async function courtLiveCheck({ argv = process.argv.slice(2), env = proce
     check('winner withdraws both stakes', withdrawn.ok && credit === 2n * STAKE && BigInt(await view(court.escrow, 'get_credit', { account_id: a.id })) === 0n
       && after - before > 2n * STAKE - 10n ** 22n, { hash: withdrawn.hash });
     evidence.bets = { approved: bet, vetoed: rejectedBet };
-    evidence.proposals = { approved: proposalId, vetoed: veto.proposalId };
+    evidence.proposals = { early: proposalId, approved: valid.proposalId, vetoed: veto.proposalId };
   } catch (error) { failure = error; }
   evidence.finishedAt = new Date(now()).toISOString();
   evidence.passed = !failure;
   if (failure) evidence.failure = operatorError(failure, env);
-  const evidenceFile = resolve(evidenceRoot, `evidence/court-relay-live-${court.dao === HOSTED_COURT.dao ? 'hosted' : 'test'}-${evidence.startedAt.slice(0, 10)}.json`);
+  const evidenceFile = resolve(evidenceRoot, `evidence/court-relay-live-${court.dao === HOSTED_COURT.dao ? 'hosted' : 'test'}-${court.dao}-${evidence.startedAt.slice(0, 10)}.json`);
   await mkdir(dirname(evidenceFile), { recursive: true });
-  await writeFile(evidenceFile, `${JSON.stringify(evidence, null, 2)}\n`);
+  await writeFile(evidenceFile, `${JSON.stringify(evidence, null, 2)}\n`, { flag: 'wx' });
   log(`Evidence: ${evidenceFile}`);
   if (failure) throw failure;
   return evidence;

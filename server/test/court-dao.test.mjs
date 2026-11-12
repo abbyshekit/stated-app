@@ -76,10 +76,18 @@ async function juryResult(bet, outcome) {
   await resolveStatement(s.db, { statementId: bet.statementId, outcome, note: `NEAR AI enclave ruling: ${outcome}.`,
     url: 'https://api.exchange.coinbase.com/products/BTC-USD/candles', reviewer: { id: jury }, outcomeAt: new Date(row.resolve_at).toISOString() });
 }
-const human = (bet, outcome) => resolveStatement(s.db, { statementId: bet.statementId, outcome, note: 'Recorded by a reviewer.',
-  url: 'https://example.org/reviewed', reviewer: admin, outcomeAt: new Date().toISOString() });
-// The correction window (ten minutes here) has passed since the Result.
-const windowPassed = (bet) => s.db.query(`update statements set resolved_at = now() - interval '11 minutes' where id = $1`, [bet.statementId]);
+const human = async (bet, outcome) => {
+  const { resolve_at: deadline } = await one('select resolve_at from bilateral_bets where id = $1', [bet.betId]);
+  return resolveStatement(s.db, { statementId: bet.statementId, outcome, note: 'Recorded by a reviewer.',
+    url: 'https://example.org/reviewed', reviewer: admin, outcomeAt: new Date(Math.min(Date.now(), new Date(deadline).getTime())).toISOString() });
+};
+// Advance both correction clocks: the Result and any on-chain Court filing.
+const windowPassed = async (bet) => {
+  await s.db.query(`update statements set resolved_at = now() - interval '11 minutes' where id = $1`, [bet.statementId]);
+  for (const proposal of proposals().filter((p) => p.description.includes(bet.betId))) {
+    proposal.submission_time = ns(new Date(Date.now() - 11 * 60_000));
+  }
+};
 
 before(async () => {
   near = new FakeNear();
@@ -184,16 +192,44 @@ test('a council Reject before the window leaves the Bet open, records it, and is
   assert.equal((await events(bet.betId, 'court_proposal')).length, 2, 'the same revised Result never files twice');
 });
 
-test('a reviewer Result on a DAO Bet is filed as a proposal too, and the DAO still carries the payout', async () => {
+test('an early reviewer Yes waits for the deadline before Court files and approves', async () => {
   const bet = await acceptedBet(`SOL trades above $500 before March 1, ${NEXT}.`);
   await human(bet, 'yes');
-  await settle();
+  const count = proposals().length;
+  const votesBefore = near.sent.filter((t) => t.method === 'act_proposal' && t.signerId === judge.id).length;
+  await windowPassed(bet);
+  assert.deepEqual(await settle(), { settled: 0, reclaimed: 0, errors: 0 });
+  assert.equal(proposals().length, count);
+  assert.equal((await events(bet.betId, 'court_proposal')).length, 0);
+  assert.equal(near.sent.filter((t) => t.method === 'act_proposal' && t.signerId === judge.id).length, votesBefore);
+  await due(bet);
+  await s.db.query(`update statements set outcome_at = (select resolve_at from bilateral_bets where id = $2) where id = $1`,
+    [bet.statementId, bet.betId]);
+  assert.deepEqual(await settle(), { settled: 0, reclaimed: 0, errors: 0 });
   const filed = await events(bet.betId, 'court_proposal');
   assert.equal(filed.length, 1);
   assert.match(proposals()[filed[0].proposalId].description, new RegExp(`^Stated reviewer: yes on bet ${bet.betId}\\.`));
+  assert.equal(near.sent.filter((t) => t.method === 'act_proposal' && t.args.id === filed[0].proposalId).length, 0,
+    'the old Result does not shorten the new proposal window');
+  assert.equal((await settle()).settled, 0);
   await windowPassed(bet);
   assert.equal((await settle()).settled, 1);
   assert.equal(near.sent.find((t) => t.method === 'referee_resolve' && t.args.id === bet.betId).signerId, DAO);
+});
+
+test('an existing Court filing is not approved before the Bet deadline', async () => {
+  const bet = await due(await acceptedBet(`AVAX trades above $500 before March 1, ${NEXT}.`));
+  await human(bet, 'yes');
+  await settle();
+  const [filed] = await events(bet.betId, 'court_proposal');
+  const future = new Date(Date.now() + HOUR);
+  await s.db.query('update bilateral_bets set resolve_at = $2 where id = $1', [bet.betId, future]);
+  await windowPassed(bet);
+  assert.deepEqual(await settle(), { settled: 0, reclaimed: 0, errors: 0 });
+  assert.equal(proposals()[filed.proposalId].status, 'InProgress');
+  assert.equal(near.sent.filter((t) => t.method === 'act_proposal' && t.args.id === filed.proposalId).length, 0);
+  await due(bet);
+  assert.equal((await settle()).settled, 1);
 });
 
 test('an old Bet with the referee account as referee still settles directly', async () => {
@@ -234,7 +270,7 @@ test('a failed filing retries, and a filing whose answer was lost is found on ch
 });
 
 test('the jury member never votes twice on a proposal', async () => {
-  const bet = await acceptedBet(`LINK trades above $40 before March 1, ${NEXT}.`);
+  const bet = await due(await acceptedBet(`LINK trades above $40 before March 1, ${NEXT}.`));
   await human(bet, 'yes');
   await settle();
   const [filed] = await events(bet.betId, 'court_proposal');

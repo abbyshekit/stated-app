@@ -94,9 +94,9 @@ export async function createCourt({ argv = process.argv.slice(2), env = process.
   const policy = await chain.view({ contractId: dao, method: 'get_policy' });
   if (!samePolicy(policy, daoArgs.policy)) throw new Error('Created policy does not match the requested frozen policy.');
   const evidence = { dao, factory: FACTORY, creator, transactionHash: sent.hash, args: daoArgs, policy, createdAt: new Date().toISOString() };
-  const file = resolve(evidenceRoot, `evidence/court-dao-${name}-${evidence.createdAt.slice(0, 10)}.json`);
+  const file = resolve(evidenceRoot, `evidence/court-dao-${dao}-${evidence.createdAt.slice(0, 10)}.json`);
   await mkdir(dirname(file), { recursive: true });
-  await writeFile(file, `${JSON.stringify(evidence, null, 2)}\n`);
+  await writeFile(file, `${JSON.stringify(evidence, null, 2)}\n`, { flag: 'wx' });
   log(`Created ${dao}; transaction ${sent.hash}; evidence ${file}`);
   return evidence;
 }

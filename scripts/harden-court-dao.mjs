@@ -86,9 +86,9 @@ export async function hardenCourt({ argv = process.argv.slice(2), env = process.
   const hardenedAt = new Date().toISOString();
   const evidence = { hardenedAt, dao: court.dao, relay, config, locked, council: account, proposalId: id,
     proposalTransaction: added.hash, approvalTransaction: approved?.hash ?? null, proposalStatus: proposal.status, verified, policy: final };
-  const file = resolve(evidenceRoot, `evidence/court-harden-testnet-${hardenedAt.slice(0, 10).replaceAll('-', '')}.json`);
+  const file = resolve(evidenceRoot, `evidence/court-harden-testnet-${court.dao}-${hardenedAt.slice(0, 10).replaceAll('-', '')}.json`);
   await mkdir(dirname(file), { recursive: true });
-  await writeFile(file, `${JSON.stringify(evidence, null, 2)}\n`);
+  await writeFile(file, `${JSON.stringify(evidence, null, 2)}\n`, { flag: 'wx' });
   log(`Evidence: ${file}`);
   if (!verified) throw new Error('Final policy verification failed. Inspect proposal and policy before proceeding.');
   log('Frozen policy verified on chain.');

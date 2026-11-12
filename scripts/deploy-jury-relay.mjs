@@ -95,9 +95,9 @@ export async function deployRelay({ argv = process.argv.slice(2), env = process.
   const evidence = { deployedAt, network: 'testnet', relay: accountId, paidBy: parentId, transaction: sent.hash,
     transactionUrl: `https://testnet.nearblocks.io/txns/${sent.hash}`, wasmBytes: wasm.length, wasmSha256: digest.toString('hex'),
     sentYocto: amountYocto, init, checks: { verified, codeMatchesTheBuild: state?.code_hash === encodeHash(digest), accessKeys: keys?.keys?.length ?? null, config } };
-  const file = resolve(projectRoot, `evidence/jury-relay-deploy-testnet-${deployedAt.slice(0, 10).replaceAll('-', '')}.json`);
+  const file = resolve(projectRoot, `evidence/jury-relay-deploy-testnet-${accountId}-${deployedAt.slice(0, 10).replaceAll('-', '')}.json`);
   await mkdir(dirname(file), { recursive: true });
-  await writeFile(file, `${JSON.stringify(evidence, null, 2)}\n`);
+  await writeFile(file, `${JSON.stringify(evidence, null, 2)}\n`, { flag: 'wx' });
   log(`Evidence: ${file}`);
   if (!verified) throw new Error('Deployment verification failed. Do not harden the DAO or use this relay.');
   log(`STATED_COURT_RELAY=${accountId}`);

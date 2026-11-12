@@ -40,8 +40,10 @@ export async function startStack(env = {}, { fetchImpl = fetch, chain = null, in
     STATED_FETCH_ALLOW_LOOPBACK: '1',
     STATED_REPLIES: '1',
     STATED_MENTIONS_START: 'all',
-    // The fake NEAR AI returns no NVIDIA evidence; production requires it (config.mjs).
+    // The fake NEAR AI returns no NVIDIA evidence; production requires it (config.mjs), and
+    // config refuses the switch for any NEAR AI host but a loopback or reserved .test one.
     STATED_REQUIRE_GPU_EVIDENCE: '0',
+    NEARAI_BASE_URL: 'https://nearai.test/v1',
     ...env,
   });
   handler = createApp({ db, config, fetchImpl, chain, intents });
