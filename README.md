@@ -188,7 +188,7 @@ cargo test --manifest-path contracts/jury-relay/Cargo.toml --locked
 
 To record the submission commit, run `node scripts/record-test-run.mjs` with PostgreSQL tools on PATH. It writes `evidence/test-run-<12-character HEAD>.json` with the commit, whether the worktree had changes, Node/PostgreSQL versions, parsed counts and duration; it saves no environment values. A complete run updates the link below, including its passed/failed status. A missing database or incomplete runner output exits nonzero and leaves the latest complete link alone. Commit the generated record with the updated link.
 
-<!-- test-run-record -->Latest full-suite record: none committed yet; `node scripts/record-test-run.mjs` writes the commit-specific file and updates this line.
+<!-- test-run-record -->Latest full-suite record: [test-run-ca6d0d03cfab.json](evidence/test-run-ca6d0d03cfab.json) (passed).
 
 ## Built during NEAR HACKATHON
 

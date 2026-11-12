@@ -1,0 +1,18 @@
+{
+  "commit": "ca6d0d03cfab581c2e61b6ea8a746fc3d542dd81",
+  "worktreeDirty": false,
+  "node": "v26.12.1",
+  "postgres": "postgres (PostgreSQL) 17.10 (Homebrew)",
+  "startedAt": "2026-11-12T23:00:09.207Z",
+  "status": "passed",
+  "counts": {
+    "tests": 896,
+    "pass": 896,
+    "fail": 0,
+    "cancelled": 0,
+    "skip": 0,
+    "todo": 0,
+    "durationMs": 268286.186875
+  },
+  "durationMs": 268286.186875
+}
