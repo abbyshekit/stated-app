@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { registerCourtRoutes, courtLine } from '../src/court-pages.mjs';
+import { registerCourtRoutes, courtLine, courtEffect } from '../src/court-pages.mjs';
 import { proposalKind, clearCourtCache } from '../src/court-dao.mjs';
 import { useNetwork } from '../src/near-network.mjs';
+import { readFileSync } from 'node:fs';
 
 test('/court links every valid chain target, puts rejected rulings first and keeps setup collapsed', async () => {
   useNetwork('testnet'); clearCourtCache();
@@ -36,12 +37,16 @@ test('/court links every valid chain target, puts rejected rulings first and kee
   assert.match(response.body, /A public claim &lt;safe&gt;/);
   assert.ok(response.body.includes(`href="/bets/${published}"`));
   for (const id of [missing, unusual]) assert.ok(!response.body.includes(`href="/bets/${id}"`), 'a bet with no page gets no link');
-  assert.equal(response.body.split('A bet with no public page here.').length - 1, 2);
+  assert.equal(response.body.split('A private bet').length - 1, 2);
   assert.doesNotMatch(response.body, /not-a-uuid/);
   assert.deepEqual(lookedUp.sort(), [published, missing].sort());
-  assert.ok(response.body.indexOf('Proposal 0 is voted down.') < response.body.indexOf('Proposal 1 is approved.'));
-  assert.match(response.body, /<b>Voted down<\/b>/);
-  assert.match(response.body, /Proposal 0 is voted down\./);
+  assert.ok(response.body.indexOf('Voted it down') < response.body.indexOf('Let it stand'));
+  assert.match(response.body, /<p class="court-action"><b>Voted it down<\/b><\/p>/);
+  assert.match(response.body, /<p class="court-action"><b>Waiting<\/b><\/p>/);
+  assert.match(response.body, /The ruling did not pay\. 0 for, 0 against/);
+  assert.equal((response.body.match(/See the vote on NEAR/g) || []).length, 3);
+  assert.match(response.body, /href="https:\/\/testnet\.nearblocks\.io\/address\/court\.testnet"/);
+  assert.doesNotMatch(response.body, /Proposal \d/);
   assert.match(response.body, /<details class="fold"><summary>How the court is set up<\/summary>/);
   assert.ok(response.body.indexOf('member.testnet') > response.body.indexOf('How the court is set up'));
   assert.match(response.body, /relay\.testnet/);
@@ -59,4 +64,33 @@ test('courtLine uses sentences for the referee and proposal', async () => {
     { id: 'bet', referee_wallet: 'court.testnet' }));
   assert.match(line, /Stated Court<\/a>, a Sputnik DAO on NEAR, is the referee\. Proposal 5 is voted down\./);
   assert.doesNotMatch(line, /Referee:|Proposal 5:/);
+});
+
+test('offer introduces the configured jury and veto window without a proposal serial', async () => {
+  const record = JSON.parse(readFileSync(new URL('../../evidence/enclave-ruling-3668aa04.json', import.meta.url))).record;
+  const models = record.verdicts.map(v => v.model);
+  const config = { court: { dao: 'court.testnet' }, nearai: { rulingModels: models }, play: { settleDelaySeconds: 600 } };
+  const db = { one: () => assert.fail('an offer has no proposal to read') };
+  const bet = { status: 'offered', referee_wallet: 'court.testnet' };
+  const line = String(await courtLine(db, config, null, bet));
+  assert.equal((line.match(/model-logo/g) || []).length, models.length);
+  assert.match(line, /Three AI models judge it\./);
+  assert.match(line, /Stated Court<\/a> can veto their ruling for ten minutes\./);
+  config.play.settleDelaySeconds = 120;
+  assert.match(String(await courtLine(db, config, null, bet)), /for 2 minutes\./);
+});
+
+test('Court effects distinguish models, proposals, escrow credit and completed payment', () => {
+  const record = JSON.parse(readFileSync(new URL('../../evidence/enclave-ruling-3668aa04.json', import.meta.url))).record;
+  const bet = { status: 'settled', settled_by: 'referee', outcome: record.outcome,
+    enclave: { mode: record.mode, outcome: record.outcome }, payout_completed: true };
+  const target = { outcome: record.outcome };
+  assert.equal(courtEffect({ status: 'Approved' }, target, bet), 'The models said yes. The winner was paid.');
+  assert.equal(courtEffect({ status: 'Approved' }, target, { ...bet, payout_completed: false }), 'The models said yes. The stakes became withdrawal credit.');
+  assert.equal(courtEffect({ status: 'Rejected' }, target, bet), 'The models said yes. The ruling did not pay.');
+  assert.equal(courtEffect({ status: 'Rejected' }, target, { ...bet, status: 'accepted' }), 'The models said yes. The ruling did not pay. Both stakes stay in the escrow until the refund date.');
+  assert.equal(courtEffect({ status: 'InProgress' }, { outcome: 'void' }, null), 'The proposal calls for a refund. The council can still vote.');
+  assert.equal(courtEffect({ status: 'Approved' }, { outcome: 'no' }, bet), 'The models said yes.', 'a mismatched approval proves no payment');
+  assert.equal(courtEffect({ status: 'Failed' }, target, null), 'The proposal calls for yes.');
+  assert.equal(courtEffect({ status: 'Approved' }, { outcome: 'void' }, { ...bet, outcome: 'void', enclave: { mode: 'ruling', outcome: 'unclear' } }), 'The models could not agree. Both stakes became withdrawal credit.');
 });

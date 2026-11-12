@@ -163,7 +163,8 @@ test('a jury Result files one proposal at once; after the window the jury approv
   const page = await s.browser().get(`/bets/${first.betId}`);
   assert.equal(page.status, 200);
   assert.match(page.text, /<dt>Settlement<\/dt><dd>The recorded Result becomes a proposal in Stated Court, the Sputnik DAO <span class="mono">stated-court\.sputnik-v2\.testnet<\/span> that referees this bet\./);
-  assert.match(page.text, /<p class="gut settlement-line"><a class="tl" href="\/bets\/[0-9a-f-]+\/ruling">All 2 models said yes\. The winner was paid\.<\/a>/);
+  assert.match(page.text, /<p class="gut settlement-line">All 2 models said yes\. The winner was paid\.<\/p>/);
+  assert.match(page.text, /<p class="gut link-row"><a class="tl" href="\/bets\/[0-9a-f-]+\/ruling">See the ruling<\/a>/);
   assert.doesNotMatch(page.text, /Proposal 0 is approved|is the referee/, 'the page states the record, not the old Court line');
   // With the window on record (filed ten minutes before settling), the sentence names Court.
   await s.db.query(`update bilateral_bet_events set detail = jsonb_set(detail, '{filedAt}', to_jsonb(
@@ -305,14 +306,17 @@ test('/court lists the DAO’s members, its rule and its Stated proposals', asyn
   assert.equal((page.text.match(/<h1[\s>]/g) || []).length, 1, 'exactly one h1');
   assert.match(page.text, /<h1 class="court-title">Stated Court<\/h1>\s*<p class="gut">Every ruling waits ten minutes on NEAR\. The council can vote it down before anyone is paid\.<\/p>/);
   const [open, fold = ''] = page.text.split('<details class="fold"><summary>How the court is set up</summary>');
+  const visibleOpen = open.replace(/href="[^"]*"/g, '');
   assert.ok(fold, 'the set-up details sit in a fold');
   for (const detail of [/stated-court\.sputnik-v2\.testnet/, /<b>jury<\/b><br>referee\.stated-play-[0-9a-f]+\.testnet/,
     /<b>council<\/b><br>council-one\.testnet/, /more than 1 in 2 of the members of a role/, /expires after 7 days/]) {
     assert.match(fold, detail);
-    assert.doesNotMatch(open, detail, 'members, thresholds and account ids stay out of the opening');
+    assert.doesNotMatch(visibleOpen, detail, 'members, thresholds and visible account ids stay inside the fold');
   }
-  assert.match(page.text, new RegExp(`<a class="tl" href="/bets/${first.betId}">(?:<span class="hl">)?[^<]+(?:</span>)?</a></p>\\s*<p class="pwho"><b>Yes</b></p>\\s*<p class="meta">Proposal 0 is approved\\. 1 for, 0 against\\.</p>`));
-  assert.match(page.text, /<b>Voted down<\/b><\/p>\s*<p class="meta">Proposal \d+ is voted down\. 0 for, 1 against\.<\/p>/);
+  assert.match(page.text, new RegExp(`<a class="tl" href="/bets/${first.betId}">(?:<span class="hl">)?[^<]+(?:</span>)?</a></p>\\s*<p class="court-action"><b>Let it stand</b></p>\\s*<p class="meta">The models said yes\\. The winner was paid\\. 1 for, 0 against</p>`));
+  assert.match(page.text, /<b>Voted it down<\/b><\/p>\s*<p class="meta">[^<]*The ruling did not pay\.[^<]*0 for, 1 against<\/p>/);
+  assert.match(page.text, /See the vote on NEAR<\/a>/);
+  assert.doesNotMatch(page.text, /Proposal \d+ is/);
   const off = { ...s.config, court: { dao: '' } };
   assert.equal(off.court.dao, '');
 });

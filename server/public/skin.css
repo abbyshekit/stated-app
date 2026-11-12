@@ -178,6 +178,14 @@ label.check { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10
 .post .head .face { width: 44px; height: 44px; grid-row: span 2; }
 .post .head b { font-size: 16px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .post .head span { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.post .head { grid-template-columns: 44px minmax(0, 1fr) 44px; }
+.post .head > b { grid-column: 2; grid-row: 1; }
+.post .head > span:not(.face) { grid-column: 2; grid-row: 2; }
+.post .head .post-origin { grid-column: 3; grid-row: 1 / span 2; display: grid; place-items: center; width: 44px; height: 44px; align-self: start; }
+.post-origin .xmark { width: 20px; height: 20px; }
+.post-time { margin: 0; padding: 0 16px 8px; color: var(--dim); font-size: 14px; font-variant-numeric: tabular-nums; }
+.post .post-time { padding: 0 0 8px; }
+.post-time a { display: inline-flex; align-items: center; min-height: 44px; padding: 12px 0; line-height: 20px; }
 .post .said { font-size: 28px; line-height: 1.42; letter-spacing: -0.015em; }
 .post .aside { margin: 10px 0 0; color: var(--dim); font-size: 14px; }
 .post .links { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
@@ -206,13 +214,20 @@ label.check { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10
 .jury-logos .face { width: 24px; height: 24px; flex: none; }
 .settled-feature { display: block; color: inherit; text-decoration: none; border-bottom: 1px solid var(--line); padding-bottom: 16px; }
 .settled-feature:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
-.feature-winner { display: flex; flex-wrap: wrap; gap: 0 16px; align-items: baseline; }
-.feature-winner span { color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.settled-feature .prop a { display: block; min-height: 44px; text-decoration: none; }
+.feature-result { display: block; min-height: 44px; text-decoration: none; }
+.feature-result .ruling-verdict b { font-size: 18px; }
+.feature-winner { font-variant-numeric: tabular-nums; }
 .home-intro { padding-top: 16px; padding-bottom: 16px; }
+.mention { color: var(--x); }
+#public-bets { border-top: 1px solid var(--line); }
 .court-title { padding: 16px 16px 0; margin: 0; }
 .court-ruling .said .tl { font: inherit; line-height: inherit; display: block; }
-.court-ruling.rejected .said { font-size: 24px; line-height: 1.3; }
-.court-ruling.rejected .pwho b { font-size: 22px; font-weight: 600; }
+.court-ruling .said .quiet { display: block; min-height: 44px; }
+.court-ruling .said a::after { content: none; }
+.court-action { margin: 16px 0 0; font-size: 17px; line-height: 1.4; }
+.court-ruling .meta { display: block; color: var(--dim); }
+.court-vote { margin: 8px 0 0; }
 .model-logo.qwen { mask-image: url('/static/models/qwen.svg'); }
 .model-logo.deepseek { mask-image: url('/static/models/deepseek.svg'); }
 .model-logo.zai { mask-image: url('/static/models/zai.svg'); }
@@ -244,7 +259,8 @@ label.check { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10
 .stakes { margin: 0; padding: 14px 16px 0; text-align: center; font-size: 15px; text-wrap: balance; }
 .stakes.left { text-align: left; padding-top: 6px; color: var(--dim); text-wrap: pretty; }
 /* A link at the end of a sentence keeps a 44px tap height without changing the line. */
-p.gut > .tl, p.stakes > .tl { display: inline; min-height: 0; padding-block: 12px; }
+p.gut > .tl, p.stakes > .tl { display: inline; min-height: 0; padding-block: 14px; }
+p.pitch > .tl { display: inline; padding: 14px 4px; line-height: 20px; }
 /* Short action links never break; a pasted URL still wraps. */
 p.gut > .tl:not(.unread), p.stakes > .tl { white-space: nowrap; }
 p.gut.settlement-line > .tl:not(.unread) { white-space: normal; }
@@ -263,6 +279,7 @@ p.gut.settlement-line > .tl:not(.unread) { white-space: normal; }
   .ruling-verdict b { font-size: 20px; }
 }
 @media (max-width: 359px) {
+  .feature-result .ruling-verdict b { font-size: 16px; }
   .prop.bet-claim.long { font-size: 18px; }
 }
 .stepper { display: flex; justify-content: center; gap: 16px; margin-top: 10px; }
@@ -375,7 +392,7 @@ input.bad { border-color: var(--err); }
 .post .said.mid { font-size: 24px; line-height: 1.4; }
 .post .said.long { font-size: 20px; line-height: 1.42; letter-spacing: -0.01em; }
 .prow .said { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; padding: 0 4px; margin: 0 -4px; }
-.prow.note .said { -webkit-line-clamp: 3; }
+.prow.note .said { -webkit-line-clamp: 4; }
 .took { display: flex; align-items: center; gap: 10px; margin: 0; padding: 12px 16px 4px; font-size: 15px; }
 .took .face { width: 32px; height: 32px; font-size: 13px; }
 .took .face + .face { margin-left: -18px; margin-right: 2px; }
@@ -473,18 +490,24 @@ input.bad[aria-invalid="true"],
 .source-author .head > span:not(.face) { grid-column: 2; grid-row: 2; }
 .source-author .head .src { grid-column: 3; grid-row: 1 / span 2; align-self: center; margin-left: 12px; }
 /* DESIGN.md: Bet seats leave the stake its natural width and keep handles whole. */
-.bet-seats .versus { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); padding-left: 16px; padding-right: 16px; }
+.bet-seats .versus { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); grid-template-rows: auto auto auto; column-gap: 8px; padding-left: 16px; padding-right: 16px; }
+.bet-seats .seat { grid-row: 1 / span 3; grid-template-rows: subgrid; align-content: start; align-items: start; }
+.bet-seats .seat:first-child { grid-column: 1; }
+.bet-seats .seat:last-child { grid-column: 3; }
+.bet-seats .pot { grid-column: 2; grid-row: 1; align-self: start; padding-top: 16px; }
 .bet-seats .pot small { white-space: nowrap; overflow-wrap: normal; text-wrap: nowrap; }
 .seat b { white-space: normal; word-break: normal; overflow-wrap: anywhere; overflow: visible; text-overflow: clip; text-wrap: wrap; }
-.bet-seats .seat b.long-handle { font-size: 13px; white-space: nowrap; overflow-wrap: normal; max-width: 100%; }
-@media (max-width: 359px) { .bet-seats .seat b.long-handle { white-space: normal; overflow-wrap: anywhere; } }
 @media (max-width: 420px) { .seat b { font-size: 15px; } }
-.bet-seats .seat b { overflow-wrap: anywhere; }
+.bet-seats .seat b { font-size: 15px; font-weight: 700; color: var(--ink); white-space: nowrap; overflow-wrap: normal; line-height: 1.4; }
+.bet-seats .seat b.account-name { white-space: normal; overflow-wrap: anywhere; }
+.bet-seats .seat b.long-handle { font-size: 13px; }
+@media (max-width: 420px) { .bet-seats .pot { padding-top: 12px; } }
 /* DESIGN.md: below 360 the stake sits above two half-width seats and the jury uses rows. */
 @media (max-width: 359px) {
-  .bet-seats .versus { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .bet-seats .versus { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(4, auto); gap: 8px 16px; }
   .bet-seats .pot { grid-column: 1 / -1; grid-row: 1; padding-top: 0; }
-  .bet-seats .seat { grid-row: 2; }
+  .bet-seats .seat { grid-row: 2 / span 3; }
+  .bet-seats .seat:last-child { grid-column: 2; }
   .ruling-post:has(.bet-claim.long) + .ruling-verdict b { font-size: 16px; }
   .jury-rail { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .jury-rail .seat { grid-template-columns: 32px minmax(0, 1fr) auto; grid-template-rows: auto; align-items: center; gap: 8px; }

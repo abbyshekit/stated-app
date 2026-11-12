@@ -20,7 +20,8 @@ import { betsFor } from './bets.mjs';
 import { publicBet, publicBetsForProfile, publicBetsForSave, firstPublicBetsForSaves, nextOpenPublicBet, publicBetHall } from './bet-public.mjs';
 import { betList, betBlock as detailBetBlock } from './bet-view.mjs';
 import { betBlock, betLead, betState, dayMonth, timeLeft } from './marked.mjs';
-import { juryLogos } from './settlement-view.mjs';
+import { betSourceHeader } from './bet-source-view.mjs';
+import { postLogo, postTime, xPostUrl } from './x-post-view.mjs';
 import { formatTestNear } from './near-escrow.mjs';
 import { network, unit } from './near-network.mjs';
 import { assertNetworkConfig } from './config.mjs';
@@ -271,9 +272,8 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
   async function layout(ctx, title, body, { og = null, kind = 'public', flush = false, back = null, extra = null, signin: headerSignin = true, inboxBadge = true, two = false } = {}) {
     const user = ctx.user;
     const path = ctx.url.pathname;
-    // DESIGN.md: public Bet and ruling pages share the wordmark; the ruling
-    // has its own explicit back-to-bet link in the content.
-    if (kind === 'public' && /^\/bets\/[a-f\d-]{36}(?:\/ruling)?$/i.test(path)) {
+    // DESIGN.md: the public Bet keeps the wordmark; its ruling has a back arrow.
+    if (kind === 'public' && /^\/bets\/[a-f\d-]{36}$/i.test(path)) {
       back = null;
     }
     const current = (p) => (path === p || (p !== '/' && path.startsWith(`${p}/`)) ? raw('aria-current="page"') : '');
@@ -534,8 +534,9 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
     const size = length > 200 ? ' long' : length > 120 ? ' mid' : '';
     return html`
       <article class="post" id="s-${row.save_id}">
-        <div class="head">${face({ url: faces?.get(String(row.speaker_x_user_id)) || null, name, size: 'lg' })}<b>${name}</b><span>${handle}</span></div>
+        <div class="head">${face({ url: faces?.get(String(row.speaker_x_user_id)) || null, name, size: 'lg' })}<b>${name}</b><span>${handle}</span>${row.platform === 'x' ? postLogo(xPostUrl(source, config.x.simulatedOrigin)) : ''}</div>
         <p class="said${size}">${link ? html`<a href="${link}">${words}</a>` : words}</p>
+        ${row.available && row.platform === 'x' ? postTime(xPostUrl(source, config.x.simulatedOrigin), row.published_at) : ''}
         ${!direct ? html`<p class="aside">${speakerLine(row)}</p>` : ''}
         ${isBackfill(row) ? html`<p class="aside">Backfill: saved after its deadline or outcome.</p>` : ''}
         ${postLinks(row, wordsAction)}
@@ -893,23 +894,28 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
       ? await nextOpenPublicBet(db, ctx.user?.id) : null;
     const rest = recent.filter((row) => fallback || row !== lead).slice(0, 8);
     const fallbackFaces = fallback ? await facesByUsername(db, [fallback.creator_username], ctx.user) : null;
-    const fallbackOther = fallback?.creator_side === 'yes' ? 'no' : 'yes';
     const featuredId = settled?.id || fallback?.id || dareBet?.id;
     const listed = hall.rows.filter(bet => bet.id !== featuredId);
+    const offers = listed.filter(bet => betState(bet).open);
+    const active = listed.filter(bet => ['accepted', 'proposed', 'disputed'].includes(bet.status));
+    const finished = listed.filter(bet => !betState(bet).open && !active.includes(bet));
+    const homeAction = !ctx.user ? { href: '/signin', label: 'Make a bet' }
+      : fallback ? { href: `/bets/${fallback.id}?join=1#accept`, label: `Bet ${fallback.creator_side === 'yes' ? 'no' : 'yes'}` }
+        : dareBet ? { href: `/bets/${dareBet.id}`, label: `Bet ${dareBet.other}` }
+          : !settled ? { href: '/me', label: 'Your predictions' } : null;
     send(ctx.res, 200, await layout(ctx, 'Bets on what is said on X', html`
       <h1 class="visually-hidden">Stated</h1>
-      ${settled ? html`<a class="settled-feature" href="/bets/${settled.id}/ruling">
-        ${await rulingPost(db, settled, settled.outcome)}
-        <p class="gut feature-winner"><b>${betLead(settled).text}</b><span>${formatTestNear((BigInt(settled.stake_yocto) * 2n).toString())} ${unit()} pot</span></p>
-        ${juryLogos(settled.enclave.models)}</a>`
-      : fallback ? html`<p class="prop">${fallback.claim}</p>${detailBetBlock(fallback, { viewer: ctx.user, faces: fallbackFaces, joinHref: `/bets/${fallback.id}?join=1#accept` })}`
+      ${settled ? html`<section class="settled-feature">
+        ${await rulingPost(db, settled, settled.outcome, { claimHref: `/bets/${settled.id}/ruling` })}
+        <a class="feature-result" href="/bets/${settled.id}/ruling"><div class="verdict ruling-verdict${settled.outcome === 'yes' ? ' yes' : ''}"><b>${settled.outcome === 'yes' ? html`<span class="hl">Yes</span>` : 'No'}</b><span>${dayMonth(settled.enclave.decidedAt || settled.settled_at, { year: true })}</span></div>
+        <p class="gut feature-winner">${betLead(settled).text} the ${formatTestNear((BigInt(settled.stake_yocto) * 2n).toString())} ${unit()} pot</p></a></section>`
+      : fallback ? html`${await betSourceHeader(db, null, fallback, config.x.simulatedOrigin)}<p class="prop">${fallback.claim}</p>${await betSourceHeader(db, null, fallback, config.x.simulatedOrigin, { timestamp: true })}${detailBetBlock(fallback, { viewer: ctx.user, faces: fallbackFaces, joinHref: `/bets/${fallback.id}?join=1#accept` })}`
         : lead ? html`${postCard(lead, { faces, sweep: true, link: publicRow(lead).link })}${dareBet ? html`<div class="dare">${dareBet.line}</div>` : ''}` : ''}
-      <p class="pitch home-intro">Reply to any post on X with @${bot} bet ${config.play.defaultStakeNear} no. Three AI models judge it and NEAR pays the winner.</p>
-      ${dareBet || fallback ? html`<div class="acts"><a class="pill solid big" href="${fallback ? `/bets/${fallback.id}?join=1#accept` : `/bets/${dareBet.id}`}">Bet ${fallback ? fallbackOther : dareBet.other}</a></div>`
-        : settled ? '' : html`<div class="acts line">${ctx.user ? html`<a class="pill solid big" href="/me">Your predictions</a>` : html`<a class="pill solid big" href="/signin">${X_MARK}Sign in with X</a>`}</div>`}
-      ${hall.total ? html`<section id="public-bets"><p class="pitch"><a class="tl" href="#public-bets">${hall.total} ${hall.total === 1 ? 'bet' : 'bets'}</a>, ${hall.settled} settled, ${formatTestNear(hall.wonYocto)} ${unit()} won</p>${betList(listed, { hall: true })}</section>` : ''}
+      <p class="pitch home-intro">Reply to any post on X with <span class="mention">@${bot} bet ${config.play.defaultStakeNear} no</span>. Three AI models judge it and NEAR pays the winner.</p>
+      ${homeAction ? html`<div class="acts"><a class="pill solid big" href="${homeAction.href}">${homeAction.label}</a></div>` : ''}
+      ${hall.total ? html`<section id="public-bets"><p class="pitch"><a class="tl" href="#public-bets">${hall.total} ${hall.total === 1 ? 'bet' : 'bets'}</a>, ${hall.settled} settled, ${formatTestNear(hall.wonYocto)} ${unit()} won</p>${offers.length ? html`<h2 class="lead">Open offers</h2>${betList(offers, { hall: true })}` : ''}${active.length ? html`<h2 class="lead">Bets in progress</h2>${betList(active, { hall: true })}` : ''}${finished.length ? html`<h2 class="lead">Finished bets</h2>${betList(finished, { hall: true })}` : ''}</section>` : ''}
       ${rest.length ? fileList(rest, publicRow, faces, betLines) : ''}
-    `, { flush: true, signin: Boolean(settled || dareBet || fallback), og: {
+    `, { flush: true, signin: false, og: {
       title: 'Stated: bets on what is said on X', description: 'Bet on what is said on X, decided by three AI models in NEAR AI enclaves.',
     } }), { headers: refCookie(ctx) });
   });

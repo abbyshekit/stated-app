@@ -47,19 +47,23 @@ One family: the system sans (`--sans`), as X uses. No display face, no monospace
 | The words on a Prediction page | 28px (22px at 320) | 400 |
 | The words on a Bet or ruling page | 28px; 24px over 120 characters (both 22px at 320); 20px over 200 (18px below 360) | 400 |
 | The words in a list | 16px | 400 |
-| Yes / No / Undecided on a ruling page | 22px (20px at 320); 18px for posts over 200 characters (16px below 360) | 600 |
+| Yes / No / Undecided on a ruling page | 22px (20px at 320); 18px for posts over 200 characters (16px below 360), always smaller than the words | 600 |
+| Yes / No on the home feature | 18px (16px below 360), smaller than the words | 600 |
 | Stake figure | 28px | 600 |
 | Body and names | 15 to 17px | 400 / 700 |
 | Supporting lines | 14px | 400, `--dim` |
 
 The words are the largest thing on a Prediction page. Yes and No sit beside the date, smaller than the words.
 
+A Bet decided by the models carries the same mark as its ruling page: yellow highlight on the words for Yes, a strike through for No. The Bet's agreed text and the signed ruling material stay unchanged; presentation adds the mark. A settlement by agreement stays unmarked.
+
 ## Layout
 
 - One column, 600px, the width of a timeline. Lists and posts run to its edges; forms and settings get 16px side padding.
-- Header: the wordmark (or a back arrow) and the viewer's face. Predictions, Bets, Inbox and Settings live behind the face; a dot on it means unread. One way to sign in per screen: when a page's own button signs you in, the header pill is dropped.
+- Header: the wordmark (or a back arrow) and the viewer's face. A ruling's header arrow returns to its Bet. Predictions, Bets, Inbox and Settings live behind the face; a dot on it means unread. One way to sign in per screen: when a page's own button signs you in, the header pill is dropped.
 - One filled button per screen. Everything else is an outline pill or an underlined word.
-- A Bet is two round faces with the stake between them: "bet yes" on the left, "bet no" on the right. An open seat reads "You?" (or "Anyone" to the person who offered it). One bold line above says where it stands ("@priya dares you", "Both sides are in", "@priya won").
+- A Bet is two round faces with the stake between them: "bet yes" on the left, "bet no" on the right. Faces align at the top, the figure centres on them, and stance labels share a baseline below complete names. Both names use 15px, weight 700, ink; handles over twelve characters use 13px without breaking. Below 360px the pot sits above the paired seats. An open seat reads "You?" (or "Anyone" to the person who offered it) in the same name style. One bold line above says where it stands ("@priya dares you", "Both sides are in", "@priya won").
+- An X post has a 44px logo link at the header's top right. Its stored publication time, when permitted, links to the same post below the words. Missing times stay absent; the save or Bet creation time never substitutes for the post time.
 - Detail that people open rarely goes in at most four folds per page. No boxes around groups; a hairline separates rows.
 
 ## Copy

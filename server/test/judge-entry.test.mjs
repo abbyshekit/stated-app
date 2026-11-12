@@ -34,7 +34,7 @@ test('signed-out home exposes only an eligible testnet Bet', async () => {
     if (visible) assert.match(res.text, new RegExp(`<section id="public-bets">[\\s\\S]*<a href="/bets/${bet.id}">Synthetic claim`));
     if (!acceptorNamed) assert.doesNotMatch(res.text, /fixture_acceptor|acceptor\.testnet/);
     assert.doesNotMatch(res.text, /private fixture note|Paid to your account/);
-    assert.match(res.text, /Sign in with X/);
+    assert.match(res.text, /href="\/signin">Make a bet<\/a>/);
   };
   assert.equal(loadConfig({ STATED_DEMO_BET_ID: 'invalid' }).demoBetId, null);
   assert.equal(loadConfig({}).demoBetId, null);

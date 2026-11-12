@@ -12,7 +12,9 @@ import { formatTestNear } from './near-escrow.mjs';
 import { unit } from './near-network.mjs';
 import { dstackPasses } from './dstack-verifier.mjs';
 import { MODEL_LOGOS, modelFace, modelName } from './jury-models.mjs';
-import { settlementSentence } from './settlement-view.mjs';
+import { jurySentence, settlementSentence } from './settlement-view.mjs';
+import { postLogo, postTime, xPostUrl } from './x-post-view.mjs';
+import { betPostTime } from './bet-source-view.mjs';
 
 const ID = '([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})';
 const percent = (value) => `${new Decimal(value).times(100).toFixed()}%`;
@@ -51,7 +53,7 @@ export function dstackVerificationLines(record) {
 }
 
 // Public pages never enrich the source identity from the viewer's private save.
-export async function rulingPost(db, bet, outcome) {
+export async function rulingPost(db, bet, outcome, { claimHref = null } = {}) {
   const linked = await db.one('select source_save_id from bilateral_bets where id=$1', [bet.id]);
   const owner = linked?.source_save_id ? await publicPredictionOwner(db, linked.source_save_id) : null;
   const source = owner ? await publicSave(db, owner, linked.source_save_id) : null;
@@ -61,8 +63,10 @@ export async function rulingPost(db, bet, outcome) {
   const handle = available ? (direct ? source.author_username : null) : bet.creator_username;
   const pictures = available ? await facesFor(db, [source]) : await facesByUsername(db, [handle]);
   const picture = pictures.get(available ? String(source.speaker_x_user_id) : String(handle || '').toLowerCase());
-  return html`<div class="ruling-post"><div class="post"><div class="head">${face({ url: picture, name: author })}<b>${author}</b>${handle && `@${handle}` !== author ? html`<span>@${handle}</span>` : ''}</div></div>
-    <p class="prop bet-claim${bet.claim.length > 200 ? ' long' : bet.claim.length > 120 ? ' mid' : ''}">${markedClaim(bet.claim, outcome)}</p>
+  const post = xPostUrl(available ? source.source_url : bet.evidence_source_url);
+  return html`<div class="ruling-post"><div class="post"><div class="head">${face({ url: picture, name: author })}<b>${author}</b>${handle && `@${handle}` !== author ? html`<span>@${handle}</span>` : ''}${postLogo(post)}</div></div>
+    <p class="prop bet-claim${bet.claim.length > 200 ? ' long' : bet.claim.length > 120 ? ' mid' : ''}">${claimHref ? html`<a href="${claimHref}">${markedClaim(bet.claim, outcome)}</a>` : markedClaim(bet.claim, outcome)}</p>
+    ${available ? postTime(post, source.published_at) : await betPostTime(db, bet)}
   </div>`;
 }
 
@@ -146,7 +150,8 @@ export function registerBetRulingRoutes({ route, db, config, layout, send, notFo
     const dstackLines = dstackVerificationLines(record);
     const evidence = evidenceLine(record, bet);
     const line = rulingLine(record, bet);
-    const settlement = await settlementSentence(db, config, bet);
+    const summary = jurySentence(bet);
+    const settlement = (await settlementSentence(db, config, bet)).replace(summary, '').trim();
     const majority = record.outcome === 'unclear' ? majorityOutcome(record) : null;
     const body = html`
       <h1 class="visually-hidden">Ruling</h1>
@@ -158,7 +163,6 @@ export function registerBetRulingRoutes({ route, db, config, layout, send, notFo
       </li>`)}</ul>
       ${evidence ? html`<p class="gut">${evidence}</p>` : ''}
       ${settlement ? html`<p class="gut settlement-line">${settlement}</p>` : ''}
-      <p class="gut"><a class="tl" href="/bets/${bet.id}">Back to bet</a></p>
       <div class="acts"><a class="pill solid big" href="/bets/new?from=${bet.id}">${record.mode === 'ruling' && record.outcome === 'unclear' && ['settled', 'refunded'].includes(bet.status) ? 'Make another bet' : 'Make your own bet'}</a></div>
       <div class="folds">
       ${evidenceFold(record)}
@@ -178,6 +182,6 @@ export function registerBetRulingRoutes({ route, db, config, layout, send, notFo
         ${quotes.map(quote => html`<p class="quiet acct">${quote.role} ${quote.model} <code>${quote.mrtd.slice(0, 16)}</code></p>`)}
       </details>
       </div>`;
-    send(ctx.res, 200, await layout(ctx, 'Ruling', body, { flush: true, signin: false }));
+    send(ctx.res, 200, await layout(ctx, 'Ruling', body, { flush: true, signin: false, back: `/bets/${bet.id}` }));
   });
 }

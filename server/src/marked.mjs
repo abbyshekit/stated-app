@@ -106,7 +106,7 @@ export function betBlock(bet, { viewer = null, faces = null, joinHref = null, le
     const label = nameOf(username, wallet);
     if (!label) return null;
     const me = mine(username);
-    return { label: me ? 'You' : label, url: me ? viewer.x_avatar_url : faces?.get(String(username || '').toLowerCase()) || null, initial: username || wallet };
+    return { label: me ? 'You' : label, account: !me && !username, url: me ? viewer.x_avatar_url : faces?.get(String(username || '').toLowerCase()) || null, initial: username || wallet };
   };
   const seats = { [bet.creator_side]: person(bet.creator_username, bet.creator_wallet) || { label: 'The proposer', url: null, initial: '?' }, [other]: person(bet.acceptor_username, bet.acceptor_wallet) };
   const seat = (side) => {
@@ -120,7 +120,7 @@ export function betBlock(bet, { viewer = null, faces = null, joinHref = null, le
       return joinHref && !asker ? html`<a class="seat" href="${joinHref}">${inner}</a>` : html`<div class="seat">${inner}</div>`;
     }
     const state = decided ? (bet.outcome === side ? ' won' : ' lost') : '';
-    return html`<div class="seat${state}">${face({ url: who.url, name: who.initial })}<b>${handleWords(who.label)}</b><span>${stance}</span></div>`;
+    return html`<div class="seat${state}">${face({ url: who.url, name: who.initial })}<b${who.account ? html` class="account-name"` : ''}>${handleWords(who.label)}</b><span>${stance}</span></div>`;
   };
   let pot;
   if (decided) pot = html`<b>${both}</b><small>${unit()}</small><small>${(bet.settled_by || bet.chain_state?.resolution?.method) === 'referee' ? 'won' : 'credited'}</small>`;

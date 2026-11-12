@@ -280,7 +280,7 @@ test('a far-off Prediction asks for the Bet dates beside the button, with the re
 
 test('signed-out home is one line and a button above the list; settings offer no switch for something that is off', async () => {
   const home = await anon.get('/');
-  assert.match(home.text, /Reply to any post on X with @statedbot bet 0\.1 no\. Three AI models judge it and NEAR pays the winner\./);
+  assert.match(home.text, /Reply to any post on X with <span class="mention">@statedbot bet 0\.1 no<\/span>\. Three AI models judge it and NEAR pays the winner\./);
   assert.doesNotMatch(home.text, /class="hero"/);
   assert.doesNotMatch(home.text.split('<footer')[1], /<p>/, 'the footer is links only');
   const settings = await lenaB.get('/me/settings');

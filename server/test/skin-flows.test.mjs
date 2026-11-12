@@ -154,7 +154,7 @@ before(async () => {
 
 after(() => s.close());
 
-test('header menu: one Main nav with the four links in order and the current one marked; signed out has Sign in with X', async () => {
+test('header menu: one Main nav with four links; signed-out home has one Make a bet action', async () => {
   for (const [path, current] of [['/me', '/me'], ['/me/inbox', '/me/inbox'], ['/me/settings', '/me/settings']]) {
     const page = await aliceB.get(path);
     assert.equal(page.status, 200);
@@ -167,7 +167,7 @@ test('header menu: one Main nav with the four links in order and the current one
   assert.doesNotMatch(out.text, /<nav aria-label="Main">/);
   // The signed-out home has one way to sign in: the page's own filled button.
   assert.equal(out.text.match(/href="\/signin"/g)?.length, 1);
-  assert.match(out.text, /<a class="pill solid big" href="\/signin">[\s\S]*?Sign in with X<\/a>/);
+  assert.match(out.text, /<a class="pill solid big" href="\/signin">Make a bet<\/a>/);
   // Any other signed-out page offers it in the header, and comes back to the same page.
   const search = await anon.get('/search?q=gold');
   assert.match(search.text, /<a class="pill" href="\/signin\?return=%2Fsearch%3Fq%3Dgold">[\s\S]*?Sign in<\/a>/);

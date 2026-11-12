@@ -120,9 +120,10 @@ test('price ruling shows the post, three models, confidence, window, price and v
   assert.doesNotMatch(response.text, /Private source words|private_author/);
   assert.ok(response.text.includes(`<b><span class="hl">Yes</span></b><span>${dayMonth(record.decidedAt, { year: true })}</span>`));
   assert.doesNotMatch(response.text, /<h2>NEAR AI enclave jury<\/h2>/);
-  assert.ok(response.text.includes(`href="/bets/${bet.id}">Back to bet</a>`));
+  assert.match(response.text, new RegExp(`<a class="back" href="/bets/${bet.id}"`));
+  assert.doesNotMatch(response.text, />Back to bet<\/a>/);
   const betPage = await s.browser().get(`/bets/${bet.id}`);
-  assert.equal(response.text.match(/<header>[\s\S]*?<\/header>/)[0], betPage.text.match(/<header>[\s\S]*?<\/header>/)[0]);
+  assert.match(betPage.text.match(/<header>[\s\S]*?<\/header>/)[0], /class="wordmark"/);
   assert.ok(response.text.includes('The NEAR AI enclave jury agreed, so @public_bettor, who bet yes, wins the 0.2\u00a0test\u00a0NEAR pot.'));
   assert.match(response.text, /<ul class="jury-rail">/);
   assert.equal((response.text.match(/<span>Yes, 95% sure<\/span>/g) || []).length, MODELS.length);
@@ -239,18 +240,22 @@ test('submitted evidence shows its link count and keeps the signed text in the J
   assert.equal(items[1].text, no.body);
 });
 
-test('home features the settled ruling once and Bet and ruling share its jury sentence', async () => {
+test('home features the settled status and pot once; Bet separates its ruling link and ruling omits repeated verdict copy', async () => {
   await setChain('settled', 'yes');
   const record = await insertRuling();
   const line = `All ${record.verdicts.length === 3 ? 'three' : record.verdicts.length} models said yes.`;
   const home = await s.browser().get('/');
-  assert.ok(home.text.includes(`<a class="settled-feature" href="/bets/${bet.id}/ruling">`));
+  assert.ok(home.text.includes(`<section class="settled-feature">`));
+  assert.ok(home.text.includes(`<a class="feature-result" href="/bets/${bet.id}/ruling">`));
+  assert.ok(home.text.includes(`<b><span class="hl">Yes</span></b><span>${dayMonth(record.decidedAt, { year: true })}</span>`));
+  assert.match(home.text, /@public_bettor won the 0\.2 test NEAR pot/);
   assert.equal(home.text.split(bet.claim).length - 1, 1);
   assert.doesNotMatch(home.text, /Operator-controlled test on NEAR testnet|View test bet/);
   const betPage = await s.browser().get(`/bets/${bet.id}`);
   const ruling = await s.browser().get(path());
-  assert.ok(betPage.text.includes(`href="/bets/${bet.id}/ruling">${line}</a>`));
-  assert.ok(ruling.text.includes(`<p class="gut settlement-line">${line}</p>`));
+  assert.ok(betPage.text.includes(`<p class="gut settlement-line">${line}</p>`));
+  assert.ok(betPage.text.includes(`<a class="tl" href="/bets/${bet.id}/ruling">See the ruling</a>`));
+  assert.doesNotMatch(ruling.text, /All three models said yes\./);
   assert.match(betPage.text, /<div class="jury-logos"/);
   assert.doesNotMatch(betPage.text, /class="wrap two"/);
   await setChain('settled', 'no');

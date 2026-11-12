@@ -175,7 +175,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
       return html`<li><p>Bet ${item.side}: ${url ? html`<a class="tl" href="${url}" rel="noopener noreferrer">${item.title || host}</a>` : item.title || item.url}${item.by ? `, @${item.by}` : ''}${host ? html` <span class="quiet">${host}</span>` : ''}${postedHost ? html` <span class="quiet">posted as ${postedHost}</span>` : ''}</p></li>`;
     })}</ul>${privateCount ? html`<p class="quiet">and ${privateCount} ${privateCount === 1 ? 'link from a private bet' : 'links from private bets'}</p>` : ''}`) : bet.evidence ? html`<p class="gut quiet">No links yet.</p>` : '';
     return html`${settledJury ? juryLogos(ruling.models) : await courtLine(db, config, chain, bet)}${line || settlement ? settledJury
-      ? html`<p class="gut settlement-line">${!privateCount ? html`<a class="tl" href="/bets/${bet.id}/ruling">${settlement || line}</a>` : settlement || line}</p>`
+      ? html`<p class="gut settlement-line">${settlement || line}</p>${!privateCount ? html`<p class="gut link-row"><a class="tl" href="/bets/${bet.id}/ruling">See the ruling</a></p>` : ''}`
       : html`<p class="gut">${line}${ruling && !privateCount ? html` <a class="tl" href="/bets/${bet.id}/ruling">See the ruling</a>` : ''}</p>`
       : check ? html`<p class="gut">NEAR AI signed second opinion: ${check.model} read the links and ${check.verdict.agrees ? 'agrees' : 'disagrees'}. <a class="tl" href="/bets/${bet.id}/attested-check.json">Verify</a></p>` : ''}${jury}${evidence}`;
   }
@@ -300,15 +300,15 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
     send(ctx.res, 200, await layout(ctx, bet.claim.slice(0, 80), html`
       <h1 class="visually-hidden" data-bet-outcome="${bet.outcome || (bet.status === 'refunded' ? 'void' : 'pending')}" data-bet-claim="${bet.claim}" data-bet-deadline="${bet.resolve_at}" data-bet-terms-hash="${bet.terms_hash}">Bet: ${bet.claim}</h1>
       <div class="pri">${await sourceHeader(null, bet)}
-      <p class="${claimClass(bet.claim)}">${claimWords(bet, recordedRuling(bet))}</p></div>
+      <p class="${claimClass(bet.claim)}">${claimWords(bet, recordedRuling(bet))}</p>${await betSourceHeader(db, null, bet, config.x.simulatedOrigin, { timestamp: true })}</div>
       ${betBlock(bet, { heading: phaseHeading(bet, ctx.user), ruling: pendingRuling(bet), cameTrue: recordedRuling(bet) === 'yes', viewer: ctx.user, faces: await faces(ctx, bet), joinHref: open && eligible && !limited ? join : null })}
       ${proof}
       ${evidence ? html`<p class="gut">${evidence.note}</p><p class="proof"><a class="tl" href="${evidence.url}" rel="noopener noreferrer">Result source</a></p>` : ''}
       ${await enclaveDetail(bet)}
       ${bet.settlement_transaction_hash && isAdmin(ctx.user) ? html`<p class="gut"><a class="tl" href="/admin/bets/${bet.id}/evidence">${evidence ? 'View evidence record' : 'Publish evidence'}</a></p>` : ''}
       ${following ? html`<p class="notice" role="status">Following. Updates will appear in your Inbox.</p>` : ''}
-      <div class="acts">${primary}<div class="two">${open ? html`${reply}${copyBetLink(bet)}` : next || start ? share : ''}</div></div>
-      <div class="folds">${fold('Share options', html`<p>${open ? betShareLink(config.baseUrl, bet, { mine: false, ghost: true }) : ''}<a class="tl" href="/share/bets/${bet.id}.png" download="stated-bet-${bet.id}.png">Save image</a></p>${open && !followPrimary ? follow : ''}`)}${betTerms(bet, { juryReview: juryDecides(bet), extra: html`${evidence ? html`<dt>Outcome known</dt><dd>${time(evidence.knownAt)}</dd><dt>Settlement recorded</dt><dd>${time(bet.settled_at)}</dd><dt>Explanation published</dt><dd>${time(evidence.publishedAt)}. Published after settlement.</dd>` : ''}<dt>Checked on NEAR</dt><dd>${bet.last_verified_at ? `Last verified ${time(bet.last_verified_at)}.` : 'Chain verification is unavailable.'}${bet.chain_freshness === 'stale' ? ' This snapshot may have changed. Acceptance checks the chain again.' : ''}</dd>` })}${open ? await payFold(ctx, bet) : ''}</div>`, {
+      <div class="acts">${primary}<div class="two">${open ? reply : next || start ? share : ''}</div></div>
+      <div class="folds">${fold('Share options', html`${open ? copyBetLink(bet) : ''}<p>${open ? betShareLink(config.baseUrl, bet, { mine: false, ghost: true }) : ''}<a class="tl" href="/share/bets/${bet.id}.png" download="stated-bet-${bet.id}.png">Save image</a></p>${open && !followPrimary ? follow : ''}`)}${betTerms(bet, { juryReview: juryDecides(bet), extra: html`${evidence ? html`<dt>Outcome known</dt><dd>${time(evidence.knownAt)}</dd><dt>Settlement recorded</dt><dd>${time(bet.settled_at)}</dd><dt>Explanation published</dt><dd>${time(evidence.publishedAt)}. Published after settlement.</dd>` : ''}<dt>Checked on NEAR</dt><dd>${bet.last_verified_at ? `Last verified ${time(bet.last_verified_at)}.` : 'Chain verification is unavailable.'}${bet.chain_freshness === 'stale' ? ' This snapshot may have changed. Acceptance checks the chain again.' : ''}</dd>` })}${open ? await payFold(ctx, bet) : ''}</div>`, {
       kind: 'public', flush: true, back: ctx.user ? '/me/bets' : null, signin: Boolean(ctx.user),
       og: { title: `${betLead(bet).text} on Stated`, description: bet.claim.slice(0, 200), image: `/share/bets/${bet.id}.png` },
     }), { kind: 'public' });
@@ -676,6 +676,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
       <h1 class="visually-hidden">Bet: ${bet.claim}</h1>
       ${await sourceHeader(ctx.user, bet)}
       <p class="${claimClass(bet.claim)}">${claimWords(presentation, recordedRuling(presentation))}</p>
+      ${await betSourceHeader(db, ctx.user, bet, config.x.simulatedOrigin, { timestamp: true })}
       ${betBlock(bet, { heading: phaseHeading(presentation, ctx.user), ruling: pendingRuling(presentation), cameTrue: recordedRuling(presentation) === 'yes', viewer: ctx.user, faces: await faces(ctx, bet), joinHref: eligible && bet.status === 'offered' && bet.chain_state && !creator && !limited ? '#accept' : null })}
       ${await enclaveDetail(published)}
       ${notices}

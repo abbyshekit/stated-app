@@ -7,6 +7,7 @@ import { accountLink } from './near-network.mjs';
 import { cachedView, courtDao, proposalTarget } from './court-dao.mjs';
 import { publicBet } from './bet-public.mjs';
 import { markedClaim } from './bet-view.mjs';
+import { juryLogos } from './settlement-view.mjs';
 
 const STATUS = { InProgress: 'open for council votes', Approved: 'approved', Rejected: 'voted down', Removed: 'removed',
   Expired: 'expired', Failed: 'failed', Moved: 'moved' };
@@ -16,6 +17,11 @@ const statusWords = (status) => STATUS[status] || 'status unavailable';
 export async function courtLine(db, config, chain, bet) {
   const dao = courtDao(config);
   if (!dao || bet?.referee_wallet !== dao) return '';
+  if (bet.status === 'offered') {
+    const models = [...new Set(config.nearai?.rulingModels || [])];
+    const count = models.length === 3 ? 'Three' : String(models.length);
+    return html`${juryLogos(models)}<p class="gut">${count} AI ${models.length === 1 ? 'model judges' : 'models judge'} it. <a class="tl" href="${accountLink(dao)}" rel="noopener noreferrer">Stated Court</a> can veto their ruling for ${duration(config.play?.settleDelaySeconds)}.</p>`;
+  }
   const filed = await db.one(`select detail from bilateral_bet_events where bet_id = $1 and kind = 'court_proposal'
     order by id desc limit 1`, [bet.id]);
   let status = null;
@@ -39,6 +45,26 @@ function policySentence(policy) {
   const days = Math.round(Number(BigInt(policy.proposal_period || '0') / 3_600_000_000_000n) / 24);
   return `Each role votes on its own: a proposal passes when more than ${num} in ${den} of the members of a role that may approve it vote yes, and fails when more than ${num} in ${den} of a role vote no; an open proposal expires after ${days} days.`;
 }
+
+// A proposal's approval alone proves neither settlement nor a transfer to the winner.
+export function courtEffect(proposal, target, bet) {
+  const ruling = bet?.enclave?.mode === 'ruling' ? bet.enclave.outcome : null;
+  const modelLine = ['yes', 'no'].includes(ruling) ? `The models said ${ruling}.`
+    : ruling === 'unclear' ? 'The models could not agree.'
+      : `The proposal calls for ${target.outcome === 'void' ? 'a refund' : target.outcome}.`;
+  const matches = bet?.status === 'settled' && bet.settled_by === 'referee' && bet.outcome === target.outcome;
+  const effect = proposal.status === 'Rejected' ? 'The ruling did not pay.'
+    : proposal.status === 'Approved' && matches
+      ? bet.outcome === 'void' ? 'Both stakes became withdrawal credit.'
+        : bet.payout_completed ? 'The winner was paid.' : 'The stakes became withdrawal credit.'
+      : proposal.status === 'InProgress' ? 'The council can still vote.' : '';
+  const held = proposal.status === 'Rejected' && ['accepted', 'proposed', 'disputed'].includes(bet?.status)
+    ? 'Both stakes stay in the escrow until the refund date.' : '';
+  return [modelLine, effect, held].filter(Boolean).join(' ');
+}
+
+const councilAction = (status) => ({ Approved: 'Let it stand', Rejected: 'Voted it down', InProgress: 'Waiting',
+  Removed: 'Removed', Expired: 'Expired', Failed: 'Failed', Moved: 'Moved' })[status] || 'Unavailable';
 
 export function registerCourtRoutes({ route, db, config, layout, send, notFound, chain }) {
   route('GET', /^\/court$/, async (ctx) => {
@@ -71,9 +97,10 @@ export function registerCourtRoutes({ route, db, config, layout, send, notFound,
         const bet = bets.get(target.id);
         const mark = bet?.status === 'settled' && bet.settled_by === 'referee' ? bet.outcome : null;
         return html`<li class="prow court-ruling${p.status === 'Rejected' ? ' rejected' : ''}"><div>
-          <p class="said">${bet?.claim ? html`<a class="tl" href="/bets/${target.id}">${markedClaim(bet.claim, mark)}</a>` : html`<span class="quiet">A bet with no public page here.</span>`}</p>
-          <p class="pwho"><b>${p.status === 'Rejected' ? 'Voted down' : target.outcome === 'void' ? 'Undecided' : target.outcome === 'yes' ? 'Yes' : 'No'}</b></p>
-          <p class="meta">Proposal ${p.id} is ${statusWords(p.status)}. ${votes.Approve || 0} for, ${votes.Reject || 0} against.</p>
+          <p class="said">${bet?.claim ? html`<a class="tl" href="/bets/${target.id}">${markedClaim(bet.claim, mark)}</a>` : html`<span class="quiet">A private bet</span>`}</p>
+          <p class="court-action"><b>${councilAction(p.status)}</b></p>
+          <p class="meta">${courtEffect(p, target, bet)} ${votes.Approve || 0} for, ${votes.Reject || 0} against</p>
+          <p class="court-vote"><a class="tl" href="${accountLink(dao)}" rel="noopener noreferrer">See the vote on NEAR</a></p>
         </div></li>`;
       })}</ul>` : html`<p class="gut quiet">No rulings yet.</p>`}
       <div class="folds"><details class="fold"><summary>How the court is set up</summary>

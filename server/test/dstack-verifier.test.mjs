@@ -309,17 +309,22 @@ test('the ruling route renders both plain lines and suppresses them when the pla
   const tx = { async one(sql) {
     if (sql.startsWith('select b.id, b.creator_user_id')) return row;
     if (sql.startsWith('select e.detail')) return { ...row, detail: record };
+    if (sql.startsWith('select src.published_at')) return null;
     if (/^select (s.statement_id|source_save_id)/.test(sql)) return null;
     throw new Error(`Unexpected SQL: ${sql}`);
   }, async many() { return []; } };
   let handler;
   let page;
+  let layoutOptions;
   registerBetRulingRoutes({ db: { tx: fn => fn(tx) }, config: { play: {}, baseUrl: 'https://stated.example' },
     route(method, expression, fn) { if (expression.test(`/bets/${row.id}/ruling`)) handler = fn; },
-    layout: async (ctx, title, body) => String(body), send(res, status, body) { assert.equal(status, 200); page = body; },
+    layout: async (ctx, title, body, options) => { layoutOptions = options; return String(body); }, send(res, status, body) { assert.equal(status, 200); page = body; },
     notFound() { assert.fail('The verified fixture must render'); } });
   assert.equal(typeof handler, 'function');
   await handler({ params: [row.id], res: {} });
+  assert.equal(layoutOptions.back, `/bets/${row.id}`);
+  assert.match(page, /class="post-origin"/);
+  assert.doesNotMatch(page, /class="post-time"|All (?:three|\d+) models said|>Back to bet<\/a>/);
   assert.match(page, /<summary>Check it yourself<\/summary>[\s\S]*<p>When this ruling was made, the official dstack verifier reported that the boot measurements match the published dstack OS 0\.5\.12 image, production build\.<\/p>/);
   assert.ok(page.includes('<p>It also reported the Intel TCB up to date with no security advisories. The command below asks the verifier again.</p>'));
   delete record.plan.dstack;

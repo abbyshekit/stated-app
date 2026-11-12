@@ -46,7 +46,7 @@ function fakeDb(rows, { profile = false } = {}) {
     async many(sql) {
       calls.push(sql);
       if (sql.includes('lower(creator.x_username)')) return profile ? rows : [];
-      if (sql.includes("where p.withdrawn_at is null and b.status='offered'")) return [...rows].sort((a, b) => a.accept_by - b.accept_by);
+      if (sql.includes("where p.withdrawn_at is null and b.status='offered'")) return rows.filter(row => row.accept_by > new Date()).sort((a, b) => a.accept_by - b.accept_by);
       if (sql.includes('from bilateral_bets b\n  join bilateral_bet_publications')) return rows;
       if (sql.includes('select distinct b.id from bilateral_bets')) return [];
       if (sql.includes('from users') || sql.includes('from saves') || sql.includes('from public_withdrawals')) return [];
@@ -79,7 +79,10 @@ test('home names Stated and lists each counted offer once in closing order', asy
   assert.doesNotMatch(listed, new RegExp(`/bets/${id(2)}`), 'the featured offer is omitted from the rows');
   for (const n of [1, 3]) assert.equal((listed.match(new RegExp(`href="/bets/${id(n)}"`, 'g')) || []).length, 1);
   assert.ok(listed.indexOf(id(3)) < listed.indexOf(id(1)));
-  assert.match(res.body, /Reply to any post on X with @statedforecast bet 0\.1 no\./);
+  assert.match(res.body, /Reply to any post on X with <span class="mention">@statedforecast bet 0\.1 no<\/span>\./);
+  assert.match(res.body, /home-intro[\s\S]*?<\/p>\s*<div class="acts"><a class="pill solid big" href="\/signin">Make a bet<\/a>/);
+  assert.doesNotMatch(res.body.match(/<header>[\s\S]*?<\/header>/)[0], /Sign in/);
+  assert.match(listed, /<h2 class="lead">Open offers<\/h2>/);
   assert.ok(db.calls.some(sql => sql.includes('from bilateral_bets b\n  join bilateral_bet_publications')));
 });
 
@@ -95,16 +98,28 @@ test('private profiles disclose only published Bets', async () => {
   assert.equal(hidden.status, 404);
 });
 
+test('home separates finished bets from open offers without duplicating rows or primary actions', async () => {
+  const rows = [offer(1, 10), offer(2, 5), offer(3, -5)];
+  const res = await get(fakeDb(rows), '/');
+  assert.equal(res.status, 200);
+  assert.equal((res.body.match(/class="pill solid big"/g) || []).length, 1);
+  const listed = res.body.split('<section id="public-bets">')[1];
+  assert.match(listed, /<h2 class="lead">Open offers<\/h2>[\s\S]*<h2 class="lead">Finished bets<\/h2>/);
+  for (const n of [1, 3]) assert.equal((listed.match(new RegExp(`href="/bets/${id(n)}"`, 'g')) || []).length, 1);
+  assert.ok(listed.indexOf(id(1)) < listed.indexOf('Finished bets'));
+  assert.ok(listed.indexOf(id(3)) > listed.indexOf('Finished bets'));
+});
+
 test('signed-out open Bet exposes its take action and share fold without private source identity', async () => {
   const db = fakeDb([offer(1, 5)]);
   const res = await get(db, `/bets/${id(1)}`);
   assert.equal(res.status, 200);
   assert.match(res.body, />Bet no<\/a>/);
-  assert.match(res.body, /<div class="two">[\s\S]*?>Reply on X<\/a>[\s\S]*?Copy link/);
+  assert.match(res.body, /<div class="two">\s*<a[^>]*>Reply on X<\/a>\s*<\/div>/);
   assert.ok(res.body.includes(`data-bet-claim="${corpus.material.claim}"`));
   assert.doesNotMatch(res.body, /class="wrap two"|Sign in to bet|>Follow<\/|View test bet/);
   assert.match(res.body, /href="\/signin\?return=[^"]+">Bet no<\/a>/);
-  assert.match(res.body, /<summary>Share options<\/summary>[\s\S]*?Save image/);
+  assert.match(res.body, /<summary>Share options<\/summary>[\s\S]*?Copy link[\s\S]*?Save image/);
   assert.doesNotMatch(res.body, /Private Name/);
   assert.ok(db.calls.some(sql => sql.includes('from bilateral_bets b\n  join bilateral_bet_publications')));
 });

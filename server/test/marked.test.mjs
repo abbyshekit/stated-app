@@ -129,7 +129,7 @@ test('betBlock escapes names and preserves complete handles and account ids', ()
   }
   assert.match(text(betBlock(bet({ creator_username: 'abcdefghijkl' }))), /<b>@abcdefghijkl<\/b>/);
   const out = text(betBlock(bet({ creator_username: null, creator_wallet: 'a'.repeat(64) })));
-  assert.ok(out.includes(`<b>${'a'.repeat(64)}</b>`));
+  assert.ok(out.includes(`<b class="account-name">${'a'.repeat(64)}</b>`));
   const hostile = text(betBlock(bet({ creator_username: '<img src=x>' })));
   assert.doesNotMatch(hostile, /<img src=x>/);
   assert.match(hostile, /@&lt;img src=x&gt;/);
