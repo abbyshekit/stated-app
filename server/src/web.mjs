@@ -35,6 +35,7 @@ import { kvGet } from './db.mjs';
 import { metrics } from './metrics.mjs';
 import { purgeOrphanXSources, resolveStatement } from './notify.mjs';
 import { canViewProfile, ownerSaveView, profileIsPublic, PUBLIC_SAVE_SQL, publicSaveView } from './privacy.mjs';
+import { privacyPage, termsPage } from './legal-pages.mjs';
 import {
   annotate,
   publicSaveOwner,
@@ -339,7 +340,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
     </header>
     <main id="content"${flush ? '' : raw(' class="pad"')}>${body}</main>
     <footer>
-      <nav aria-label="More"><a href="/search">Search</a>${isAdmin(user) ? html`<a href="/desk">Desk</a>` : ''}<a href="/privacy">Privacy</a></nav>
+      <nav aria-label="More"><a href="/search">Search</a>${isAdmin(user) ? html`<a href="/desk">Desk</a>` : ''}<a href="/terms">Terms</a><a href="/privacy">Privacy</a></nav>
     </footer>
   </div>
 </body>
@@ -919,33 +920,20 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
       <div class="signbox">
         <h1 class="visually-hidden">Sign in</h1>
         <p class="pitch">Stated reads your X profile and posts, nothing else. It cannot post, follow or message as you.</p>
-        <p>Your profile here starts private. By signing in you agree to the <a href="/privacy">privacy policy</a>.</p>
+        <p>Your profile here starts private. By signing in you agree to the <a href="/terms">Terms of Service</a> and the <a href="/privacy">Privacy Policy</a>.</p>
         <a class="pill solid big xbutton" href="${next}">${X_MARK}Sign in with X</a>
       </div>
     `, { kind: 'private', flush: true }), { kind: 'private', headers: refCookie(ctx) });
   });
 
+  route('GET', /^\/terms$/, async (ctx) => {
+    send(ctx.res, 200, await layout(ctx, 'Terms of Service', termsPage({ bot: await botUsername() })));
+  });
+
   route('GET', /^\/privacy$/, async (ctx) => {
-    send(ctx.res, 200, await layout(ctx, 'Privacy', html`
-      <h1>Privacy</h1>
-      <p>Stated keeps a record of predictions you save, so you can see what happened to them.</p>
-      <h2>What is stored</h2>
-      <p>Your X user ID, handle, display name and profile image; for each save, the link, the post or article ID, the author, the dates, and how its deadline and probability were read; your collections, visibility choices, private notes and reminder dates; your inbox. ${config.x.textPolicy === 'all'
-        ? 'This server is set to store the words of every saved post too.'
-        : 'For an X post saved privately, Stated keeps the link and the terms, not the words. The words are stored only while a public record shows the post.'} Sentences you pick from articles are stored with a link to the article. When you tag the bot on X, the tag itself is a public post on X, and Stated cannot make it private. To save something without a public tag, paste the link at <a href="/me/track">Track a link</a>: post links are read through the X API, and what you save there is private.</p>
-      <h2>What X learns when you read a private post here</h2>
-      <p>Your pages never fetch anything from X by themselves. On a private save's page you can ask to see that one post's words. Stated's server then requests that post from X's public oEmbed service. X sees a request from Stated's server for that post at that time. It is not told who you are, and Stated never requests several of your posts together, but if you open several posts one after another, X sees those requests close together. The words are kept in the server's memory for up to an hour, shared by everyone who asks for the same post, and are never written to the database. A check that finds the post protected or deleted drops that copy then. Until the check, a cached copy can remain for up to an hour.</p>
-      <h2>Who can see it</h2>
-      <p>Your profile and every save start private: only you can see them. If you make your profile public, only the saves you choose are shown, on pages, search, exports, previews and statistics. Private notes and reminder dates are never shown to anyone else. Reviewers who record outcomes see each claim and can open its post on X, which shows who wrote it. For a claim no one has made public, they are not shown who saved it, how many saved it, or any terms a saver confirmed.</p>
-      <h2>Posts removed from X</h2>
-      <p>A post on a public record is checked against X every day; a post saved privately, every week. If X says a saved post is deleted or its account is protected, Stated marks it unavailable and stops storing and showing its words, including in your inbox.</p>
-      <h2>Cookies</h2>
-      <p>Stated sets only its own cookies: one that keeps you signed in, one used during sign-in, one that remembers which link brought you here until you sign up, and a random visitor cookie that counts a visit to a public page once a day. None is shared with anyone.</p>
-      <h2>Messages</h2>
-      <p>The bot sends direct messages only if you turn that on and have messaged it first. Updates always reach your private inbox here.</p>
-      <h2>Your data</h2>
-      <p>Download your profile as JSON at <a href="/me/export.json">/me/export.json</a>, following pagination.next until it is null. When historyContinues is true, the next page repeats the saves with their next batch of revisions. Records describe only the saves on each page. Remove any save from its page. To delete your account, contact the operator named in the bot’s X profile.</p>
-    `));
+    send(ctx.res, 200, await layout(ctx, 'Privacy Policy', privacyPage({
+      bot: await botUsername(), sessionDays: config.sessionDays, textPolicy: config.x.textPolicy,
+    })));
   });
 
   route('GET', /^\/signin\/x$/, async (ctx) => {

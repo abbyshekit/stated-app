@@ -117,7 +117,7 @@ test('a chosen post asks for a side with the smallest stake and a month chosen',
   }
   assert.match(page.text, /<label for="date-custom">Other<\/label>/);
   assert.match(page.text, /<p class="lead">Bet on this post<\/p>/);
-  assert.match(page.text, /<nav aria-label="More"><a href="\/search">Search<\/a><a href="\/privacy">Privacy<\/a><\/nav>/);
+  assert.match(page.text, /<nav aria-label="More"><a href="\/search">Search<\/a><a href="\/terms">Terms<\/a><a href="\/privacy">Privacy<\/a><\/nav>/);
   assert.match(page.text, /<p class="meta stake-label">Your side<\/p>\s*<div class="seg side-choice"/);
   assert.match(page.text, /<p class="meta stake-label">Stake each, in test NEAR<\/p>\s*<div class="seg side-choice/);
   assert.match(page.text, /<p class="meta stake-label" id="deadline-label">Deadline, 23:59 UTC<\/p>\s*<div class="seg side-choice/);

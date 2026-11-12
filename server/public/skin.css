@@ -620,3 +620,8 @@ form:not(:has(input[name="side"]:checked)) .send { opacity: 0.45; }
 .tl.unread { font-size: 14px; overflow-wrap: anywhere; }
 /* The paste button appears once the field holds a link. */
 form:not(:has(#bet-link:valid)) .acts.paste { display: none; }
+/* Terms and Privacy: one reading column. */
+.legal { max-width: 65ch; padding-bottom: 32px; }
+.legal p, .legal li { line-height: 1.55; }
+.legal ul { margin: 8px 0 0; padding-left: 20px; }
+.legal li + li { margin-top: 8px; }

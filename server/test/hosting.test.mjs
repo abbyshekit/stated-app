@@ -93,6 +93,7 @@ test('the real entry point starts with the worker off, answers /healthz, and sto
     const home = await fetch(`http://127.0.0.1:${port}/`);
     assert.match(home.headers.get('content-security-policy') || '', /default-src 'none'|default-src 'self'/);
     assert.equal((await fetch(`http://127.0.0.1:${port}/privacy`)).status, 200);
+    assert.equal((await fetch(`http://127.0.0.1:${port}/terms`)).status, 200);
     child.kill('SIGTERM');
     const result = await exited;
     assert.equal(result.code, 0, result.out);
