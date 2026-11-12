@@ -87,6 +87,8 @@ Use **Copy bet link** to invite someone to an open public Bet.
 
 During acceptance, **Matching stake** confirms the request is in progress and repeat submissions are blocked. A rejected request returns to an enabled form; browser Back also permits a fresh attempt.
 
+Concurrent managed retries serialize account creation and acceptance through PostgreSQL. After waiting, the server checks finalized escrow and the recipient's persisted private binding before signing. A recorded unresolved transaction is checked again without another broadcast.
+
 [Browser acceptance and payout](evidence/web-take-testnet-20261111.json)
 
 An open reply Bet can also show **Reply in simulated X**. It opens the bot's offer with the take command filled in. Select a second test account and send the reply to stake from that account without a Stated sign-in. Connected mode prepares an X reply to the bot's published offer. [Verified simulated reply handoff](evidence/reply-link-testnet-20261111.json)
@@ -127,7 +129,7 @@ curl -fsS https://test.rpc.fastnear.com -H 'content-type: application/json' \
 
 ## NEAR HACKATHON notes
 
-The recording evidence records the test run at filming. The release verification ran 475 app tests; the existing contract verification passed 71 tests separately. `npm audit --omit=dev` flags four high-severity entries in the Meteor SDK dependency tree. The reply-to-payout demo uses app-managed testnet accounts.
+The recording evidence records the test run at filming. The combined release verification ran 498 app tests; the existing contract verification passed 71 tests separately. `npm audit --omit=dev` flags four high-severity entries in the Meteor SDK dependency tree. The reply-to-payout demo uses app-managed testnet accounts.
 
 - **Development dates.** The first recorded Stated development snapshot is dated 9 November 2026, after the hackathon announcement. It includes the standalone forecasting prototype. The judge walkthrough uses the Node app and its NEAR integration.
 - **NEAR integration.** The escrow contract (Rust, `near-sdk` 5.29.0; version 2 adds the referee and the unanswered-result rule), live dry-run quotes from NEAR Intents for paying a stake from another chain (the mainnet payment path is implemented and unverified), named accounts per X handle with a claim step that swaps keys, wallet signing through the self-hosted Meteor SDK, exact finalized-transaction verification, and a bounded testnet reconciler that keeps Bet pages current without a browser. A full reply-to-settlement run on testnet is recorded in `evidence/reply-bets-testnet-live.json` (`node scripts/reply-bets-live.mjs` repeats it).

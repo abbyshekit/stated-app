@@ -255,6 +255,14 @@ export function accountNameFor(username, xUserId, parent) {
 export async function ensurePlayAccount(db, config, chain, { xUserId, username }) {
   assertPlay(config);
   if (!inPilot(config, xUserId)) throw Object.assign(new UserError('Bets with real NEAR are invite-only for now.', 403), { pilot: true });
+  const existing = await playAccountFor(db, xUserId);
+  if (existing?.ready) return existing;
+  return withManagedOperation(db, `managed-account:${config.near?.network || 'testnet'}:${String(xUserId)}`,
+    'Your account is still being opened. Try again shortly.',
+    (locked) => provisionPlayAccount(locked, config, chain, { xUserId, username }));
+}
+
+async function provisionPlayAccount(db, config, chain, { xUserId, username }) {
   const existing = await db.one('select * from play_accounts where x_user_id = $1', [String(xUserId)]);
   if (existing?.ready) return existing;
   const bank = await treasury(db, config, chain);
@@ -344,10 +352,96 @@ export async function ensureFunds(db, config, chain, account, neededYocto) {
  * The wallet step is the only difference from the browser path.
  */
 export async function playAction(db, config, chain, user, betId, input, { fetchImpl = fetch } = {}) {
+  if (input.action === 'accept') {
+    const reference = typeof betId === 'string' ? betId.toLowerCase() : betId;
+    return withManagedOperation(db, `managed-accept:${config.nearContract}:${reference}:${user.id}`,
+      'Your stake is still being matched. Retry verification shortly.',
+      (locked) => performPlayAction(locked, config, chain, user, reference, input, { fetchImpl }));
+  }
+  return performPlayAction(db, config, chain, user, betId, input, { fetchImpl });
+}
+
+// Session-scoped because each reservation and verification must commit normally.
+// All work uses this one connection; waiting contenders hold no pool connection.
+async function withManagedOperation(db, key, busyMessage, fn) {
+  const deadline = performance.now() + 5000;
+  const busy = () => new UserError(busyMessage, 409);
+  for (;;) {
+    const remaining = deadline - performance.now();
+    if (remaining <= 0) throw busy();
+    const client = await new Promise((resolve, reject) => {
+      let expired = false;
+      const timer = setTimeout(() => { expired = true; reject(busy()); }, remaining);
+      db.pool.connect((error, connected) => {
+        clearTimeout(timer);
+        if (expired) { connected?.release(); return; }
+        if (error) reject(error);
+        else resolve(connected);
+      });
+    });
+    let locked = false;
+    let releaseError;
+    try {
+      const result = await client.query('select pg_try_advisory_lock(hashtextextended($1, 0)) as locked', [key]);
+      locked = result.rows[0].locked;
+      if (locked) {
+        const bound = {
+          query: (sql, params) => client.query(sql, params),
+          one: async (sql, params) => (await client.query(sql, params)).rows[0] || null,
+          many: async (sql, params) => (await client.query(sql, params)).rows,
+          async tx(work) {
+            await client.query('begin');
+            try {
+              const value = await work(bound);
+              await client.query('commit');
+              return value;
+            } catch (error) {
+              await client.query('rollback');
+              throw error;
+            }
+          },
+        };
+        return await fn(bound);
+      }
+    } finally {
+      try {
+        if (locked) await client.query('select pg_advisory_unlock(hashtextextended($1, 0))', [key]);
+      } catch (error) { releaseError = error; throw error; }
+      finally { client.release(releaseError); }
+    }
+    await new Promise((resolve) => setTimeout(resolve, Math.min(50, Math.max(0, deadline - performance.now()))));
+  }
+}
+
+async function performPlayAction(db, config, chain, user, betId, input, { fetchImpl }) {
   assertPlay(config);
   const account = await playAccountFor(db, user.x_user_id);
   if (!account?.ready) throw new UserError('This person has no play account yet.', 409);
   secretOf(config, account);
+  if (input.action === 'accept') {
+    if (!inPilot(config, user.x_user_id)) throw new UserError('Bets with real NEAR are invite-only for now.', 403);
+    const bet = await syncNearBet(db, config, user, betId, { fetchImpl });
+    const request = await db.one(`select * from bilateral_near_requests
+      where bet_id=$1 and user_id=$2 and wallet_account=$3 and method='accept_bet'
+      and metadata->>'contract'=$4 order by created_at, id limit 1`,
+    [betId, user.id, account.account_id, config.nearContract]);
+    const exact = request && input.termsHash === bet.terms_hash && request.args.id === betId
+      && request.args.binding_hash === request.binding_hash && request.metadata.depositYocto === bet.stake_yocto;
+    if (exact && String(bet.acceptor_user_id) === String(user.id) && bet.acceptor_wallet === account.account_id
+      && bet.chain_state?.acceptor_binding_hash === request.binding_hash
+      && ['accepted', 'proposed', 'disputed', 'settled', 'refunded'].includes(bet.chain_state.status)) {
+      return { bet, hash: request.transaction_hash, status: 'succeeded' };
+    }
+    // An interrupted finalized lookup can be checked again, but its signed
+    // transaction must not be replaced by a second broadcast while unresolved.
+    if (exact && bet.status === 'offered' && bet.chain_state?.status === 'offered'
+      && request.transaction_hash && request.execution_status !== 'failed') {
+      const verified = await verifyBetTransaction(db, config, user, betId,
+        { requestId: request.id, transactionHash: request.transaction_hash }, { fetchImpl });
+      if (verified.status === 'failed') throw new UserError(`NEAR rejected that: ${verified.explanation}`, 409);
+      return { bet: await syncNearBet(db, config, user, betId, { fetchImpl }), hash: request.transaction_hash, status: verified.status };
+    }
+  }
   const prepared = await prepareNearAction(db, config, user, betId, { ...input, accountId: account.account_id }, { fetchImpl });
   const sign = async (tx, current) => {
     const secret = secretOf(config, current);
