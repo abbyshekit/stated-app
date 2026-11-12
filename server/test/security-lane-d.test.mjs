@@ -421,11 +421,10 @@ test('public export HTTP route is bounded and rate limited before owner/export q
   assert.equal(queries, before);
   assert.equal((await fetch(`${base}/api/desk/export.json`)).status, 429);
   assert.equal((await fetch(`${base}/bets/00000000-0000-4000-8000-000000000001/enclave-ruling.json`)).status, 429);
-  assert.equal((await fetch(`${base}/bets/00000000-0000-4000-8000-000000000001/ruling`)).status, 429);
   assert.equal(queries, before, 'exports and ruling JSON share one budget');
 });
 
-test('ruling HTML consumes the same heavy-read budget as ruling JSON before querying', async t => {
+test('ruling HTML has its own page budget, refuses a flood before querying, and leaves the JSON budget alone', async t => {
   let queries = 0;
   const db = {
     tx: fn => fn(db),
@@ -433,14 +432,19 @@ test('ruling HTML consumes the same heavy-read budget as ruling JSON before quer
   };
   const base = await serving(t, createApp({ db, config: loadConfig({ STATED_BASE_URL: 'http://localhost' }) }));
   const path = '/bets/00000000-0000-4000-8000-000000000001';
-  for (let i = 0; i < 10; i += 1) assert.equal((await fetch(`${base}${path}/ruling`)).status, 404);
-  const before = queries;
-  for (const suffix of ['/ruling', '/enclave-ruling.json']) {
-    const refused = await fetch(`${base}${path}${suffix}`);
-    assert.equal(refused.status, 429);
-    assert.ok(Number(refused.headers.get('retry-after')) > 0);
+  let allowed = 0; let refused = null; let before = 0;
+  for (let i = 0; i < 120 && !refused; i += 1) {
+    before = queries;
+    const res = await fetch(`${base}${path}/ruling`);
+    if (res.status === 429) refused = res;
+    else { assert.equal(res.status, 404); allowed += 1; }
   }
-  assert.equal(queries, before);
+  assert.ok(allowed >= 60, `a reader gets at least 60 pages before the budget (${allowed})`);
+  assert.ok(refused, 'a flood of ruling pages is refused');
+  assert.ok(Number(refused.headers.get('retry-after')) > 0);
+  assert.match(refused.headers.get('content-type') || '', /text\/html/);
+  assert.equal(queries, before, 'the refused page made no query');
+  assert.equal((await fetch(`${base}${path}/enclave-ruling.json`)).status, 404, 'reading pages does not use up the JSON budget');
 });
 
 test('public profile HTML and API show bounded pages with a next-page link', async t => {

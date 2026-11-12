@@ -123,21 +123,21 @@ function evidenceFold(record) {
   </details>`;
 }
 
-export function registerBetRulingRoutes({ route, db, config, layout, send, notFound, allowHeavyRead = null, readRuling = readEnclaveRuling }) {
-  const fallbackBudget = createReadLimiter({ railway: config.hosted && Boolean(process.env.RAILWAY_ENVIRONMENT) });
+export function registerBetRulingRoutes({ route, db, config, layout, send, notFound, readRuling = readEnclaveRuling }) {
+  // A ruling page is read by people, so it has its own per-address budget: generous enough that a reader
+  // never meets it, separate from the export and JSON budget so neither can use up the other. Repeat
+  // reads reuse the verified-record cache; the budget bounds a flood of cache misses.
+  const pageBudget = createReadLimiter({ railway: config.hosted && Boolean(process.env.RAILWAY_ENVIRONMENT), capacity: 60, refillMs: 1000 });
   // Match web.mjs static handling, restricted to the bundled model logos.
   route('GET', /^\/static\/models\/(qwen|deepseek|zai)\.svg$/, (ctx) => {
     ctx.res.writeHead(200, { 'content-type': 'image/svg+xml', 'cache-control': 'public, max-age=86400', 'x-content-type-options': 'nosniff' });
     ctx.res.end(MODEL_LOGOS.get(ctx.params[0]));
   });
   route('GET', new RegExp(`^/bets/${ID}/ruling$`), async (ctx) => {
-    if (allowHeavyRead) {
-      if (!allowHeavyRead(ctx)) return;
-    } else {
-      const budget = fallbackBudget(ctx.req);
-      if (!budget.allowed) return send(ctx.res, 429, JSON.stringify({ error: 'Too many downloads. Retry after the indicated delay.' }), {
-        kind: 'private', headers: { 'content-type': 'application/json; charset=utf-8', 'retry-after': String(budget.retryAfter) },
-      });
+    const budget = pageBudget(ctx.req);
+    if (!budget.allowed) {
+      return send(ctx.res, 429, await layout(ctx, 'Too many requests', html`<p class="gut">Too many pages from one address. Try again in ${budget.retryAfter} seconds.</p>`),
+        { kind: 'private', headers: { 'retry-after': String(budget.retryAfter) } });
     }
     const result = await db.tx(async tx => {
       let record;
