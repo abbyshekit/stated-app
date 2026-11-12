@@ -52,14 +52,15 @@ export function nextBetTime(value, now = Date.now()) {
   const clock = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'UTC', hour: '2-digit', minute: '2-digit',
   }).format(date);
-  const day = dayMonth(date, { year: date.getUTCFullYear() !== new Date(now).getUTCFullYear() });
+  const day = dayMonth(date);
   if (left > 0 && left < 2 * 86400000) {
     const minutes = left < 3600000;
     const count = Math.ceil(left / (minutes ? 60000 : 3600000));
     const unit = minutes ? 'minute' : 'hour';
     return `in ${count} ${unit}${count === 1 ? '' : 's'}, ${clock} UTC ${day}`;
   }
-  return `${day}, ${clock} UTC`;
+  if (left > 0) return `in ${Math.ceil(left / DAY)} days, ${clock} UTC ${day}`;
+  return `${clock} UTC ${day}`;
 }
 
 export function betLead(bet, { viewer = null } = {}) {
@@ -123,7 +124,8 @@ export function betBlock(bet, { viewer = null, faces = null, joinHref = null, le
   };
   let pot;
   if (decided) pot = html`<b>${both}</b><small>${unit()}</small><small>${(bet.settled_by || bet.chain_state?.resolution?.method) === 'referee' ? 'won' : 'credited'}</small>`;
-  else if (['settled', 'refunded', 'cancelled', 'expired'].includes(bet.status)) pot = html`<b>${stake}</b><small>${unit()} each</small><small>${funded ? 'escrow closed' : 'not deposited'}</small>`;
+  else if (bet.status === 'refunded' || (bet.status === 'settled' && bet.outcome === 'void' && (bet.settled_by || bet.chain_state?.resolution?.method) === 'referee')) pot = html`<b>${stake}</b><small>${unit()} each</small>`;
+  else if (['settled', 'cancelled', 'expired'].includes(bet.status)) pot = html`<b>${stake}</b><small>${unit()} each</small><small>${funded ? 'escrow closed' : 'not deposited'}</small>`;
   else pot = html`<b>${stake}</b><small>${unit()} each</small>`;
   const head = lead ? betLead(bet, { viewer }) : null;
   return html`${head ? html`<p class="lead">${head.text}${head.aside ? html`<span>${head.aside}</span>` : ''}</p>` : ''}

@@ -114,7 +114,7 @@ async function seedBet(stack, creator, acceptor, now, spec) {
   };
   const record = spec.rulingOutcome ? enclaveRulingFixture({
     source: spec.source, outcome: spec.rulingOutcome, mode: spec.mode || 'ruling',
-    reason: spec.reason, outcomes: spec.outcomes, models: ['Qwen/Qwen3.8-27B', 'Qwen/Qwen3.6-35B-A3B-FP8', 'deepseek-ai/DeepSeek-V4.1-Flash-1017'],
+    reason: spec.reason, outcomes: spec.outcomes, models: ['Qwen/Qwen3.8-27B', 'deepseek-ai/DeepSeek-V4.1-Flash-1017', 'z-ai/glm-5.3-flash'],
     material: { claim: spec.claim, madeAt, deadline, postUrl: source.url,
       bets: [{ id, termsHash }] },
   }) : null;

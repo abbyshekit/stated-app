@@ -1,4 +1,5 @@
 import { isNamedAccount, useNetwork } from './near-network.mjs';
+import { parseReputationTiers } from './reputation.mjs';
 
 // Enclave rulings decide a Result with no human step, so they run only when asked
 // for in so many words (STATED_ENCLAVE_RULINGS=1) and a key is set. A ruling is
@@ -56,6 +57,7 @@ export function loadConfig(env = process.env) {
       treasuryKey: env.STATED_PLAY_TREASURY_KEY || '',
       autoProvision: env.STATED_PLAY_AUTOPROVISION === '1' && !mainnet,
       defaultStakeNear: env.STATED_PLAY_DEFAULT_STAKE || '0.1',
+      reputationTiers: parseReputationTiers(env.STATED_REPUTATION_TIERS),
       // What a new account starts with. On testnet, enough for one full-size Bet. On mainnet
       // it is the operator's own NEAR, so it covers network fees only: a stake is the person's money.
       startNear: env.STATED_PLAY_START_NEAR || (mainnet ? '0.05' : '1.6'),

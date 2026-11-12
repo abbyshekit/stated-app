@@ -9,13 +9,17 @@ import { readEnclaveRuling, quoteSummary } from './enclave-ruling.mjs';
 import { publicPredictionOwner, publicSave } from './store.mjs';
 import { dayMonth } from './marked.mjs';
 import { markedClaim } from './bet-view.mjs';
+import { formatTestNear } from './near-escrow.mjs';
+import { unit } from './near-network.mjs';
 
 const ID = '([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})';
-const MODEL_LOGOS = new Map(['qwen', 'deepseek'].map(family => [family,
+const MODEL_LOGOS = new Map(['qwen', 'deepseek', 'zai'].map(family => [family,
   readFileSync(new URL(`../public/models/${family}.svg`, import.meta.url))]));
 const modelFace = (id) => {
-  const family = id.startsWith('Qwen/') ? 'qwen' : id.startsWith('deepseek-ai/') ? 'deepseek' : null;
-  return family ? html`<span class="face model-logo ${family}" role="img" aria-label="${family === 'qwen' ? 'Qwen' : 'DeepSeek'} logo"></span>`
+  const family = id.startsWith('Qwen/') ? 'qwen' : id.startsWith('deepseek-ai/') ? 'deepseek'
+    : /^(?:z-ai|zai-org)\//.test(id) ? 'zai' : null;
+  const maker = { qwen: 'Qwen', deepseek: 'DeepSeek', zai: 'Z.ai' }[family];
+  return family ? html`<span class="face model-logo ${family}" role="img" aria-label="${maker} logo"></span>`
     : face({ name: modelName(id) });
 };
 const percent = (value) => `${new Decimal(value).times(100).toFixed()}%`;
@@ -28,7 +32,7 @@ const clock = (value) => new Intl.DateTimeFormat('en-GB', {
   timeZone: 'UTC', hour: '2-digit', minute: '2-digit',
 }).format(new Date(value));
 const outcomeWord = (outcome) => outcome === 'yes' ? 'Yes' : outcome === 'no' ? 'No' : 'Undecided';
-const modelName = (id) => id.split('/').at(-1)
+const modelName = (id) => /^(?:z-ai|zai-org)\/glm-5\.3-flash$/i.test(id) ? 'GLM-5.3 Flash' : id.split('/').at(-1)
   .replace(/-(?:A\d+B|FP\d+|BF\d+|Flash|Instruct|Thinking|\d{4,8})(?=-|$)/gi, '')
   .replaceAll('-', ' ');
 const VERIFIED = [
@@ -58,21 +62,42 @@ async function postRow(db, bet, outcome) {
 
 function evidenceLine(record, bet) {
   const evidence = JSON.parse(record.evidence.text);
-  const deadline = `${clock(bet.resolve_at)} UTC, ${dayMonth(bet.resolve_at)}`;
+  const deadline = `${clock(bet.resolve_at)} UTC ${dayMonth(bet.resolve_at)}`;
   if (record.evidence.kind === 'submitted') {
-    const first = record.verdicts[0];
-    return html`“${first.parsed.reason}” <span class="quiet">${modelName(first.model)}</span> Deadline: ${deadline}.`;
+    const counts = new Map();
+    for (const { parsed } of record.verdicts) counts.set(parsed.outcome, (counts.get(parsed.outcome) || 0) + 1);
+    const majority = [...counts].find(([, count]) => count > record.verdicts.length / 2)?.[0];
+    const juror = record.outcome === 'unclear'
+      ? majority && record.verdicts.find(verdict => verdict.parsed.outcome !== majority) : record.verdicts[0];
+    return html`${juror ? html`“${juror.parsed.reason.replace(/[.,!?]+$/, '')},” ${modelName(juror.model)} wrote. ` : ''}The deadline was ${deadline}.`;
   }
   const plan = record.plan.parsed;
   return plan.kind === 'moment'
-    ? `Coinbase ${plan.product} opened at ${price(evidence.summary.priceAtMoment)} at ${clock(plan.start)} UTC, ${dayMonth(plan.start)}; the deadline was ${deadline}.`
-    : `Coinbase ${plan.product} ranged from ${price(evidence.summary.lowestLow)} to ${price(evidence.summary.highestHigh)} before the ${deadline} deadline.`;
+    ? `Coinbase ${plan.product} traded at ${price(evidence.summary.priceAtMoment)} at ${deadline}, the deadline.`
+    : `Coinbase ${plan.product} ranged from ${price(evidence.summary.lowestLow)} to ${price(evidence.summary.highestHigh)} before the deadline, ${deadline}.`;
+}
+
+function rulingLine(record, bet) {
+  if (record.mode === 'review') return record.agrees !== null
+    ? `A Stated reviewer recorded ${outcomeWord(bet.outcome)} on ${dayMonth(bet.result_recorded_at || bet.settled_at)}. The jury ${record.agrees ? 'agreed' : 'disagreed'}.` : '';
+  const settled = ['settled', 'refunded'].includes(bet.status);
+  if (record.outcome === 'unclear') {
+    const counts = new Map();
+    for (const { parsed } of record.verdicts) counts.set(parsed.outcome, (counts.get(parsed.outcome) || 0) + 1);
+    const split = [...counts.values()].sort((a, b) => b - a);
+    return `The NEAR AI enclave jury split ${split[0]} to ${split[1] || 0}. All three must agree, so both stakes ${settled ? 'went' : 'go'} back.`;
+  }
+  const creatorWon = record.outcome === bet.creator_side;
+  const winner = creatorWon ? bet.creator_username : bet.acceptor_username;
+  const loser = creatorWon ? bet.acceptor_username : bet.creator_username;
+  const pot = formatTestNear((BigInt(bet.stake_yocto) * 2n).toString());
+  return `The NEAR AI enclave jury agreed, so ${winner ? `@${winner}` : `the ${record.outcome} side`} ${settled ? 'won' : 'wins'} ${pot} ${unit()} from ${loser ? `@${loser}` : `the ${record.outcome === 'yes' ? 'no' : 'yes'} side`}.`;
 }
 
 function evidenceFold(record) {
   if (record.evidence.kind !== 'submitted') return '';
   const { items } = JSON.parse(record.evidence.text);
-  if (!items.length) return '';
+  if (!items.length) return html`<p class="gut quiet">No links yet.</p>`;
   return html`<details class="fold"><summary>Links, ${items.length}</summary>
     <ul class="posts evidence-list">${items.map(item => {
       let url = null; let host = null;
@@ -88,8 +113,8 @@ function evidenceFold(record) {
 }
 
 export function registerBetRulingRoutes({ route, db, config, layout, send, notFound }) {
-  // Match web.mjs static handling, restricted to the two bundled model logos.
-  route('GET', /^\/static\/models\/(qwen|deepseek)\.svg$/, (ctx) => {
+  // Match web.mjs static handling, restricted to the bundled model logos.
+  route('GET', /^\/static\/models\/(qwen|deepseek|zai)\.svg$/, (ctx) => {
     ctx.res.writeHead(200, { 'content-type': 'image/svg+xml', 'cache-control': 'public, max-age=86400', 'x-content-type-options': 'nosniff' });
     ctx.res.end(MODEL_LOGOS.get(ctx.params[0]));
   });
@@ -113,11 +138,12 @@ export function registerBetRulingRoutes({ route, db, config, layout, send, notFo
     const verified = gpuVerified
       ? [...VERIFIED, 'Each model’s NVIDIA GPU attestation was verified by NVIDIA’s attestation service'] : VERIFIED;
     const evidence = evidenceLine(record, bet);
+    const line = rulingLine(record, bet);
     const body = html`
       <h1 class="visually-hidden">Ruling</h1>
       ${post}
-      <div class="verdict ruling-verdict${record.outcome === 'yes' ? ' yes' : ''}"><h2>NEAR AI enclave jury</h2><b>${outcomeWord(record.outcome)}</b><span>${dayMonth(record.decidedAt, { year: true })}</span></div>
-      ${record.mode === 'review' && record.agrees !== null ? html`<p class="gut quiet">A Stated reviewer recorded ${outcomeWord(bet.outcome)} on ${dayMonth(bet.result_recorded_at || bet.settled_at)}. The jury ${record.agrees ? 'agreed' : 'disagreed'} on ${dayMonth(record.decidedAt)}.</p>` : ''}
+      <div class="verdict ruling-verdict${record.outcome === 'yes' ? ' yes' : ''}"><b>${outcomeWord(record.outcome)}</b><span>${dayMonth(record.decidedAt, { year: true })}</span></div>
+      ${line ? html`<p class="gut quiet">${line}</p>` : ''}
       <ul class="jury-rail">${record.verdicts.map(verdict => html`<li class="seat">
         ${modelFace(verdict.model)}<b>${modelName(verdict.model)}</b><span>${outcomeWord(verdict.parsed.outcome)}, ${percent(verdict.parsed.confidence)} sure</span>
       </li>`)}</ul>
@@ -139,7 +165,7 @@ export function registerBetRulingRoutes({ route, db, config, layout, send, notFo
         ${quotes.map(quote => html`<p class="quiet acct">${quote.role} ${quote.model} <code>${quote.mrtd.slice(0, 16)}</code></p>`)}
       </details>
       </div>
-      <div class="acts"><a class="pill solid big" href="/bets/new?from=${bet.id}">Make your own bet</a></div>`;
+      <div class="acts"><a class="pill solid big" href="/bets/new?from=${bet.id}">${record.mode === 'ruling' && record.outcome === 'unclear' && ['settled', 'refunded'].includes(bet.status) ? 'Make another bet' : 'Make your own bet'}</a></div>`;
     send(ctx.res, 200, await layout(ctx, 'Ruling', body, { flush: true, back: `/bets/${bet.id}`, signin: false }));
   });
 }

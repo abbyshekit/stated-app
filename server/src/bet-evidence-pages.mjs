@@ -69,7 +69,7 @@ export function registerBetEvidenceRoutes({ route, db, config, layout, needPost,
       : error?.message === 'Evidence is unavailable.' ? 'Links are unavailable.' : error?.message;
     const body = html`
       <h1 class="visually-hidden">Links</h1>
-      <ul class="posts"><li class="prow">${face({ url: authorPicture, name: author })}<div>
+      <ul class="posts evidence-post"><li class="prow">${face({ url: authorPicture, name: author })}<div>
         <p class="pwho"><b>${author}</b>${handle && `@${handle}` !== author ? html`<span>@${handle}</span>` : ''}</p>
         <p class="said">${bet.claim}</p>
       </div></li></ul>

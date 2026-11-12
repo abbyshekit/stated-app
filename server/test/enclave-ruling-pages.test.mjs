@@ -209,7 +209,7 @@ test('settled rulings, corrections and ambiguous refunds render on both pages', 
   }
   await setChain('settled', 'void');
   await insertRuling({ source: 'evidence', outcome: 'unclear' });
-  await bothContain('The enclave jury could not decide, so both stakes went back.');
+  await bothContain('The NEAR AI enclave jury could not agree, so both stakes went back.');
   for (const page of await pages()) {
     assert.match(page, /<span>Stakes returned<\/span>/);
     assert.doesNotMatch(page, /Agreed void/);

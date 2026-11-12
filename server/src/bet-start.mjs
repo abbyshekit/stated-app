@@ -9,6 +9,7 @@ import { face, facesFor } from './certificate.mjs';
 import { statusIdOf } from './intake.mjs';
 import { dayMonth } from './marked.mjs';
 import { inPilot, network, unit } from './near-network.mjs';
+import { aboveLimit, limitFor, limitHint, limitReply, recordFor } from './reputation.mjs';
 import { recentPublic } from './store.mjs';
 import { effectiveTerms } from './terms.mjs';
 import { isPlaceholder, oembedText } from './xtext.mjs';
@@ -63,6 +64,9 @@ export function registerBetStartRoutes({ route, db, config, layout, send, redire
     const datePreset = ['week', 'month', 'year', 'custom'].includes(q.get('datePreset')) ? q.get('datePreset') : null;
     const postId = statusIdOf(link);
     const go = q.get('go') === '1';
+    const record = ctx.user && postId && config.play.reputationTiers !== null ? await recordFor(db, ctx.user.id) : null;
+    const limit = record ? limitFor(config, record) : null;
+    const hint = record ? limitHint(config, record) : null;
     // Look beyond the recent public list: a pasted post may already have a
     // date, even when its saves are private. Only date presence is used here.
     const held = postId ? await db.one(`select coalesce(st.deadline_at, st.proposed_deadline_at) as deadline
@@ -105,6 +109,7 @@ export function registerBetStartRoutes({ route, db, config, layout, send, redire
     else if (go && !postId) error = BAD_LINK;
     else if (go && !side) error = 'Choose bet yes or bet no.';
     else if (go && !stake) error = `Choose a stake of up to 1 ${unit()}.`;
+    else if (go && limit && aboveLimit(stake, limit)) error = limitReply(config, limit);
     else if (go && needsDate && (!validDate || (effectivePreset === 'year' ? yearUnavailable : chosenDate < minDate || chosenDate > maxDate))) error = 'Choose a date from tomorrow to a year away.';
     else if (go) return redirect(ctx.res, replyComposerUrl(config, bot, postId, stake, side, needsDate ? chosenDate : null));
 
@@ -151,7 +156,8 @@ export function registerBetStartRoutes({ route, db, config, layout, send, redire
     // Then the bet on it. The default stake and one-month date leave the side to the visitor.
     const picked = open.find((row) => statusIdOf(row.source_url) === postId) || null;
     const faces = picked ? await facesFor(db, [picked], ctx.user) : null;
-    const stakeNow = stake || (STAKES.includes(config.play.defaultStakeNear) ? config.play.defaultStakeNear : STAKES[0]);
+    const allowed = STAKES.filter((value) => !limit || !aboveLimit(value, limit));
+    const stakeNow = stake || (allowed.includes(config.play.defaultStakeNear) ? config.play.defaultStakeNear : allowed[0]);
     const postUrl = config.x.simulatedOrigin ? `${config.x.simulatedOrigin}/?c=${postId}` : `https://x.com/i/web/status/${postId}`;
     // The reply is drawn the way X will show it. CSS fills in the side and stake from the
     // two choices below, so the visitor sees the exact words before the composer opens.
@@ -175,7 +181,7 @@ export function registerBetStartRoutes({ route, db, config, layout, send, redire
       <i class="date-week"> by ${replyDate(dateFor('week'))}</i>
       <i class="date-month"> by ${replyDate(dateFor('month'))}</i>
       ${!yearUnavailable ? html`<i class="date-year"> by ${replyDate(yearEnd)}</i>` : ''}
-      <i class="date-custom"> by the date you pick</i>` : '';
+      <i class="date-custom">${validDate && effectivePreset === 'custom' ? html` by ${replyDate(pickedDate)}` : ' by the date you pick'}</i>` : '';
     return page(html`
       <h1 class="visually-hidden">Make a bet</h1>
       <form method="get" action="/bets/new" novalidate>
@@ -198,13 +204,13 @@ export function registerBetStartRoutes({ route, db, config, layout, send, redire
         </div>
         <p class="meta stake-label">Stake each, in ${unit()}</p>
         <div class="seg side-choice" role="radiogroup" aria-label="Stake each, in ${unit()}">
-          ${STAKES.map((value, i) => html`<input type="radio" id="stake-${i}" name="stake" value="${value}"${value === stakeNow ? ' checked' : ''}><label for="stake-${i}">${value}</label>`)}
+          ${STAKES.map((value, i) => html`<input type="radio" id="stake-${i}" name="stake" value="${value}"${value === stakeNow ? ' checked' : ''}${limit && aboveLimit(value, limit) ? ' disabled' : ''}><label for="stake-${i}">${value}</label>`)}
         </div>
-        ${needsDate ? html`<p class="meta stake-label">Deadline</p><div class="seg side-choice date-presets" role="radiogroup" aria-label="Deadline">
+        ${hint ? html`<p class="gut quiet">${hint}</p>` : ''}
+        ${needsDate ? html`<p class="meta stake-label" id="deadline-label">Deadline, 23:59 UTC</p><div class="seg side-choice date-presets" role="radiogroup" aria-labelledby="deadline-label">
           ${[['week', '1 week'], ['month', '1 month'], ...(!yearUnavailable ? [['year', '31 Dec']] : []), ['custom', 'Other']].map(([value, label]) => html`<input type="radio" id="date-${value}" name="datePreset" value="${value}"${effectivePreset === value ? ' checked' : ''}><label for="date-${value}">${label}</label>`)}
         </div><div class="gut custom-date">
-          <label for="bet-date">Deadline</label>
-          <input type="date" id="bet-date" name="date" value="${date}" min="${minDate}" max="${maxDate}">
+          <input type="${effectivePreset === 'custom' && date && !validDate ? 'text' : 'date'}" id="bet-date" name="date" value="${date}" min="${minDate}" max="${maxDate}" aria-labelledby="deadline-label"${error && effectivePreset === 'custom' && (!validDate || chosenDate < minDate || chosenDate > maxDate) ? html` aria-invalid="true"` : ''}>
         </div>` : ''}
         ${error ? html`<p class="err" role="alert">${error}</p>` : ''}
         <div class="acts"><button class="primary big send" type="submit"><span class="need">Choose yes or no</span><span class="go">${X_MARK}Reply ${config.x.simulatedOrigin ? 'in simulated X' : 'on X'}</span></button></div>

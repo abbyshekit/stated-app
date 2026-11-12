@@ -14,8 +14,8 @@ export const BET_STATUS = {
   expired: 'Offer expired', refunded: 'Refund credited', unverified: 'Verification needed',
 };
 export const betTime = (value) => new Intl.DateTimeFormat('en-GB', {
-  timeZone: 'UTC', dateStyle: 'medium', timeStyle: 'short',
-}).format(new Date(value)) + ' UTC';
+  timeZone: 'UTC', hour: '2-digit', minute: '2-digit',
+}).format(new Date(value)) + ` UTC ${dayMonth(value)}`;
 
 
 // DESIGN.md: the Result marks the words, on both the Bet and its ruling page.
@@ -49,7 +49,7 @@ export function betBlock(bet, options = {}) {
       return `<b${handle.length > 13 ? ' class="long-handle"' : ''}>${handle}</b>`;
     }));
   const ruling = ['accepted', 'proposed', 'disputed'].includes(bet.status) && ['yes', 'no'].includes(options.ruling) ? options.ruling : null;
-  const pot = bet.status === 'settled' || ruling;
+  const pot = (bet.status === 'settled' && !refereeVoid) || ruling;
   const body = pot ? raw(String(seats).replace(/<div class="pot">[\s\S]*?<\/div>/,
     String(html`<div class="pot"><b>${formatTestNear((BigInt(bet.stake_yocto) * 2n).toString())}</b><small>${unit()} pot</small></div>`))) : seats;
   return html`${head ? html`<p class="lead">${head.text}${head.aside ? html`<span>${head.aside}</span>` : ''}</p>` : ''}<div class="bet-seats"${ruling ? html` data-ruling="${ruling}"` : ''}>${body}</div>`;

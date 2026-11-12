@@ -5,8 +5,9 @@ import { fingerprint } from './canonical.mjs';
 import { betFor } from './bets.mjs';
 import { notifyBetChange } from './bet-notify.mjs';
 import { reserveNearRequest } from './near-request.mjs';
-import { contractVersion, rpc, STORAGE_FEE_YOCTO, viewCredit, viewEscrowSnapshot, walletPayload } from './near-escrow.mjs';
+import { contractVersion, formatTestNear, rpc, STORAGE_FEE_YOCTO, viewCredit, viewEscrowSnapshot, walletPayload } from './near-escrow.mjs';
 import { inPilot, isAccount, isNamedAccount, networkName } from './near-network.mjs';
+import { assertStakeLimit } from './reputation.mjs';
 import { UserError } from './store.mjs';
 
 const ns = (date) => (BigInt(new Date(date).getTime()) * 1000000n).toString();
@@ -244,6 +245,9 @@ export async function prepareNearAction(db, config, user, id, input, options = {
       method = 'finalize_unanswered';
       args = { ...args, proposal_id: chain.proposal.id, expected_revision: chain.proposal.revision };
     } else throw new UserError('Choose a supported escrow action.');
+  }
+  if (action === 'fund' || action === 'accept') {
+    await assertStakeLimit(db, config, user.id, formatTestNear(bet.stake_yocto));
   }
   const { request, reused } = await reserveNearRequest(db, { bet, user, account, method, args, metadata, depositYocto: deposit, contract });
   const payload = walletPayload({ contract: request.metadata.contract, accountId: request.wallet_account,

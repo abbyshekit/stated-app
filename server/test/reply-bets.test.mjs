@@ -56,7 +56,8 @@ const intents = {
 
 before(async () => {
   near = new FakeNear();
-  s = await startStack({ STATED_NEAR_CONTRACT: 'escrow.testnet', STATED_PLAY: '1', STATED_PLAY_AUTOPROVISION: '1', STATED_PLAY_SETTLE_DELAY_SECONDS: '0' }, { fetchImpl: near.fetchImpl, chain: near.chain, intents });
+  // Keep the original 0.5-stake lifecycle fixtures; reputation tiers have their own suite.
+  s = await startStack({ STATED_NEAR_CONTRACT: 'escrow.testnet', STATED_PLAY: '1', STATED_PLAY_AUTOPROVISION: '1', STATED_PLAY_SETTLE_DELAY_SECONDS: '0', STATED_REPUTATION_TIERS: 'off' }, { fetchImpl: near.fetchImpl, chain: near.chain, intents });
   await s.connectBot(s.fakeX.addUser('500', 'statedbot'));
   X = Object.fromEntries(['lena', 'oskar', 'priya', 'Jun_M', '_odd_'].map((name, i) => [name, s.fakeX.addUser(String(7001 + i), name)]));
   adminB = await s.signIn(s.fakeX.addUser('900', 'reviewer'));
@@ -171,7 +172,7 @@ test('a Bet’s page says what its stake would cost from another chain, as a quo
   assert.match(base.text, /<details class="fold" id="pay" open>/);
   assert.match(base.text, /For 0\.5 NEAR, NEAR Intents quotes <b>1\.81 USDC<\/b> on Base, with an estimated transfer time of 37 seconds\./);
   assert.deepEqual(quoted.calls, [['nep141:base-usdc.omft.near', bet.stake_yocto]], 'the quote is for exactly this stake');
-  assert.match(base.text, /NEAR Intents dry-run quote from 10 Nov 2026, 22:44 UTC\. Requesting a quote moves no funds\./);
+  assert.match(base.text, /NEAR Intents dry-run quote from 22:44 UTC\s10\sNov(?:\s2026)?\. Requesting a quote moves no funds\./);
 
   const eth = await s.browser().get(`/bets/${bet.id}?pay=${encodeURIComponent('nep141:eth.omft.near')}`);
   assert.match(eth.text, /<details class="fold" id="pay" open>/);

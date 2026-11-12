@@ -187,9 +187,8 @@ label.check { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10
 .verdict span { color: var(--dim); font-size: 15px; }
 .verdict .tl { font-size: 15px; color: var(--dim); min-height: 36px; align-self: center; }
 /* DESIGN.md: the jury's faces carry the verdict; its technical detail stays folded. */
-.ruling-post .prow .said { display: block; overflow: visible; -webkit-line-clamp: unset; }
+.ruling-post .prow .said, .evidence-post .prow .said { display: block; overflow: visible; -webkit-line-clamp: unset; }
 .ruling-verdict { flex-wrap: wrap; gap: 8px 12px; }
-.ruling-verdict h2 { margin: 0; font-size: 17px; font-weight: 400; }
 .ruling-verdict > span { font-size: 14px; }
 .jury-rail { list-style: none; margin: 0; padding: 24px 16px 8px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .jury-rail .seat { grid-template-rows: auto 1fr auto; }
@@ -198,8 +197,10 @@ label.check { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10
 .jury-rail .seat .model-logo { border-radius: 0; background: var(--ink); mask-position: center; mask-size: contain; mask-repeat: no-repeat; }
 .model-logo.qwen { mask-image: url('/static/models/qwen.svg'); }
 .model-logo.deepseek { mask-image: url('/static/models/deepseek.svg'); }
+.model-logo.zai { mask-image: url('/static/models/zai.svg'); }
 @media (prefers-color-scheme: light) {
   .verdict.yes b { color: var(--ink); }
+  .ruling-verdict.yes b { background: var(--mark); color: var(--on-mark); }
 }
 .proof { display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; padding: 4px 16px 12px; margin: 0; border-bottom: 1px solid var(--line); font-size: 15px; min-height: 0; }
 .proof:empty { padding: 6px 0; }
@@ -455,10 +456,17 @@ input.bad[aria-invalid="true"],
 @media (max-width: 420px) { .seat b { font-size: 15px; } }
 .bet-seats .seat b { overflow-wrap: anywhere; }
 .bet-seats .seat b.long-handle { font-size: 13px; white-space: nowrap; overflow-wrap: normal; max-width: 100%; }
-/* DESIGN.md: below 360 the full handle wraps within its seat, without a spacer. */
+/* DESIGN.md: below 360 the stake sits above two full-width seats and the jury uses rows. */
 @media (max-width: 359px) {
-  .bet-seats .seat b.long-handle { white-space: normal; overflow-wrap: anywhere; }
-  .jury-rail .seat b { font-size: 14px; white-space: nowrap; }
+  .bet-seats .versus { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 0; }
+  .bet-seats .pot { grid-column: 1 / -1; grid-row: 1; padding-top: 0; }
+  .bet-seats .seat { grid-row: 2; }
+  .bet-seats .seat b.long-handle { white-space: nowrap; overflow-wrap: normal; }
+  .jury-rail { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .jury-rail .seat { grid-template-columns: 32px minmax(0, 1fr) auto; grid-template-rows: auto; align-items: center; gap: 8px; }
+  .jury-rail .seat .face { width: 32px; height: 32px; margin: 0; font-size: 16px; }
+  .jury-rail .seat b { font-size: 14px; justify-self: start; white-space: nowrap; }
+  .jury-rail .seat > span:last-child { white-space: nowrap; font-size: 13px; }
 }
 
 /* The reply that makes a bet, set as the thing to type. */
@@ -588,7 +596,9 @@ form:not(:has(input[name="side"]:checked)) .send { opacity: 0.45; }
 /* DESIGN.md: side, stake and deadline use the same outline choice. */
 .seg.side-choice { background: none; border: 0; border-radius: 0; padding: 0; gap: 8px; }
 .seg.side-choice label { border: 1px solid var(--line); color: var(--ink); min-height: 44px; font-weight: 400; }
-.seg.side-choice input:checked + label { background: var(--ink); color: var(--ground); border-color: var(--ink); }
+.seg.side-choice input:checked + label { background: none; color: var(--ink); border-color: var(--ink); font-weight: 700; }
+/* DESIGN.md: unavailable stakes keep the existing quiet tokens and control size. */
+.seg.side-choice input:disabled + label { color: var(--dim); background: var(--ground); border-color: var(--line); cursor: default; }
 .tl.unread { font-size: 14px; overflow-wrap: anywhere; }
 /* The paste button appears once the field holds a link. */
 form:not(:has(#bet-link:valid)) .acts.paste { display: none; }

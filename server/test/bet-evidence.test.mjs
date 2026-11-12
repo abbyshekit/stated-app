@@ -287,7 +287,7 @@ test('the private evidence form fetches a local article and preserves a failed l
   const form = await acceptorBrowser.get(path);
   assert.equal(form.status, 200);
   assert.match(form.text, /<span class="page-title">Links<\/span>/);
-  assert.match(form.text, /Links close (?:in \d+ (?:minutes?|hours?), \d{2}:\d{2} UTC \d{1,2} [A-Z][a-z]{2}|\d{1,2} [A-Z][a-z]{2}(?: \d{4})?, \d{2}:\d{2} UTC)\. The jury reads the text saved from each page\./);
+  assert.match(form.text, /Links close (?:in \d+ (?:minutes?|hours?|days?), )?\d{2}:\d{2} UTC \d{1,2} [A-Z][a-z]{2}\. The jury reads the text saved from each page\./);
   assert.match(form.text, /<form\b/i);
   assert.match(form.text, /name="(?:url|link)"/i);
   assert.match(form.text, /type="hidden" name="side" value="no"/);

@@ -1,7 +1,7 @@
 // The Marked presentation helpers: how long until we find out, and the two-seat Bet block.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { betLead, betState, dayMonth, timeLeft } from '../src/marked.mjs';
+import { betLead, betState, dayMonth, nextBetTime, timeLeft } from '../src/marked.mjs';
 import { betBlock } from '../src/bet-view.mjs';
 
 const NOW = Date.UTC(2026, 10, 10, 15, 0, 0);
@@ -44,7 +44,11 @@ test('betState: open needs funding and an unexpired offer; decided needs an agre
 
 test('betLead speaks to the reader: a dare to a visitor, a status to the person who made it', () => {
   assert.equal(betLead(bet()).text, '@priya dares you');
-  assert.match(betLead(bet()).aside, /^Offer closes (?:in \d+ (?:minutes?|hours?), \d{2}:\d{2} UTC \d{1,2} \w{3}|\d{1,2} \w{3}(?: \d{4})?, \d{2}:\d{2} UTC)$/);
+  assert.match(betLead(bet()).aside, /^Offer closes in \d+ days, \d{2}:\d{2} UTC \d{1,2} \w{3}$/);
+  assert.equal(nextBetTime('2026-11-10T15:10:00Z', NOW), 'in 10 minutes, 15:10 UTC 10 Nov');
+  assert.equal(nextBetTime('2026-11-11T15:00:00Z', NOW), 'in 24 hours, 15:00 UTC 11 Nov');
+  assert.equal(nextBetTime('2026-11-15T15:00:00Z', NOW), 'in 5 days, 15:00 UTC 15 Nov');
+  assert.equal(nextBetTime('2026-11-09T15:00:00Z', NOW), '15:00 UTC 9 Nov');
   assert.equal(betLead(bet(), { viewer: { x_username: 'Priya' } }).text, 'Your bet is open');
   assert.equal(betLead(bet({ funded: false })).text, 'Not funded yet');
   assert.equal(betLead(bet({ accept_by: past() })).text, 'Nobody took this one');
@@ -111,6 +115,8 @@ test('betBlock: an agreed result rings the winner in ink; only a Prediction that
     const voided = bet({ status: 'settled', outcome: 'void', acceptor_username: 'oskar', ...method });
     assert.match(text(betBlock(voided)), /<span>Stakes returned<\/span>/);
     assert.doesNotMatch(text(betBlock(voided)), /Agreed void|seat won|seat lost/);
+    assert.match(text(betBlock(voided)), /<b>0\.1<\/b><small>test NEAR each<\/small><\/div>/);
+    assert.doesNotMatch(text(betBlock(voided)), /escrow closed|test NEAR pot/);
     assert.doesNotMatch(text(betBlock(voided, { lead: false })), /Stakes returned|class="lead"/);
   }
 });

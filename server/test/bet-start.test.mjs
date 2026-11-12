@@ -119,9 +119,10 @@ test('a chosen post asks for a side with the smallest stake and a month chosen',
   assert.match(page.text, /<p class="lead">Bet on this post<\/p>/);
   assert.match(page.text, /<nav aria-label="More"><a href="\/search">Search<\/a><a href="\/privacy">Privacy<\/a><\/nav>/);
   assert.match(page.text, /<p class="meta stake-label">Your side<\/p>\s*<div class="seg side-choice"/);
-  for (const label of ['Stake each, in test NEAR', 'Deadline']) {
-    assert.match(page.text, new RegExp(`<p class="meta stake-label">${label}</p>\\s*<div class="seg side-choice`));
-  }
+  assert.match(page.text, /<p class="meta stake-label">Stake each, in test NEAR<\/p>\s*<div class="seg side-choice/);
+  assert.match(page.text, /<p class="meta stake-label" id="deadline-label">Deadline, 23:59 UTC<\/p>\s*<div class="seg side-choice/);
+  assert.equal((page.text.match(/>Deadline\b/g) || []).length, 1, 'one Deadline label');
+  assert.doesNotMatch(page.text, /<label for="bet-date">/);
   assert.match(page.text, /type="date" id="bet-date" name="date" value="" min="\d{4}-\d{2}-\d{2}" max="\d{4}-\d{2}-\d{2}"/);
   assert.match(page.text, /<span class="need">Choose yes or no<\/span><span class="go">[\s\S]*?Reply on X<\/span><\/button>/, 'the button asks for a side until one is chosen');
   assert.doesNotMatch(page.text, /href="\/signin/, 'nothing on this path offers a sign-in it does not need');
@@ -198,6 +199,12 @@ test('a bad link, side or stake stays on the page with the reason and what was t
   assert.equal(noSide.location, null);
   assert.match(noSide.text, /<p class="err" role="alert">Choose bet yes or bet no\.<\/p>/);
   assert.match(noSide.text, /name="stake" value="0\.5" checked/, 'the chosen stake is kept');
+  const invalidDate = await s.browser().request('GET', `/bets/new?link=${post}&side=no&stake=0.25&datePreset=custom&date=2026-02-31&go=1`);
+  assert.equal(invalidDate.status, 400);
+  assert.match(invalidDate.text, /type="text" id="bet-date" name="date" value="2026-02-31"[^>]*aria-invalid="true"/);
+  assert.match(invalidDate.text, /name="side" value="no" required checked/);
+  assert.match(invalidDate.text, /name="stake" value="0\.25" checked/);
+  assert.match(invalidDate.text, /name="datePreset" value="custom" checked/);
   for (const query of [`link=${post}&side=maybe&stake=0.1&go=1`, `link=${post}&side=no&stake=5&go=1`, `link=${post}&side=no&stake=0.1%20no&go=1`]) {
     const res = await s.browser().request('GET', `/bets/new?${query}`);
     assert.equal(res.status, 400, query);

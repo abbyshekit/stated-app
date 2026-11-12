@@ -12,7 +12,7 @@ import { publishPublicResultEvidence } from './bet-result-evidence.mjs';
 import { readAttestedCheck, runAttestedCheck, verificationRecipe } from './attested-check.mjs';
 import { readEnclaveRuling } from './enclave-ruling.mjs';
 import { courtLine } from './court-pages.mjs';
-import { betBlock, betList, betShareLink, betTerms, displayBetStatus, markedClaim, nextBetTime } from './bet-view.mjs';
+import { betBlock, betList, betShareLink, betTerms, betTime, displayBetStatus, markedClaim, nextBetTime } from './bet-view.mjs';
 import { facesByUsername } from './certificate.mjs';
 import { betLead, betState, dayMonth } from './marked.mjs';
 import { formatTestNear, STORAGE_FEE_YOCTO } from './near-escrow.mjs';
@@ -26,14 +26,13 @@ import { tokenChoices } from './play-pages.mjs';
 import { nearUp, shortAmount } from './intents.mjs';
 import { accountLink, inPilot, network, networkName, transactionLink, unit } from './near-network.mjs';
 import { X_MARK } from './bet-view.mjs';
+import { aboveLimit, limitFor, limitHint, recordFor } from './reputation.mjs';
 
 const ID = '([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})';
 const STATUS = { offered: 'Awaiting acceptance', expired: 'Offer expired', accepted: 'Stakes escrowed', proposed: 'Result proposed', disputed: 'Result disputed', settled: 'Result agreed', cancelled: 'Offer cancelled', refunded: 'Stakes refunded' };
 const OUTCOME = { yes: 'Came true', no: 'Did not come true', void: 'Void, no winner' };
 const STAKES = ['0.1', '0.25', '0.5', '1'];
-const time = (value) => new Intl.DateTimeFormat('en-GB', {
-  timeZone: 'UTC', dateStyle: 'medium', timeStyle: 'short',
-}).format(new Date(value)) + ' UTC';
+const time = betTime;
 const utc = (value) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/.test(value) ? `${value}${value.length === 16 ? ':00' : ''}Z` : value;
 const otherSide = (bet) => (bet.creator_side === 'yes' ? 'no' : 'yes');
 const enclaveRecipe = `Run node scripts/verify-enclave-ruling.mjs <baseUrl> <betId>. Use verifyEnclaveRecord to check signed request and response hashes, model signatures, material and evidence. Re-fetch Coinbase candles or inspect submitted links and text hashes; compare the public Result. Hardware verification is separate: ${verificationRecipe.verificationCenter}.`;
@@ -77,7 +76,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
     if (evidencePhase(bet)) return { text: participant ? 'Links are open' : 'Both sides are in', aside: `Links close ${nextBetTime(bet.evidence.closesAt)}` };
     return juryDecides(bet) && !bet.enclave && bet.evidence && !bet.evidence.open
       && ['accepted', 'proposed', 'disputed'].includes(bet.status)
-      ? { text: 'The jury is deciding', aside: 'Links are closed' } : null;
+      ? { text: 'The NEAR AI enclave jury is deciding', aside: 'Links are closed' } : null;
   };
   const copyBetLink = (bet) => html`
     <a class="tl" id="bet-link" href="${config.baseUrl}${pathFor(bet.id)}">Bet link</a>
@@ -141,7 +140,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
         line = 'A reviewer corrected the enclave’s ruling.';
       } else if (ruling.outcome === 'unclear') {
         line = ['settled', 'refunded'].includes(bet.status) && (bet.outcome === 'void' || bet.status === 'refunded')
-          ? 'The enclave jury could not decide, so both stakes went back.' : 'The enclave jury could not decide.';
+          ? 'The NEAR AI enclave jury could not agree, so both stakes went back.' : 'The enclave jury could not decide.';
       } else {
         line = `A NEAR AI enclave jury ruled from ${source}.`;
       }
@@ -152,7 +151,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
     const items = bet.evidence?.items || [];
     const privateCount = bet.evidence?.privateItemCount || 0;
     const evidenceLabel = `Links, ${items.length}`;
-    const evidence = (items.length || privateCount || bet.evidence?.open) ? fold(evidenceLabel, html`<ul>${items.map(item => {
+    const evidence = (items.length || privateCount) ? fold(evidenceLabel, html`<ul>${items.map(item => {
       let url = null; let host = null; let postedHost = null;
       try {
         const parsed = new URL(item.url);
@@ -161,7 +160,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
         if (host && posted.host !== host) postedHost = posted.host;
       } catch { /* Old stored links still render as text. */ }
       return html`<li><p>Bet ${item.side}: ${url ? html`<a class="tl" href="${url}" rel="noopener noreferrer">${item.title || host}</a>` : item.title || item.url}${item.by ? `, @${item.by}` : ''}${host ? html` <span class="quiet">${host}</span>` : ''}${postedHost ? html` <span class="quiet">posted as ${postedHost}</span>` : ''}</p></li>`;
-    })}</ul>${!items.length && !privateCount ? html`<p class="quiet">Links from both sides appear here.</p>` : ''}${privateCount ? html`<p class="quiet">and ${privateCount} ${privateCount === 1 ? 'link from a private bet' : 'links from private bets'}</p>` : ''}`) : '';
+    })}</ul>${privateCount ? html`<p class="quiet">and ${privateCount} ${privateCount === 1 ? 'link from a private bet' : 'links from private bets'}</p>` : ''}`) : bet.evidence ? html`<p class="gut quiet">No links yet.</p>` : '';
     return html`${await courtLine(db, config, chain, bet)}${line ? html`<p class="gut">${line}</p>${ruling && !privateCount ? html`<div class="gut link-row"><a class="tl" href="/bets/${bet.id}/ruling">See the ruling</a></div>` : ''}`
       : check ? html`<p class="gut">NEAR AI signed second opinion: ${check.model} read the links and ${check.verdict.agrees ? 'agrees' : 'disagrees'}. <a class="tl" href="/bets/${bet.id}/attested-check.json">Verify</a></p>` : ''}${evidence}`;
   }
@@ -237,13 +236,22 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
       <script src="/static/pay.js?v=${payVersion}" defer></script>`;
   }
 
+  async function takeLimit(ctx, bet) {
+    if (!ctx.user || config.play?.reputationTiers === null) return null;
+    const record = await recordFor(db, ctx.user.id);
+    const limit = limitFor(config, record);
+    return aboveLimit(formatTestNear(bet.stake_yocto), limit)
+      ? limitHint(config, record) || `Your limit is ${limit} ${unit()}.` : null;
+  }
+
   async function publicPage(ctx, bet) {
     const join = `${pathFor(bet.id)}?join=1#accept`;
     const { open, expired } = betState(bet);
     const take = otherSide(bet);
     const eligible = !ctx.user || inPilot(config, ctx.user.x_user_id);
     const mine = Boolean(ctx.user?.x_username && bet.creator_username && ctx.user.x_username.toLowerCase() === bet.creator_username.toLowerCase());
-    const reply = open && eligible && !mine && bet.referee_wallet ? await replyToOffer(bet) : '';
+    const limited = open && eligible && !mine ? await takeLimit(ctx, bet) : null;
+    const reply = open && eligible && !mine && !limited && bet.referee_wallet ? await replyToOffer(bet) : '';
     const followPrimary = !pendingRuling(bet) && (['accepted', 'proposed', 'disputed'].includes(bet.status)
       || (open && ctx.user && ctx.url.searchParams.get('follow') === '1'));
     const following = ctx.user && (followPrimary || ctx.url.searchParams.get('done') === 'following')
@@ -260,10 +268,11 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
     const share = betShareLink(config.baseUrl, bet, { mine: false, ghost: Boolean(next || start), label: pendingRuling(bet) ? 'Post the result' : null });
     let primary = share;
     if (next) primary = html`<a class="pill solid big" href="${pathFor(next.id)}">Take another bet</a>`;
-    if (start) primary = html`<a class="pill solid big" href="${start}">Make your own bet</a>`;
+    if (start) primary = html`<a class="pill solid big" href="${start}">${bet.enclave?.mode === 'ruling' && bet.enclave.outcome === 'unclear' && (bet.status === 'refunded' || bet.outcome === 'void') ? 'Make another bet' : 'Make your own bet'}</a>`;
     if (followPrimary) primary = following ? '' : follow;
     else if (open) {
       if (!eligible) primary = html`<p class="stakes">Bets with real NEAR are invite-only for now.</p>`;
+      else if (limited) primary = html`<p class="quiet" id="accept">${limited}</p>`;
       else primary = ctx.user ? html`<a class="pill solid big" href="${join}">Bet ${take}</a>`
         : html`<a class="pill solid big" href="/signin?return=${encodeURIComponent(join)}">${X_MARK}Sign in to bet ${take}</a>`;
     }
@@ -275,7 +284,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
       <h1 class="visually-hidden" data-bet-outcome="${bet.outcome || (bet.status === 'refunded' ? 'void' : 'pending')}" data-bet-claim="${bet.claim}" data-bet-deadline="${bet.resolve_at}" data-bet-terms-hash="${bet.terms_hash}">Bet: ${bet.claim}</h1>
       <div class="pri">${await sourceHeader(null, bet)}
       <p class="${claimClass(bet.claim)}">${claimWords(bet, recordedRuling(bet))}</p></div>
-      ${betBlock(bet, { heading: phaseHeading(bet, ctx.user), ruling: pendingRuling(bet), cameTrue: recordedRuling(bet) === 'yes', viewer: ctx.user, faces: await faces(ctx, bet), joinHref: open && eligible ? join : null })}
+      ${betBlock(bet, { heading: phaseHeading(bet, ctx.user), ruling: pendingRuling(bet), cameTrue: recordedRuling(bet) === 'yes', viewer: ctx.user, faces: await faces(ctx, bet), joinHref: open && eligible && !limited ? join : null })}
       ${proof}
       ${evidence ? html`<p class="gut">${evidence.note}</p><p class="proof"><a class="tl" href="${evidence.url}" rel="noopener noreferrer">Result source</a></p>` : ''}
       ${await enclaveDetail(bet)}
@@ -529,6 +538,8 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
     const evidencePrimary = participant && published && evidencePhase(published);
     const lost = juryRefereed && participant && bet.status === 'settled' && ['yes', 'no'].includes(bet.outcome)
       && bet.outcome !== (creator ? bet.creator_side : otherSide(bet));
+    const juryRefunded = juryRefereed && participant && published?.enclave?.mode === 'ruling'
+      && published.enclave.outcome === 'unclear' && (bet.status === 'refunded' || (bet.status === 'settled' && bet.outcome === 'void'));
     const presentation = published ? { ...bet, enclave: published.enclave, evidence: published.evidence,
       result_recorded_at: published.result_recorded_at } : bet;
     const invite = `${config.baseUrl}${pathFor(bet.id)}`;
@@ -552,8 +563,12 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
     let walletAlternative = '';
     let refundPrimary = false;
     const needsStake = creator ? !bet.chain_state : Boolean(bet.chain_state);
+    const limited = !creator && bet.status === 'offered' && !expired && bet.chain_state
+      ? await takeLimit(ctx, bet) : null;
     if (!eligible && bet.status === 'offered' && !expired && needsStake) {
       primary = html`<p class="stakes">Bets with real NEAR are invite-only for now.</p>`;
+    } else if (limited) {
+      primary = html`<p class="gut quiet" id="accept">${limited}</p>`;
     } else if (creator && bet.status === 'offered' && !expired && !bet.chain_state) {
       primary = html`${awaitingWallet ? walletReturnInstruction : html`<p class="stakes">Deposit ${formatTestNear((BigInt(bet.stake_yocto) + BigInt(STORAGE_FEE_YOCTO)).toString())} ${unit()}: your ${formatTestNear(bet.stake_yocto)} stake and a ${formatTestNear(STORAGE_FEE_YOCTO)} storage fee.</p>`}
         <div class="acts"><form method="post" action="${pathFor(bet.id)}/fund">${csrfField(ctx)}${walletField(knownWallet)}<button class="${pendingDeposit ? 'big' : 'primary big'}" type="submit">${awaitingWallet ? 'Continue in wallet' : 'Deposit stake'}</button></form></div>`;
@@ -597,7 +612,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
     if (evidencePrimary) {
       primary = html`<div class="acts"><a class="pill solid big" href="${pathFor(bet.id)}/evidence">Add a link</a>
         <div class="two">${betShareLink(config.baseUrl, published, { mine: creator, ghost: true, label: 'Post on X' })}</div></div>`;
-    } else if (lost && published && !primary) {
+    } else if ((lost || juryRefunded) && published && !primary) {
       primary = html`<div class="acts"><a class="pill solid big" href="/bets/new?from=${bet.id}">Make another bet</a>
         <div class="two">${betShareLink(config.baseUrl, published, { mine: creator, ghost: true, label: 'Post the result' })}</div></div>`;
     }
@@ -618,7 +633,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
         ${played && credit && withdrawal.request?.execution_status !== 'succeeded'
           ? html`<p class="stakes left" role="status">Your payout is being sent to your Stated account.</p>` : ''}
         ${played && withdrawal.request?.execution_status === 'succeeded'
-          ? html`<p class="stakes left">Paid to your account. <a href="${transactionLink(withdrawal.request.transaction_hash)}" rel="noopener noreferrer">See it on NEAR</a> or open your <a href="/me/wallet">wallet</a>.</p>`
+          ? html`<p class="stakes left">Paid to your account.</p><div class="gut link-row"><a class="tl" href="${transactionLink(withdrawal.request.transaction_hash)}" rel="noopener noreferrer">See it on NEAR</a></div>`
           : html`${withdrawal.request?.execution_message ? html`<p class="notice" role="status">${withdrawal.request.execution_message}</p>` : ''}
         ${withdrawal.request?.transaction_hash ? html`<p class="notice"><a href="${transactionLink(withdrawal.request.transaction_hash)}" rel="noopener noreferrer">View transaction</a></p>` : ''}`}
         ${withdrawal.creditYocto === null ? html`<p class="notice">Withdrawal credit could not be checked. Verify the escrow to retry.</p>`
@@ -639,7 +654,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
       <h1 class="visually-hidden">Bet: ${bet.claim}</h1>
       ${await sourceHeader(ctx.user, bet)}
       <p class="${claimClass(bet.claim)}">${claimWords(presentation, recordedRuling(presentation))}</p>
-      ${betBlock(bet, { heading: phaseHeading(presentation, ctx.user), ruling: pendingRuling(presentation), cameTrue: recordedRuling(presentation) === 'yes', viewer: ctx.user, faces: await faces(ctx, bet), joinHref: eligible && bet.status === 'offered' && bet.chain_state && !creator ? '#accept' : null })}
+      ${betBlock(bet, { heading: phaseHeading(presentation, ctx.user), ruling: pendingRuling(presentation), cameTrue: recordedRuling(presentation) === 'yes', viewer: ctx.user, faces: await faces(ctx, bet), joinHref: eligible && bet.status === 'offered' && bet.chain_state && !creator && !limited ? '#accept' : null })}
       ${await enclaveDetail(published)}
       ${notices}
       ${failed || stakeFailure ? html`<p class="notice" role="alert">${failed?.message || stakeFailure.execution_message || 'The stake transaction failed. Retry in your wallet.'}</p>` : ''}

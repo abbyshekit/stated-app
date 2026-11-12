@@ -53,7 +53,7 @@ test('an empty hall has no fabricated totals and plain statuses follow snapshots
   assert.deepEqual(await publicBetHall(database([])), { rows: [], total: 0, settled: 0, paidYocto: '0', wonYocto: '0' });
   const hall = await publicBetHall(database([storedBet(), storedBet('accepted')]));
   const html = String(betList(hall.rows, { hall: true }));
-  assert.match(html, /Offer closes (?:in \d+ (?:minutes?|hours?), \d{2}:\d{2} UTC 20 Nov|20 Nov(?: \d{4})?, \d{2}:\d{2} UTC)/);
+  assert.match(html, /Offer closes in \d+ (?:minutes?|hours?|days?), \d{2}:\d{2} UTC 20 Nov/);
   assert.match(html, /Both sides are in/);
   assert.equal(hall.paidYocto, '0');
   const expired = storedBet();

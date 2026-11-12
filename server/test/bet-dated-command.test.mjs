@@ -227,7 +227,8 @@ test('public date composer validates missing and impossible dates, then redirect
   assert.equal(page.status, 200);
   assert.match(page.text, /type="date"[^>]*name="date"(?![^>]*required)/);
   assert.match(page.text, /name="datePreset" value="month" checked/);
-  assert.match(page.text, /role="radiogroup" aria-label="Deadline"/);
+  assert.match(page.text, /id="deadline-label">Deadline, 23:59 UTC<\/p>/, "the time is on the label, so the drawn reply stays the reply that gets posted");
+  assert.match(page.text, /role="radiogroup" aria-labelledby="deadline-label"/, 'the deadline choices are named by the visible label');
   const min = page.text.match(/\bmin="(\d{4}-\d{2}-\d{2})"/)?.[1];
   const max = page.text.match(/\bmax="(\d{4}-\d{2}-\d{2})"/)?.[1];
   assert.equal(min, ymd(new Date(Date.now() + DAY)));

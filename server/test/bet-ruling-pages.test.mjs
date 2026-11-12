@@ -118,7 +118,9 @@ test('price ruling shows the post, three models, confidence, window, price and v
   assert.ok(response.text.includes('<p class="pwho"><b>public_bettor</b><span>@public_bettor</span></p>'));
   assert.ok(response.text.includes(`<p class="said"><span class="hl">${bet.claim}</span></p>`));
   assert.doesNotMatch(response.text, /Private source words|private_author/);
-  assert.ok(response.text.includes(`<h2>NEAR AI enclave jury</h2><b>Yes</b><span>${dayMonth(record.decidedAt, { year: true })}</span>`));
+  assert.ok(response.text.includes(`<b>Yes</b><span>${dayMonth(record.decidedAt, { year: true })}</span>`));
+  assert.doesNotMatch(response.text, /<h2>NEAR AI enclave jury<\/h2>/);
+  assert.ok(response.text.includes('The NEAR AI enclave jury agreed, so @public_bettor wins 0.2 test NEAR from @other_bettor.'));
   assert.match(response.text, /<ul class="jury-rail">/);
   assert.equal((response.text.match(/<span>Yes, 95% sure<\/span>/g) || []).length, MODELS.length);
   assert.match(response.text, /<b>Qwen3\.8 27B<\/b>/);
@@ -129,7 +131,7 @@ test('price ruling shows the post, three models, confidence, window, price and v
     assert.ok(row.includes('<p>The source confirms the outcome.</p>'));
   }
   assert.ok(response.text.includes('Every model has to agree at 80% or more, or both stakes go back.'));
-  assert.ok(response.text.includes(`Coinbase BTC-USD opened at US$100,000 at ${clock(record.plan.parsed.start)} UTC, ${dayMonth(record.plan.parsed.start)}; the deadline was ${clock(bet.resolve_at)} UTC, ${dayMonth(bet.resolve_at)}.`));
+  assert.ok(response.text.includes(`Coinbase BTC-USD traded at US$100,000 at ${clock(bet.resolve_at)} UTC ${dayMonth(bet.resolve_at)}, the deadline.`));
   assert.match(response.text, /<summary>Check it yourself<\/summary>\s*<p>Each verdict was signed inside an Intel TDX enclave, and every signature checked out\.<\/p>/);
   assert.doesNotMatch(response.text, /<h2>Verified<\/h2>|✓/);
   for (const line of VERIFIED) assert.ok(response.text.includes(`<div>${line}</div>`), `Missing verified check: ${line}`);
@@ -208,9 +210,9 @@ test('review mode computes agreement from the settled Bet rather than the stored
   const record = await insertRuling({ mode: 'review', outcome: 'yes', agrees: false });
   const response = await s.browser().get(path());
   assert.equal(response.status, 200);
-  assert.match(response.text, /<h2>NEAR AI enclave jury<\/h2><b>Yes<\/b>/);
+  assert.match(response.text, /class="verdict ruling-verdict yes"><b>Yes<\/b>/);
   const settled = await s.db.one('select settled_at from bilateral_bets where id=$1', [bet.id]);
-  assert.ok(response.text.includes(`<p class="gut quiet">A Stated reviewer recorded Yes on ${dayMonth(settled.settled_at)}. The jury agreed on ${dayMonth(record.decidedAt)}.</p>`));
+  assert.ok(response.text.includes(`<p class="gut quiet">A Stated reviewer recorded Yes on ${dayMonth(settled.settled_at)}. The jury agreed.</p>`));
   assert.doesNotMatch(response.text, /Ruled yes/);
   assert.ok(response.text.includes('A second opinion does not change the payout.'));
   assert.doesNotMatch(response.text, /both stakes go back/, 'a second opinion never moves money');

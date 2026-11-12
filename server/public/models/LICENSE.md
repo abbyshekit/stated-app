@@ -4,6 +4,7 @@ Source: [@lobehub/icons-static-svg](https://www.npmjs.com/package/@lobehub/icons
 
 - [qwen.svg](https://unpkg.com/@lobehub/icons-static-svg@1.71.0/icons/qwen.svg)
 - [deepseek.svg](https://unpkg.com/@lobehub/icons-static-svg@1.71.0/icons/deepseek.svg)
+- [zai.svg](https://unpkg.com/@lobehub/icons-static-svg@1.71.0/icons/zai.svg)
 
 The SVG paths are unchanged. Inline presentation style attributes were removed; skin.css renders the monochrome paths as masks using the --ink token.
 

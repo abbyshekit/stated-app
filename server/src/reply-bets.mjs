@@ -21,6 +21,7 @@ import { syncNearBet } from './near-bets.mjs';
 import { verifyBetTransaction } from './near-execution-state.mjs';
 import { ensurePlayAccount, inPilot, nearChain, playAccountFor, playAction, referee, refereeSettle, refillTreasury, topUpReferee } from './play.mjs';
 import { completeSetup, signInFromX, UserError, userByXId } from './store.mjs';
+import { assertStakeLimit, limitReply } from './reputation.mjs';
 
 const DAY = 86400000;
 const STAKE = /^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?$/;
@@ -72,7 +73,8 @@ function requestIdFor(eventId) {
 }
 
 // Built when asked for, so the unit is the one for the network this server is on.
-const refusals = ({ walletUrl = null } = {}) => ({
+const refusals = ({ walletUrl = null, config, limit } = {}) => ({
+  limit: config && limit ? limitReply(config, limit) : null,
   stake: `A bet here is between 0.01 and 1 ${unit()}. Try again with an amount in that range.`,
   no_date: 'Add a date to make it a bet, like: bet 0.1 yes by 30 Nov.',
   too_soon: 'That post is due too soon to take a bet on.',
@@ -194,7 +196,6 @@ async function offer(db, config, chain, cmd, deps) {
   if (!inPilot(config, cmd.x_user_id)) throw new Refused('pilot');
   if (['stake', 'too_soon', 'too_far'].includes(cmd.detail)) throw new Refused(cmd.detail);
   const user = await ensureUser(db, { xUserId: cmd.x_user_id, username: cmd.x_username });
-  const judge = await referee(db, config, chain);
   let betId = cmd.bet_id;
   if (!betId) {
     const row = await db.one(`select st.status, coalesce(st.deadline_at, st.proposed_deadline_at) as deadline, src.url
@@ -206,6 +207,9 @@ async function offer(db, config, chain, cmd, deps) {
     const due = new Date(row.deadline).getTime();
     if (due < Date.now() + 10 * 60000) throw new Refused('too_soon');
     if (due > Date.now() + 365 * DAY) throw new Refused('too_far');
+    // Keep the existing refusal order, then check before either account can be funded.
+    await assertStakeLimit(db, config, user.id, cmd.stake_near);
+    const judge = await referee(db, config, chain);
     const bet = await createBet(db, user, {
       requestId: requestIdFor(cmd.event_id),
       claim: cmd.words,
@@ -270,6 +274,7 @@ async function take(db, config, chain, cmd, deps) {
   row = await read();
   const mine = String(row.acceptor_user_id || '') === String(user.id);
   if (!mine && (row.status !== 'offered' || new Date(row.accept_by).getTime() <= Date.now())) throw new Refused('taken');
+  if (!mine) await assertStakeLimit(db, config, user.id, formatTestNear(row.stake_yocto));
   await ensurePlayAccount(db, config, chain, { xUserId: cmd.x_user_id, username: cmd.x_username });
   let bet = row;
   if (!mine) {
@@ -278,7 +283,7 @@ async function take(db, config, chain, cmd, deps) {
       await consentToPublicBet(db, user, betId);
       ({ bet } = await playAction(db, config, chain, user, betId, { action: 'accept', termsHash: row.terms_hash }, deps));
     } catch (error) {
-      if (error instanceof UserError && [403, 409].includes(error.status) && !error.funds) throw new Refused('taken');
+      if (error instanceof UserError && [403, 409].includes(error.status) && !error.funds && error.reason !== 'limit') throw new Refused('taken');
       throw error;
     }
   }
@@ -317,11 +322,12 @@ export async function runBetCommands(db, config, chain, { limit = 5, fetchImpl =
         continue;
       }
       const reason = error instanceof Refused ? error.reason
+        : (error instanceof UserError && error.reason === 'limit') ? 'limit'
         : (error instanceof UserError && error.funds) ? 'funds'
           : (error instanceof UserError && /claimed/i.test(error.message)) ? 'claimed' : null;
       if (reason) {
         await db.query(`update bet_commands set status = 'refused', words = null, detail = $2, updated_at = clock_timestamp() where event_id = $1 and status = 'queued'`, [cmd.event_id, reason]);
-        await say(db, config, { key: `refused:${cmd.event_id}`, inReplyTo: cmd.event_id, body: betReplies.refused(reason, { walletUrl: `${config.baseUrl}/me/wallet` }) });
+        await say(db, config, { key: `refused:${cmd.event_id}`, inReplyTo: cmd.event_id, body: betReplies.refused(reason, { walletUrl: `${config.baseUrl}/me/wallet`, config, limit: error.limit }) });
         result.refused += 1;
       } else if (cmd.attempts >= 5) {
         await db.query(`update bet_commands set status = 'failed', words = null, detail = $2, updated_at = clock_timestamp() where event_id = $1 and status = 'queued'`,
