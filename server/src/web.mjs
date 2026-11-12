@@ -534,7 +534,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
     const size = length > 200 ? ' long' : length > 120 ? ' mid' : '';
     return html`
       <article class="post" id="s-${row.save_id}">
-        <div class="head">${face({ url: faces?.get(String(row.speaker_x_user_id)) || null, name, size: 'lg' })}<b>${name}</b><span>${handle}</span>${row.platform === 'x' ? postLogo(xPostUrl(source, config.x.simulatedOrigin)) : ''}</div>
+        <div class="head">${face({ url: faces?.get(String(row.speaker_x_user_id)) || null, name, size: 'lg' })}<b>${name}</b><span>${handle}</span>${row.platform === 'x' ? postLogo(xPostUrl(source, config.x.simulatedOrigin), config.x.simulatedOrigin) : ''}</div>
         <p class="said${size}">${link ? html`<a href="${link}">${words}</a>` : words}</p>
         ${row.available && row.platform === 'x' ? postTime(xPostUrl(source, config.x.simulatedOrigin), row.published_at) : ''}
         ${!direct ? html`<p class="aside">${speakerLine(row)}</p>` : ''}

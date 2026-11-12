@@ -28,7 +28,7 @@ export async function predictionSourceHeader(db, viewer, source, simulatedOrigin
   const label = source.platform === 'x' ? (simulatedOrigin ? 'On simulated X' : 'On X') : 'Source';
   const post = source.platform === 'x' ? xPostUrl(link, simulatedOrigin) : null;
   return html`<div class="post source-author" data-source-author="prediction">
-    <p class="visually-hidden">Source prediction by</p><div class="head">${face({ url: pictures.get(String(source.speaker_x_user_id)) || null, name })}<b>${name}</b><span>${handle}</span>${post ? postLogo(post) : link ? html`<a class="src" href="${link}" rel="noopener noreferrer">${label}</a>` : ''}</div>
+    <p class="visually-hidden">Source prediction by</p><div class="head">${face({ url: pictures.get(String(source.speaker_x_user_id)) || null, name })}<b>${name}</b><span>${handle}</span>${post ? postLogo(post, simulatedOrigin) : link ? html`<a class="src" href="${link}" rel="noopener noreferrer">${label}</a>` : ''}</div>
   </div>`;
 }
 
@@ -53,6 +53,6 @@ export async function betSourceHeader(db, viewer, bet, simulatedOrigin, { timest
   const pictures = await facesByUsername(db, [handle], viewer);
   const name = viewer?.x_username?.toLowerCase() === handle.toLowerCase() ? viewer.x_name || handle : handle;
   return html`<div class="post source-author" data-source-author="proposer">
-    <div class="head">${face({ url: pictures.get(handle.toLowerCase()) || null, name })}<b>${name ? `Offered by ${name}` : 'Bet proposer'}</b><span>${handle ? `@${handle}` : ''}</span>${postLogo(xPostUrl(bet.evidence_source_url, simulatedOrigin))}</div>
+    <div class="head">${face({ url: pictures.get(handle.toLowerCase()) || null, name })}<b>${name ? `Offered by ${name}` : 'Bet proposer'}</b><span>${handle ? `@${handle}` : ''}</span>${postLogo(xPostUrl(bet.evidence_source_url, simulatedOrigin), simulatedOrigin)}</div>
   </div>`;
 }

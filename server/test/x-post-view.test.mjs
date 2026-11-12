@@ -49,3 +49,13 @@ test('a public Bet can show its already-published post time without disclosing a
   assert.equal(await betPostTime({ one: async () => null }, bet), '', 'never infer the post time from Bet creation');
   assert.equal(await betPostTime({ one: () => assert.fail('not an X URL') }, { ...bet, evidence_source_url: 'https://example.org/result' }), '');
 });
+
+test('a post on the simulated X is labelled in words, never with the real X mark', () => {
+  const origin = 'http://127.0.0.1:4311';
+  const simulated = String(postLogo(`${origin}/?c=12`, origin));
+  assert.match(simulated, /On simulated X/);
+  assert.doesNotMatch(simulated, /class="xmark"|See the post on X/);
+  const real = String(postLogo('https://x.com/someone/status/1', origin));
+  assert.match(real, /See the post on X/);
+  assert.equal(String(postLogo(null, origin)), '');
+});
