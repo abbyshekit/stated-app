@@ -452,6 +452,22 @@ test('the referee refills below the actual call reserve and stops once funded', 
   assert.equal(held(id), NEAR('0.303'));
 });
 
+test('with Stated Court the referee is kept able to reserve a 300-Tgas filing or approval', async () => {
+  const id = 'referee.stated.near';
+  const court = { ...s.config, court: { ...(s.config.court || {}), dao: 'stated-court.sputnik-v2.near' } };
+  const { reserve } = await near.chain.callFunds(id, 300_000_000_000_000n);
+  const { reserve: ordinary } = await near.chain.callFunds(id);
+  // Enough for an ordinary call, one yoctoNEAR short of a Court filing: the state that stalled the first jury ruling.
+  near.accounts.get(id).balance = reserve - 1n;
+  assert.ok(held(id) >= ordinary);
+  assert.equal(await topUpReferee(s.db, s.config, near.chain), false, 'without a Court the ordinary reserve applies');
+  const before = held(TREASURY);
+  assert.equal(await topUpReferee(s.db, court, near.chain), true);
+  assert.equal(held(id), reserve + NEAR('0.2'));
+  assert.equal(before - held(TREASURY), NEAR('0.2') + 1n);
+  assert.equal(await topUpReferee(s.db, court, near.chain), false);
+});
+
 test('a Bet link carries a new user through wallet setup and sufficient funding back to the exact offer', async () => {
   const source = s.fakeX.post(X.priya.id, 'Peregrine 3.0 ships a stable release before March 1, ' + NEXT + '.');
   const offer = tag(X.oskar, '@statedbot bet 0.1 no', source);

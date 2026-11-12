@@ -177,7 +177,7 @@ cargo test --manifest-path contracts/bilateral-escrow/Cargo.toml --locked
 cargo test --manifest-path contracts/jury-relay/Cargo.toml --locked
 ```
 
-`npm test` runs the whole suite when a throwaway PostgreSQL 15+ cluster can start (`initdb` and `pg_ctl` on PATH): 833 tests passed on 12 November 2026. `STATED_TEST_REQUIRE_PG=1` makes a missing database an error. [`.github/workflows/checks.yml`](.github/workflows/checks.yml) runs these commands and `npm audit --omit=dev --audit-level=high` on every push. Server tests use throwaway clusters and a fake X API; they do not establish live X or enclave behaviour. The escrow has 71 Rust tests and the relay 17; both pass `cargo clippy -- -D warnings` and `cargo fmt -- --check`.
+`npm test` runs the whole suite when a throwaway PostgreSQL 15+ cluster can start (`initdb` and `pg_ctl` on PATH): 834 tests passed on 12 November 2026. `STATED_TEST_REQUIRE_PG=1` makes a missing database an error. [`.github/workflows/checks.yml`](.github/workflows/checks.yml) runs these commands and `npm audit --omit=dev --audit-level=high` on every push. Server tests use throwaway clusters and a fake X API; they do not establish live X or enclave behaviour. The escrow has 71 Rust tests and the relay 17; both pass `cargo clippy -- -D warnings` and `cargo fmt -- --check`.
 
 ## Built during NEAR HACKATHON
 

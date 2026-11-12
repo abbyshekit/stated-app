@@ -19,7 +19,7 @@ import { kvGet, kvSet } from './db.mjs';
 import { verifyBetTransaction } from './near-execution-state.mjs';
 import { deliveryFromReceipts } from './near-delivery.mjs';
 import { prepareNearAction, syncNearBet } from './near-bets.mjs';
-import { functionCallFunds, NEAR_CALL_GAS as GAS, rpc, rpcUrls } from './near-escrow.mjs';
+import { COURT_CALL_GAS, functionCallFunds, NEAR_CALL_GAS as GAS, rpc, rpcUrls } from './near-escrow.mjs';
 import { inPilot, isNamedAccount, network, unit } from './near-network.mjs';
 import { UserError } from './store.mjs';
 
@@ -210,13 +210,20 @@ export async function refillTreasury(db, config, chain) {
   return { refilled: moved.ok, balance: await chain.balance(bank.id) };
 }
 
-/** Keeps the referee able to reserve the gas for a ruling. */
+/**
+ * Keeps the referee able to reserve the gas for its largest call. With Stated Court that is a
+ * 300-Tgas filing or approval: sized for an ordinary call, the referee once sat 0.001 NEAR short
+ * of it and every filing failed until it was topped up by hand (12 November 2026).
+ */
 export async function topUpReferee(db, config, chain) {
   const judge = await referee(db, config, chain);
-  const { balance, reserve } = await chain.callFunds(judge.id);
+  const court = Boolean(config.court?.dao);
+  const { balance, reserve } = await chain.callFunds(judge.id, court ? COURT_CALL_GAS : GAS);
   if (balance >= reserve) return false;
   const bank = await treasury(db, config, chain);
-  return (await chain.transfer({ fromId: bank.id, secret: bank.secret, toId: judge.id, amountYocto: yocto('0.2') })).ok;
+  const top = BigInt(yocto('0.2'));
+  const amount = court ? reserve - balance + top : top;
+  return (await chain.transfer({ fromId: bank.id, secret: bank.secret, toId: judge.id, amountYocto: String(amount) })).ok;
 }
 
 /** The referee account: decides a Bet from Stated's recorded Result. Its key never leaves this server. */

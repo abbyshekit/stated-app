@@ -15,6 +15,9 @@ export function rpcUrls(env = process.env) {
 }
 export const STORAGE_FEE_YOCTO = '10000000000000000000000';
 export const NEAR_CALL_GAS = 100000000000000n;
+// Stated Court filings and approvals through the relay attach this much gas, so the
+// referee that sends them must be able to reserve it.
+export const COURT_CALL_GAS = 300_000_000_000_000n;
 const CALL_OVERHEAD_GAS = 5_000_000_000_000n;
 const ONE_NEAR = '1000000000000000000000000';
 const MAX_DEPOSIT = 1010000000000000000000000n;

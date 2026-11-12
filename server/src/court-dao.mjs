@@ -11,7 +11,7 @@
 //   get_proposal({ id }), get_last_proposal_id(), get_proposals({ from_index, limit }), get_policy()
 // act_proposal also gets `proposal: <kind>`: later Sputnik versions require the
 // kind there, and v2's JSON argument parser ignores a field it does not know.
-import { NEAR_CALL_GAS } from './near-escrow.mjs';
+import { COURT_CALL_GAS, NEAR_CALL_GAS } from './near-escrow.mjs';
 import { referee } from './play.mjs';
 import { UserError } from './store.mjs';
 import { fingerprint } from './canonical.mjs';
@@ -21,7 +21,7 @@ const TIMEOUT_MS = 120_000;
 const RESOLVE_GAS = NEAR_CALL_GAS;
 // act_proposal carries the execution of referee_resolve inside it.
 const APPROVE_GAS = 200_000_000_000_000n;
-const RELAY_APPROVE_GAS = 300_000_000_000_000n;
+const RELAY_APPROVE_GAS = COURT_CALL_GAS;
 const OUTCOMES = new Set(['yes', 'no', 'void']);
 const UUID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/;
 // How far back a lost filing is looked for before filing again.
