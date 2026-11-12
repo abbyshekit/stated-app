@@ -11,6 +11,7 @@ import { consentToPublicBet, followPublicBet, followsFor, nextOpenPublicBet, pub
 import { publishPublicResultEvidence } from './bet-result-evidence.mjs';
 import { readAttestedCheck, runAttestedCheck, verificationRecipe } from './attested-check.mjs';
 import { readEnclaveRuling } from './enclave-ruling.mjs';
+import { modelFace, modelName } from './jury-models.mjs';
 import { courtLine } from './court-pages.mjs';
 import { betBlock, betList, betShareLink, betTerms, betTime, displayBetStatus, markedClaim, nextBetTime } from './bet-view.mjs';
 import { facesByUsername } from './certificate.mjs';
@@ -148,6 +149,11 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
       line = 'Then a NEAR AI enclave jury reads both sides’ links and decides.';
     }
     const check = !ruling && config.nearai?.apiKey ? await db.tx(tx => readAttestedCheck(tx, bet)) : null;
+    // While the jury works, its three models are on the page, as they are on the ruling.
+    const deciding = juryDecides(bet) && !ruling && bet.evidence && !bet.evidence.open
+      && ['accepted', 'proposed', 'disputed'].includes(bet.status);
+    const jury = deciding ? html`<ul class="jury-rail deciding" aria-label="The NEAR AI enclave jury">${[...new Set(config.nearai?.rulingModels || [])]
+      .map(model => html`<li class="seat">${modelFace(model)}<b>${modelName(model)}</b><span>Deciding</span></li>`)}</ul>` : '';
     const items = bet.evidence?.items || [];
     const privateCount = bet.evidence?.privateItemCount || 0;
     const evidenceLabel = `Links, ${items.length}`;
@@ -162,7 +168,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
       return html`<li><p>Bet ${item.side}: ${url ? html`<a class="tl" href="${url}" rel="noopener noreferrer">${item.title || host}</a>` : item.title || item.url}${item.by ? `, @${item.by}` : ''}${host ? html` <span class="quiet">${host}</span>` : ''}${postedHost ? html` <span class="quiet">posted as ${postedHost}</span>` : ''}</p></li>`;
     })}</ul>${privateCount ? html`<p class="quiet">and ${privateCount} ${privateCount === 1 ? 'link from a private bet' : 'links from private bets'}</p>` : ''}`) : bet.evidence ? html`<p class="gut quiet">No links yet.</p>` : '';
     return html`${await courtLine(db, config, chain, bet)}${line ? html`<p class="gut">${line}${ruling && !privateCount ? html` <a class="tl" href="/bets/${bet.id}/ruling">See the ruling</a>` : ''}</p>`
-      : check ? html`<p class="gut">NEAR AI signed second opinion: ${check.model} read the links and ${check.verdict.agrees ? 'agrees' : 'disagrees'}. <a class="tl" href="/bets/${bet.id}/attested-check.json">Verify</a></p>` : ''}${evidence}`;
+      : check ? html`<p class="gut">NEAR AI signed second opinion: ${check.model} read the links and ${check.verdict.agrees ? 'agrees' : 'disagrees'}. <a class="tl" href="/bets/${bet.id}/attested-check.json">Verify</a></p>` : ''}${jury}${evidence}`;
   }
 
   // Dry-run comparison. An actual top-up starts from the signed-in Bet

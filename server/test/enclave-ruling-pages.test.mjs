@@ -152,6 +152,12 @@ test('evidence plans appear with no links, and close without an add link', async
   assert.match((await creatorBrowser.get(path())).text, /Then a NEAR AI enclave jury reads both sides’ links and decides\./);
   await s.db.query("update enclave_plans set closes_at=clock_timestamp()-interval '1 minute' where statement_id=$1", [statement.id]);
   for (const page of await pages()) assert.doesNotMatch(page, /Then a NEAR AI enclave jury reads both sides’ links and decides\.|Add a link|Links, 0/);
+  // Once links close, the page shows the jurors who are deciding, before any ruling exists.
+  await setChain('accepted');
+  for (const page of await pages()) {
+    assert.match(page, /<ul class="jury-rail deciding" aria-label="The NEAR AI enclave jury">/);
+    assert.ok((page.match(/<span>Deciding<\/span><\/li>/g) || []).length >= 1, 'each juror reads Deciding');
+  }
 });
 
 test('evidence before a plan uses the configured window and only public metadata', async () => {

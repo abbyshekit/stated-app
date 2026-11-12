@@ -200,6 +200,7 @@ label.check { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10
 .jury-rail .seat b { font-size: 14px; font-weight: 400; overflow-wrap: anywhere; }
 .jury-rail .seat > span:last-child { font-variant-numeric: tabular-nums; }
 .jury-rail .seat.dissent > span:last-child { color: var(--ink); }
+.jury-rail.deciding .seat .model-logo { background: var(--dim); }
 .jury-rail .seat .model-logo { border-radius: 0; background: var(--ink); mask-position: center; mask-size: contain; mask-repeat: no-repeat; }
 .model-logo.qwen { mask-image: url('/static/models/qwen.svg'); }
 .model-logo.deepseek { mask-image: url('/static/models/deepseek.svg'); }

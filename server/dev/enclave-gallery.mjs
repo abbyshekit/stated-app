@@ -410,7 +410,8 @@ async function main() {
   process.on('SIGINT', onSignal);
   process.on('SIGTERM', onSignal);
   try {
-    stack = await startStack({ ...enclaveEnv, STATED_PLAY: '1', STATED_NEAR_CONTRACT: 'escrow.testnet',
+    stack = await startStack({ ...enclaveEnv, NEARAI_RULING_MODELS: 'Qwen/Qwen3.8-27B,deepseek-ai/DeepSeek-V4.1-Flash-1017,z-ai/glm-5.3-flash',
+      STATED_PLAY: '1', STATED_NEAR_CONTRACT: 'escrow.testnet',
       STATED_PLAY_SETTLE_DELAY_SECONDS: '600' }, {
       fetchImpl: async (url, options) => {
         if (stack && new URL(url).origin === new URL(stack.fakeX.base).origin) return fetch(url, options);

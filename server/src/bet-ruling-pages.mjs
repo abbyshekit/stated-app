@@ -1,7 +1,6 @@
 // INTEGRATION: web.mjs registers this public, read-only page beside the Bet start routes.
 // DESIGN.md: a normal post row, hairline-separated evidence and one filled action; skin.css only.
 import Decimal from 'decimal.js';
-import { readFileSync } from 'node:fs';
 import { html } from './html.mjs';
 import { readPublicBet } from './bet-public.mjs';
 import { face, facesByUsername, facesFor } from './certificate.mjs';
@@ -12,17 +11,9 @@ import { markedClaim } from './bet-view.mjs';
 import { formatTestNear } from './near-escrow.mjs';
 import { unit } from './near-network.mjs';
 import { dstackPasses } from './dstack-verifier.mjs';
+import { MODEL_LOGOS, modelFace, modelName } from './jury-models.mjs';
 
 const ID = '([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})';
-const MODEL_LOGOS = new Map(['qwen', 'deepseek', 'zai'].map(family => [family,
-  readFileSync(new URL(`../public/models/${family}.svg`, import.meta.url))]));
-const modelFace = (id) => {
-  const family = id.startsWith('Qwen/') ? 'qwen' : id.startsWith('deepseek-ai/') ? 'deepseek'
-    : /^(?:z-ai|zai-org)\//.test(id) ? 'zai' : null;
-  const maker = { qwen: 'Qwen', deepseek: 'DeepSeek', zai: 'Z.ai' }[family];
-  return family ? html`<span class="face model-logo ${family}" role="img" aria-label="${maker} logo"></span>`
-    : face({ name: modelName(id) });
-};
 const percent = (value) => `${new Decimal(value).times(100).toFixed()}%`;
 const majorityOutcome = (record) => {
   const counts = new Map();
@@ -38,9 +29,6 @@ const clock = (value) => new Intl.DateTimeFormat('en-GB', {
   timeZone: 'UTC', hour: '2-digit', minute: '2-digit',
 }).format(new Date(value));
 const outcomeWord = (outcome) => outcome === 'yes' ? 'Yes' : outcome === 'no' ? 'No' : 'Undecided';
-const modelName = (id) => /^(?:z-ai|zai-org)\/glm-5\.3-flash$/i.test(id) ? 'GLM-5.3 Flash' : id.split('/').at(-1)
-  .replace(/-(?:A\d+B|FP\d+|BF\d+|Flash|Instruct|Thinking|\d{4,8})(?=-|$)/gi, '')
-  .replaceAll('-', ' ');
 const VERIFIED = [
   'Each model ran in an Intel TDX enclave whose quote chains to Intel’s root certificate',
   'Each enclave’s signing key and this request’s fresh nonce are inside its quote',
