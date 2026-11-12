@@ -55,6 +55,16 @@ The import-price bet is settled from links: after the release, whoever is right 
 
 ## Why each track
 
+| Track | What it asks for | Where to see it |
+| --- | --- | --- |
+| Privacy & Private AI | AI that runs in a TEE, with what was verified shown | [The ruling page](https://stated-production.up.railway.app/bets/3668aa04-7009-4b85-b19d-debfabebbf96/ruling): each model's verdict, then "Check it yourself"; `npm run verify` re-checks it from outside |
+| AI Security & Defense | AI with money but not the keys | The [jury relay](contracts/jury-relay) can only file one `referee_resolve` per bet and approve it ten minutes later; the [escrow](contracts/bilateral-escrow) has no access keys; stake ceilings of 0.25, 0.5 and 1 test NEAR follow settled bets |
+| Social Money: Sputnik DAO | Shared rules on a DAO | [Stated Court](https://stated-production.up.railway.app/court), a Sputnik DAO with a frozen policy ([freeze record](evidence/court-harden-testnet-20261112.json)) |
+| Social Money: named accounts | Readable accounts | Each X handle gets one, such as [`chainabstracted.stated-play-6cf0876dd7.testnet`](https://testnet.nearblocks.io/address/chainabstracted.stated-play-6cf0876dd7.testnet) |
+| Social Money: reputation-based access | Access that grows with reputation | Stake ceilings rise with settled bets ([code](server/src/reputation.mjs)) |
+| Social Money: Trezu | | Not used |
+| Open Innovation | Money, intelligence and ownership together | A reply on X becomes a bet, three enclave models decide it, a DAO can veto, and a keyless escrow pays |
+
 ### Privacy & Private AI (`privacy`)
 
 - **Confidential computation.** Every jury call runs in an Intel TDX enclave on NEAR AI Cloud. The app fetches an attestation with a fresh nonce, verifies the gateway's and signing model's quotes back to Intel's pinned root and their key and nonce bindings, checks each model's NVIDIA GPU evidence with NVIDIA's attestation service, replays the event log against RTMR3, and verifies the response signature over the exact request and response bytes.
