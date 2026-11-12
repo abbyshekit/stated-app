@@ -535,6 +535,11 @@ export async function verifyEnclaveRecordWithGpu(record, { roots, jwks, fetchImp
  */
 export function quoteSummary(record, { roots, jwks } = {}) {
   verifyEnclaveRecord(record, { roots, jwks });
+  return verifiedQuoteSummary(record);
+}
+
+// Extraction only: callers must already have verified the complete record.
+export function verifiedQuoteSummary(record) {
   const read = (role, model, report) => {
     const { body } = parseTdxQuote(report.intel_quote);
     return { role, model, signingAddress: String(report.signing_address).replace(/^0x/i, '').toLowerCase(),

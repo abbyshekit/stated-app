@@ -30,7 +30,12 @@ test('the Privacy Policy names what is public, each cookie, each recipient and t
   assert.match(words, /a random visitor cookie that counts a visit to a public page once a day/);
   assert.match(words, /keeps you signed in \(30 days\)/);
   assert.match(words, /It is not given the bettors’ names or accounts/);
-  assert.match(words, /load it from X’s image server/);
+  assert.match(words, /Pages show a letter or a stored image; your browser does not load profile pictures from X/);
+  assert.match(words, /Saves start private unless, with a public profile, you choose public for a save or set public as your default in settings/);
+  assert.match(words, /Your profile starts private/);
+  assert.match(words, /Remove a save from its page unless a bet relies on it; those saves stay to protect the stakes/);
+  assert.match(words, /Before publication or after its creator takes it off public pages, its bettors can see its page, and signed-in people with its link can also see it while it is an open invitation/);
+  assert.doesNotMatch(words, /Every save starts private|only to its two bettors|load it from X’s image server|Remove any save from its page/);
   assert.match(words, /stored encrypted with AES-256-GCM/);
   assert.match(words, /not written to the database/);
   assert.match(words, /Stated keeps the link and the terms, not the words/);

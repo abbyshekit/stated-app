@@ -136,6 +136,24 @@ test('one batch query fetches bounded histories, separates save-private revision
   assert.equal(ids.size, revisions.length - 1);
 });
 
+test('public and owner export queries redact shared Result history per statement, including revision notes', async () => {
+  for (const privateOwner of [false, true]) {
+    let historyReads = 0;
+    await exportPage({ async many(sql) {
+      if (!sql.includes('from revisions r')) return [save(1)];
+      historyReads += 1;
+      assert.match(sql, /s.statement_id = r.statement_id/);
+      assert.match(sql, /p.bet_id = b.id and p.creator_user_id = b.creator_user_id and p.withdrawn_at is null/);
+      assert.match(sql, /r.kind in \('resolved', 'resolution_changed', 'disputed'\)/);
+      assert.match(sql, /case when redact then before - 'url' - 'note' else before end as before/);
+      assert.match(sql, /case when redact then after - 'url' - 'note' else after end as after/);
+      assert.match(sql, /case when redact then 'Result recorded. Bet evidence stays on its Bet page.' else note end as note/);
+      return [];
+    } }, owner, url('/api/u/alice/export.json'), { owner: privateOwner });
+    assert.equal(historyReads, 1);
+  }
+});
+
 test('token buckets refill, isolate clients, canonicalize IPs, ignore untrusted headers and bound memory', () => {
   let time = 0;
   const request = ip => ({ headers: { 'x-real-ip': ip }, socket: { remoteAddress: '127.0.0.1' } });
@@ -245,6 +263,70 @@ test('cache hits cannot disclose evidence whose publication was withdrawn', asyn
   assert.equal(db.detailReads(), 1);
 });
 
+test('JSON, ruling HTML and the home feature share a verified record and recheck withdrawal', async t => {
+  const db = rulingDb(enclaveRulingFixture());
+  const material = db.record.material;
+  const ns = value => (BigInt(Date.parse(value)) * 1000000n).toString();
+  const bet = { ...db.row, creator_user_id: '1', acceptor_user_id: '2',
+    creator_username: 'maker', acceptor_username: 'taker', creator_bound: true, acceptor_bound: true,
+    acceptor_consented: true, creator_side: 'yes', stake_yocto: '100000000000000000000000',
+    creator_wallet: 'maker.testnet', acceptor_wallet: 'taker.testnet', near_height: '1',
+    accept_by: material.madeAt, created_at: material.madeAt, settled_at: material.deadline,
+    near_verified_at: material.deadline, read_at: material.deadline };
+  bet.chain_state = { id: bet.id, terms_hash: bet.terms_hash, stake_yocto: bet.stake_yocto,
+    creator_side: bet.creator_side, creator: bet.creator_wallet, acceptor: bet.acceptor_wallet,
+    creator_binding_hash: 'a'.repeat(64), acceptor_binding_hash: 'b'.repeat(64),
+    accept_by_ns: ns(bet.accept_by), resolve_at_ns: ns(bet.resolve_at), status: 'settled',
+    resolution: { outcome: 'yes', method: 'agreement' } };
+  const cachedOne = db.one;
+  let uncachedReads = 0;
+  db.one = async sql => {
+    if (sql.startsWith('select e.detail')) { uncachedReads += 1; return { ...bet, detail: db.record }; }
+    if (sql.startsWith('select b.id, b.creator_user_id')) return db.public ? bet : null;
+    if (sql.startsWith('select e.id as event_id') || sql.startsWith('select detail')) return cachedOne(sql);
+    if (sql.includes('bot_credentials')) return { x_username: 'statedforecast' };
+    if (sql.startsWith('select s.statement_id')) return db.record.evidence.kind === 'submitted' ? { statement_id: '7' } : null;
+    if (/^select (source_save_id|src.published_at)/.test(sql)) return null;
+    assert.fail(sql);
+  };
+  db.many = async sql => {
+    if (sql.startsWith('select b.id, b.creator_user_id')) return db.public ? [bet] : [];
+    if (sql.includes('from bet_evidence')) return db.visible.map(id => ({ id, bet_id: bet.id, user_id: '1',
+      side: 'yes', url: 'https://news.example.org/report', title: 'Report' }));
+    if (sql.includes('from users') || sql.includes('from saves') || sql.includes('select distinct b.id')) return [];
+    assert.fail(sql);
+  };
+  db.tx = fn => fn(db);
+  const base = await serving(t, createApp({ db, config: loadConfig({ STATED_BASE_URL: 'http://localhost' }) }));
+  for (const path of [`/bets/${bet.id}/enclave-ruling.json`, `/bets/${bet.id}/ruling`, '/', `/bets/${bet.id}/ruling`]) {
+    const response = await fetch(base + path);
+    const body = await response.text();
+    assert.equal(response.status, 200, body);
+    assert.ok(body.includes(path === '/' ? 'settled-feature' : path.endsWith('/ruling') ? 'Check it yourself' : '"record"'));
+    assert.equal(db.detailReads(), 1, `${path} reuses the verified event`);
+    assert.equal(uncachedReads, 0, `${path} never calls the uncached verifier`);
+  }
+  db.public = false;
+  assert.equal((await fetch(`${base}/bets/${bet.id}/ruling`)).status, 404);
+  assert.doesNotMatch(await (await fetch(`${base}/`)).text(), /settled-feature/);
+  db.public = true;
+  db.row.terms_hash = 'changed';
+  assert.equal((await fetch(`${base}/bets/${bet.id}/ruling`)).status, 404, 'cache hits retain the Bet binding check');
+  db.row.terms_hash = bet.terms_hash;
+  db.record.materialHash = 'tampered';
+  db.row.event_revision = '2';
+  assert.equal((await fetch(`${base}/bets/${bet.id}/ruling`)).status, 404, 'edited records are reverified');
+  db.record = enclaveRulingFixture({ source: 'evidence' });
+  db.row.event_revision = '3';
+  db.visible = ['1'];
+  assert.equal((await fetch(`${base}/bets/${bet.id}/ruling`)).status, 200);
+  const reads = db.detailReads();
+  db.visible = [];
+  assert.equal((await fetch(`${base}/bets/${bet.id}/ruling`)).status, 404, 'cached signed text is hidden when an evidence Bet is withdrawn');
+  assert.equal(db.detailReads(), reads);
+  assert.doesNotMatch(await (await fetch(`${base}/`)).text(), /settled-feature/);
+});
+
 test('cache bounds evict least recently used proofs and oversized records are never retained', async () => {
   const db = rulingDb(enclaveRulingFixture());
   let checks = 0;
@@ -339,7 +421,26 @@ test('public export HTTP route is bounded and rate limited before owner/export q
   assert.equal(queries, before);
   assert.equal((await fetch(`${base}/api/desk/export.json`)).status, 429);
   assert.equal((await fetch(`${base}/bets/00000000-0000-4000-8000-000000000001/enclave-ruling.json`)).status, 429);
+  assert.equal((await fetch(`${base}/bets/00000000-0000-4000-8000-000000000001/ruling`)).status, 429);
   assert.equal(queries, before, 'exports and ruling JSON share one budget');
+});
+
+test('ruling HTML consumes the same heavy-read budget as ruling JSON before querying', async t => {
+  let queries = 0;
+  const db = {
+    tx: fn => fn(db),
+    async one() { queries += 1; return null; },
+  };
+  const base = await serving(t, createApp({ db, config: loadConfig({ STATED_BASE_URL: 'http://localhost' }) }));
+  const path = '/bets/00000000-0000-4000-8000-000000000001';
+  for (let i = 0; i < 10; i += 1) assert.equal((await fetch(`${base}${path}/ruling`)).status, 404);
+  const before = queries;
+  for (const suffix of ['/ruling', '/enclave-ruling.json']) {
+    const refused = await fetch(`${base}${path}${suffix}`);
+    assert.equal(refused.status, 429);
+    assert.ok(Number(refused.headers.get('retry-after')) > 0);
+  }
+  assert.equal(queries, before);
 });
 
 test('public profile HTML and API show bounded pages with a next-page link', async t => {

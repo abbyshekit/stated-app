@@ -3,8 +3,85 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { createBet } from '../src/bets.mjs';
+import { ensureDesk } from '../src/store.mjs';
 import { startStack } from './support/app.mjs';
 import { enclaveRulingFixture } from './support/enclave.mjs';
+
+test('public, Desk and owner exports redact private, mixed and withdrawn Bet history per statement', async t => {
+  const s = await startStack();
+  t.after(() => s.close());
+  const person = s.fakeX.addUser('9203', 'history_privacy');
+  const browser = await s.signIn(person);
+  await browser.submit('/setup', { profile: 'public', defaults: 'public' });
+  const owner = await s.db.one('select * from users where x_user_id=$1', [person.id]);
+  await s.db.query("update users set profile_visibility='public',setup_completed_at=now() where id=$1", [owner.id]);
+  const desk = await ensureDesk(s.db);
+  const cases = [];
+  for (const visibility of ['private', 'mixed', 'withdrawn', 'published']) {
+    const source = await s.db.one(`insert into sources (platform,platform_id,url,text,acquisition)
+      values ('web',$1,'https://example.org/history','Export history fixture','url_intake') returning id`, [visibility]);
+    const statement = await s.db.one(`insert into statements (source_id,span,speaker)
+      values ($1,$2,'@history_privacy') returning id`, [source.id, `History ${visibility}`]);
+    // These saves are public independently of the Bet's publication.
+    const save = await s.db.one(`insert into saves
+      (owner_x_user_id,owner_user_id,statement_id,relation,visibility,intake,first_public_at)
+      values ($1,$2,$3,'mine','public','url',now()) returning id`, [person.id, owner.id, statement.id]);
+    await s.db.query(`insert into saves
+      (owner_x_user_id,owner_user_id,statement_id,relation,visibility,intake,first_public_at)
+      values ($1,$2,$3,'following','public','url',now())`, [desk.x_user_id, desk.id, statement.id]);
+    for (let i = 0; i < (visibility === 'mixed' ? 2 : 1); i += 1) {
+      const bet = await createBet(s.db, owner, { requestId: randomUUID(), sourceSaveId: String(save.id),
+        claim: `History ${visibility}`, criteria: 'Official result', evidenceSourceUrl: 'https://example.org/result',
+        creatorSide: 'yes', stakeNear: '0.1', acceptBy: new Date(Date.now() + 86400000).toISOString(),
+        resolveAt: new Date(Date.now() + 172800000).toISOString() });
+      if (visibility === 'published' || visibility === 'withdrawn' || (visibility === 'mixed' && i === 0)) {
+        await s.db.query(`insert into bilateral_bet_publications (bet_id,creator_user_id,withdrawn_at)
+          values ($1,$2,$3)`, [bet.id, owner.id, visibility === 'withdrawn' ? new Date() : null]);
+      }
+    }
+    const secret = `https://evidence.example.org/${visibility}-SECRET`;
+    const reason = `${visibility}-JUROR-REASON`;
+    for (const kind of ['resolved', 'resolution_changed', 'disputed', 'captured']) {
+      const url = kind === 'captured' ? 'https://public.example.org/source' : secret;
+      const note = kind === 'captured' ? 'Source captured' : reason;
+      await s.db.query(`insert into revisions (statement_id,kind,actor,before,after,note)
+        values ($1,$2,'reviewer',$3,$4,$5)`, [statement.id, kind,
+        { status: 'open', url, note }, { status: 'yes', url, note }, note]);
+    }
+    cases.push({ claim: `History ${visibility}`, hide: visibility !== 'published', secret, reason });
+  }
+  for (const [client, path] of [[s.browser(), '/api/u/history_privacy/export.json'],
+    [s.browser(), '/api/desk/export.json'], [browser, '/me/export.json']]) {
+    const response = await client.request('GET', path);
+    assert.equal(response.status, 200, path);
+    const data = JSON.parse(response.text);
+    for (const fixture of cases) {
+      const save = data.saves.find(row => row.claim === fixture.claim);
+      assert.ok(save, `${path}: independent public save is exported`);
+      assert.equal(save.history.length, 4);
+      if (fixture.hide) {
+        assert.equal(response.text.includes(fixture.secret), false, `${path}: no private evidence in the export`);
+        assert.equal(response.text.includes(fixture.reason), false, `${path}: no private juror reason in the export`);
+      }
+      for (const revision of save.history) {
+        if (revision.kind === 'captured') {
+          assert.equal(revision.before.url, 'https://public.example.org/source');
+          assert.equal(revision.after.note, 'Source captured');
+          assert.equal(revision.note, 'Source captured');
+        } else if (fixture.hide) {
+          assert.deepEqual(revision.before, { status: 'open' });
+          assert.deepEqual(revision.after, { status: 'yes' });
+          assert.equal(revision.note, 'Result recorded. Bet evidence stays on its Bet page.');
+          assert.doesNotMatch(JSON.stringify(revision), /SECRET|JUROR-REASON/);
+        } else {
+          assert.equal(revision.before.url, fixture.secret);
+          assert.equal(revision.after.note, fixture.reason);
+          assert.equal(revision.note, fixture.reason);
+        }
+      }
+    }
+  }
+});
 
 test('public pages and both exports paginate real rows; export histories use one query', async t => {
   const s = await startStack();

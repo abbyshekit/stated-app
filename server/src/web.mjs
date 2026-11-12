@@ -4,7 +4,8 @@ import { baselineScore } from '../../score.mjs';
 import { editorialIntake, personIntake, selectCandidates } from './articles.mjs';
 import { nearChain } from './play.mjs';
 import { registerPlayRoutes } from './play-pages.mjs';
-import { registerBetRoutes } from './bet-pages.mjs';
+import { enclaveRecipe, registerBetRoutes } from './bet-pages.mjs';
+import { createPublicRulingReader } from './public-ruling.mjs';
 import { registerBetStartRoutes } from './bet-start.mjs';
 import { registerBetRulingRoutes, rulingPost } from './bet-ruling-pages.mjs';
 import { registerCourtRoutes } from './court-pages.mjs';
@@ -201,6 +202,8 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
   let botName = null;
   let xClient = null;
   const readBudget = createReadLimiter({ railway: config.hosted && Boolean(process.env.RAILWAY_ENVIRONMENT) });
+  const publicRuling = createPublicRulingReader({ recipe: enclaveRecipe });
+  const readPublicRuling = async (tx, id) => (await publicRuling(tx, id))?.record || null;
 
   function allowHeavyRead(ctx) {
     const budget = readBudget(ctx.req);
@@ -883,7 +886,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
     let settled = null;
     for (const row of hall.rows.filter(bet => bet.status === 'settled' && ['yes', 'no'].includes(bet.outcome))
       .sort((a, b) => new Date(b.settled_at) - new Date(a.settled_at))) {
-      const bet = await publicBet(db, row.id, config.play);
+      const bet = await publicBet(db, row.id, { ...config.play, readRuling: readPublicRuling });
       if (bet?.enclave && !bet.evidence?.privateItemCount) { settled = bet; break; }
     }
     const dare = !settled && config.play?.enabled
@@ -1950,9 +1953,9 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
     redirect(ctx.res, '/desk');
   });
 
-  registerBetRoutes({ route, db, config, layout, needUser, needAdmin, isAdmin, needPost, csrfField, send, redirect, notFound, fetchImpl, walletVersion: WALLET_VERSION, payVersion: PAY_VERSION, botUsername, chain: chainFor, quotes, allowHeavyRead });
+  registerBetRoutes({ route, db, config, layout, needUser, needAdmin, isAdmin, needPost, csrfField, send, redirect, notFound, fetchImpl, walletVersion: WALLET_VERSION, payVersion: PAY_VERSION, botUsername, chain: chainFor, quotes, allowHeavyRead, publicRuling });
   registerBetStartRoutes({ route, db, config, layout, send, redirect, botUsername, fileList, betLinesFor, publicRow, csp: CONTENT_SECURITY_POLICY });
-  registerBetRulingRoutes({ route, db, config, layout, send, notFound });
+  registerBetRulingRoutes({ route, db, config, layout, send, notFound, allowHeavyRead, readRuling: readPublicRuling });
   registerCourtRoutes({ route, db, config, layout, send, notFound, chain: chainFor });
   registerBetEvidenceRoutes({ route, db, config, layout, needPost, csrfField, send, redirect, notFound });
   registerPlayRoutes({ botUsername, route, db, config, layout, needUser, needPost, csrfField, send, redirect, notFound, chain: chainFor, quotes, payVersion: PAY_VERSION });

@@ -90,11 +90,23 @@ export async function exportPage(db, user, url, { owner = false } = {}) {
   // One revision query for the entire page. Pairing the save with its statement
   // excludes another save's private revisions even when the statement is shared.
   const revisions = page.rows.length ? await db.many(`
-    select r.id, r.statement_id, r.save_id, r.kind, r.actor, r.before, r.after, r.note, r.at
+    with history as (
+      select r.*, (r.kind in ('resolved', 'resolution_changed', 'disputed') and exists (
+        select 1 from bilateral_bets b join saves s on s.id = b.source_save_id
+        where s.statement_id = r.statement_id and not exists (
+          select 1 from bilateral_bet_publications p
+          where p.bet_id = b.id and p.creator_user_id = b.creator_user_id and p.withdrawn_at is null
+        )
+      )) as redact
     from revisions r where r.statement_id = any($1::bigint[])
       and (r.save_id is null or r.save_id = any($2::bigint[]))
       and ($3::bigint is null or r.id > $3::bigint)
-    order by r.id limit $4`, [page.rows.map(row => row.statement_id), page.rows.map(row => row.save_id), after, historyLimit + 1]) : [];
+    order by r.id limit $4)
+    select id, statement_id, save_id, kind, actor,
+      case when redact then before - 'url' - 'note' else before end as before,
+      case when redact then after - 'url' - 'note' else after end as after,
+      case when redact then 'Result recorded. Bet evidence stays on its Bet page.' else note end as note, at
+    from history order by id`, [page.rows.map(row => row.statement_id), page.rows.map(row => row.save_id), after, historyLimit + 1]) : [];
   const history = revisions.slice(0, historyLimit);
   const historyContinues = revisions.length > historyLimit;
   return {

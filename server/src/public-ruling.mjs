@@ -1,4 +1,4 @@
-// INTEGRATION: JSON-only verified proof cache. Visibility and Bet bindings stay live on every request.
+// INTEGRATION: verified proof cache. Visibility and Bet bindings stay live on every request.
 import { createHash } from 'node:crypto';
 import { rulingCovers, verifyEnclaveRecordWithGpu } from './enclave-ruling.mjs';
 import { UserError } from './store.mjs';
@@ -97,6 +97,6 @@ export function createPublicRulingReader({ verify = verifyEnclaveRecordWithGpu, 
       entry.etag = `"${createHash('sha256').update(body).digest('hex')}"`;
       entry.agrees = agrees;
     }
-    return { body: entry.body, etag: entry.etag };
+    return { record: { ...record, agrees }, body: entry.body, etag: entry.etag };
   };
 }

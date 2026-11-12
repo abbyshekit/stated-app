@@ -38,7 +38,7 @@ const STAKES = ['0.1', '0.25', '0.5', '1'];
 const time = betTime;
 const utc = (value) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/.test(value) ? `${value}${value.length === 16 ? ':00' : ''}Z` : value;
 const otherSide = (bet) => (bet.creator_side === 'yes' ? 'no' : 'yes');
-const enclaveRecipe = `Run node scripts/verify-enclave-ruling.mjs <baseUrl> <betId>. Use verifyEnclaveRecord to check signed request and response hashes, model signatures, material and evidence. Re-fetch Coinbase candles or inspect submitted links and text hashes; compare the public Result. Hardware verification is separate: ${verificationRecipe.verificationCenter}.`;
+export const enclaveRecipe = `Run node scripts/verify-enclave-ruling.mjs <baseUrl> <betId>. Use verifyEnclaveRecord to check signed request and response hashes, model signatures, material and evidence. Re-fetch Coinbase candles or inspect submitted links and text hashes; compare the public Result. Hardware verification is separate: ${verificationRecipe.verificationCenter}.`;
 
 // A Bet settled by the referee was settled from the post's recorded Result, so its words carry the same
 // mark as the post: highlighted if it came true, struck through if it did not. A Bet two people settled
@@ -47,8 +47,7 @@ const refereeRuling = (bet) => (bet.status === 'settled' && (bet.settled_by || b
 const claimWords = (bet, ruling = refereeRuling(bet)) => markedClaim(bet.claim, ruling);
 const claimClass = (claim) => `prop bet-claim${claim.length > 200 ? ' long' : claim.length > 120 ? ' mid' : ''}`;
 
-export function registerBetRoutes({ route, db, config, layout, needUser, needAdmin, isAdmin, needPost, csrfField, send, redirect, notFound, fetchImpl, walletVersion, payVersion, botUsername, chain, quotes = null, allowHeavyRead = null }) {
-  const publicRuling = createPublicRulingReader({ recipe: enclaveRecipe });
+export function registerBetRoutes({ route, db, config, layout, needUser, needAdmin, isAdmin, needPost, csrfField, send, redirect, notFound, fetchImpl, walletVersion, payVersion, botUsername, chain, quotes = null, allowHeavyRead = null, publicRuling = createPublicRulingReader({ recipe: enclaveRecipe }) }) {
   // Standalone route registrars retain a budget; createApp supplies its shared export/ruling budget.
   const fallbackBudget = createReadLimiter({ railway: config.hosted && Boolean(process.env.RAILWAY_ENVIRONMENT) });
   // DESIGN.md: only the proposer name is bold in the source attribution.

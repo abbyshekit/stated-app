@@ -141,22 +141,41 @@ function view(row) {
 
 // DESIGN.md: publication never grants access to another Bet's private evidence.
 export async function evidenceForBet(tx, statementId, betId, viewerId = null) {
-  return tx.many(`select e.*, u.x_username from bet_evidence e
+  const rows = await tx.many(`select e.*, u.x_username,
+    b.creator_user_id as evidence_creator_id, b.acceptor_user_id as evidence_acceptor_id from bet_evidence e
     join users u on u.id=e.user_id join bilateral_bets b on b.id=e.bet_id
     where e.statement_id=$1 and (e.bet_id=$2
       or b.creator_user_id=$3 or b.acceptor_user_id=$3
       or exists (select 1 from bilateral_bet_publications p
         where p.bet_id=b.id and p.creator_user_id=b.creator_user_id and p.withdrawn_at is null))
     order by e.at, e.id`, [statementId, betId, viewerId]);
+  // Both public projections and participant evidence pages use this reader. A
+  // link from another Bet must not reveal more identity than that Bet publishes.
+  const ids = [...new Set(rows.map(item => String(item.bet_id)))];
+  const identities = new Map();
+  if (ids.length) {
+    for (const row of await tx.many(`${SELECT} where b.id = any($1::uuid[]) and p.withdrawn_at is null`, [ids])) {
+      identities.set(String(row.id), { row, bet: view(row) });
+    }
+  }
+  return rows.map(item => {
+    if (viewerId != null && [item.evidence_creator_id, item.evidence_acceptor_id]
+      .some(id => id != null && String(id) === String(viewerId))) return item;
+    const identity = identities.get(String(item.bet_id));
+    const username = !identity ? null : String(item.user_id) === String(identity.row.creator_user_id)
+      ? identity.bet.creator_username : String(item.user_id) === String(identity.row.acceptor_user_id)
+        ? identity.bet.acceptor_username : null;
+    return { ...item, x_username: username };
+  });
 }
 
-export async function readPublicBet(tx, id, { evidenceWindowSeconds = 86400 } = {}) {
+export async function readPublicBet(tx, id, { evidenceWindowSeconds = 86400, readRuling = readEnclaveRuling } = {}) {
   const row = await tx.one(`${SELECT} where b.id=$1 and p.withdrawn_at is null for share of b,p`, [id]);
   if (!row) return null;
   const bet = view(row);
   // DESIGN.md: only published Bets disclose the verified call and submitted links.
   // Full source text belongs in the signed JSON, never in this page projection.
-  const record = await readEnclaveRuling(tx, id);
+  const record = await readRuling(tx, id);
   bet.enclave = record ? {
     mode: record.mode, outcome: record.outcome, agrees: record.agrees,
     models: record.verdicts.map(verdict => verdict.model), reason: record.verdicts[0].parsed.reason,

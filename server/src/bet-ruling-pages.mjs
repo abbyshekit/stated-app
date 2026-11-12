@@ -4,7 +4,8 @@ import Decimal from 'decimal.js';
 import { html } from './html.mjs';
 import { readPublicBet } from './bet-public.mjs';
 import { face, facesByUsername, facesFor } from './certificate.mjs';
-import { readEnclaveRuling, quoteSummary } from './enclave-ruling.mjs';
+import { readEnclaveRuling, verifiedQuoteSummary } from './enclave-ruling.mjs';
+import { createReadLimiter } from './public-read-limits.mjs';
 import { publicPredictionOwner, publicSave } from './store.mjs';
 import { dayMonth } from './marked.mjs';
 import { markedClaim } from './bet-view.mjs';
@@ -122,23 +123,34 @@ function evidenceFold(record) {
   </details>`;
 }
 
-export function registerBetRulingRoutes({ route, db, config, layout, send, notFound }) {
+export function registerBetRulingRoutes({ route, db, config, layout, send, notFound, allowHeavyRead = null, readRuling = readEnclaveRuling }) {
+  const fallbackBudget = createReadLimiter({ railway: config.hosted && Boolean(process.env.RAILWAY_ENVIRONMENT) });
   // Match web.mjs static handling, restricted to the bundled model logos.
   route('GET', /^\/static\/models\/(qwen|deepseek|zai)\.svg$/, (ctx) => {
     ctx.res.writeHead(200, { 'content-type': 'image/svg+xml', 'cache-control': 'public, max-age=86400', 'x-content-type-options': 'nosniff' });
     ctx.res.end(MODEL_LOGOS.get(ctx.params[0]));
   });
   route('GET', new RegExp(`^/bets/${ID}/ruling$`), async (ctx) => {
+    if (allowHeavyRead) {
+      if (!allowHeavyRead(ctx)) return;
+    } else {
+      const budget = fallbackBudget(ctx.req);
+      if (!budget.allowed) return send(ctx.res, 429, JSON.stringify({ error: 'Too many downloads. Retry after the indicated delay.' }), {
+        kind: 'private', headers: { 'content-type': 'application/json; charset=utf-8', 'retry-after': String(budget.retryAfter) },
+      });
+    }
     const result = await db.tx(async tx => {
-      const bet = await readPublicBet(tx, ctx.params[0], config.play);
+      let record;
+      const bet = await readPublicBet(tx, ctx.params[0], { ...config.play, readRuling: async (tx, id) => {
+        record = await readRuling(tx, id);
+        return record;
+      } });
       // The signed text cannot be redacted. Preserve the JSON route's private-evidence gate.
       if (!bet?.enclave || bet.evidence?.privateItemCount) return null;
-      let record;
       let quotes;
       try {
-        record = await readEnclaveRuling(tx, bet.id);
         if (!record) return null;
-        quotes = quoteSummary(record);
+        quotes = verifiedQuoteSummary(record);
       } catch { return null; }
       return { bet, record, quotes, post: await rulingPost(tx, bet, record.outcome) };
     });

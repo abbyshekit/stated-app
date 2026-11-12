@@ -321,13 +321,13 @@ test('the ruling route renders both plain lines and suppresses them when the pla
     layout: async (ctx, title, body, options) => { layoutOptions = options; return String(body); }, send(res, status, body) { assert.equal(status, 200); page = body; },
     notFound() { assert.fail('The verified fixture must render'); } });
   assert.equal(typeof handler, 'function');
-  await handler({ params: [row.id], res: {} });
+  await handler({ params: [row.id], req: { headers: {}, socket: { remoteAddress: '127.0.0.1' } }, res: {} });
   assert.equal(layoutOptions.back, `/bets/${row.id}`);
   assert.match(page, /class="post-origin"/);
   assert.doesNotMatch(page, /class="post-time"|All (?:three|\d+) models said|>Back to bet<\/a>/);
   assert.match(page, /<summary>Check it yourself<\/summary>[\s\S]*<p>When this ruling was made, the official dstack verifier reported that the boot measurements match the published dstack OS 0\.5\.12 image, production build\.<\/p>/);
   assert.ok(page.includes('<p>It also reported the Intel TCB up to date with no security advisories. The command below asks the verifier again.</p>'));
   delete record.plan.dstack;
-  await handler({ params: [row.id], res: {} });
+  await handler({ params: [row.id], req: { headers: {}, socket: { remoteAddress: '127.0.0.1' } }, res: {} });
   assert.doesNotMatch(page, /boot measurements match|Intel TCB up to date/);
 });

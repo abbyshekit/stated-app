@@ -83,7 +83,7 @@ export function privacyPage({ bot, sessionDays, textPolicy }) {
       <p>This policy covers Stated: this site and the @${bot} bot on X.</p>
 
       <h2>Much of Stated is public by design</h2>
-      <p>A bet made on X is a set of public posts, and the bot’s replies name the bettors. A published bet’s page shows the post, the stake, the evidence and the ruling, and the X handle of each side that bet from an X account. Its ruling’s record, including what each model was sent and what it answered, is published for anyone to check, except jurors’ reasons when the ruling also covered a private bet. A bet made by replying on X is published; a bet started on this site is published only when its creator chooses, and until then its page is shown only to its two bettors.</p>
+      <p>A bet made on X is a set of public posts, and the bot’s replies name the bettors. A published bet’s page shows the post, the stake, the evidence and the ruling, and the X handle of each side that bet from an X account. Its ruling’s record, including what each model was sent and what it answered, is published for anyone to check, except jurors’ reasons when the ruling also covered a private bet. A bet made by replying on X is published; a bet started on this site is published only when its creator chooses. Before publication or after its creator takes it off public pages, its bettors can see its page, and signed-in people with its link can also see it while it is an open invitation.</p>
       <p>Each bettor’s NEAR account is named after their X handle. NEAR testnet records every account, deposit, ruling and payout publicly, and Stated Court’s proposals and votes are public there too. We cannot delete what is on NEAR, and posts on X are governed by X.</p>
 
       <h2>What Stated collects</h2>
@@ -104,7 +104,7 @@ export function privacyPage({ bot, sessionDays, textPolicy }) {
 
       <h2>Who else receives it</h2>
       <ul>
-        <li><b>X.</b> Stated reads posts and profiles and posts the bot’s replies through the X API. Pages that show a profile picture load it from X’s image server, which sees that your browser loaded it and which site it came from.</li>
+        <li><b>X.</b> Stated reads posts and profiles and posts the bot’s replies through the X API. Pages show a letter or a stored image; your browser does not load profile pictures from X.</li>
         <li><b>NEAR AI Cloud.</b> The jury is sent the claim and the post’s link, its date and deadline, each bet’s ID and terms fingerprint, and the evidence. It is not given the bettors’ names or accounts, though the post’s link shows who wrote the post.</li>
         <li><b>NEAR.</b> Transactions go through public NEAR RPC providers and are public on the chain.</li>
         <li><b>The sites behind evidence links.</b> Stated’s server fetches each link a bettor posts. The site sees a request from Stated’s server, not from the bettor.</li>
@@ -117,7 +117,7 @@ export function privacyPage({ bot, sessionDays, textPolicy }) {
       <p>On a private save’s page you can ask to see that one post’s words. Stated’s server then requests the post from X’s public oEmbed service. X sees a request from Stated’s server for that post at that time. It is not told who you are, and Stated never requests several of your posts together, but if you open several posts one after another, X sees those requests close together. The words are kept in the server’s memory for up to an hour, shared by everyone who asks for the same post, and are never written to the database. A check that finds the post protected or deleted drops that copy then. Until the check, a cached copy can remain for up to an hour.</p>
 
       <h2>Who can see your saves</h2>
-      <p>Every save starts private, and so does your profile, except that your profile page lists, under your X handle, the published bets you took part in. If you make your profile public, only the saves you choose are shown, on pages, search, exports, previews and statistics. Private notes and reminder dates are never shown to anyone else. Reviewers who record outcomes see each claim and can open its post on X, which shows who wrote it. For a claim no one has made public, they are not shown who saved it, how many saved it, or any terms a saver confirmed.</p>
+      <p>Saves start private unless, with a public profile, you choose public for a save or set public as your default in settings. Your profile starts private, except that your profile page lists, under your X handle, the published bets you took part in. If you make your profile public, only the saves you choose are shown, on pages, search, exports, previews and statistics. Private notes and reminder dates are never shown to anyone else. Reviewers who record outcomes see each claim and can open its post on X, which shows who wrote it. For a claim no one has made public, they are not shown who saved it, how many saved it, or any terms a saver confirmed.</p>
 
       <h2>How long it is kept</h2>
       <ul>
@@ -130,7 +130,7 @@ export function privacyPage({ bot, sessionDays, textPolicy }) {
       <ul>
         <li>Choose what to make public, and make it private again, from your settings and each save’s page. A bet’s creator can take a published bet off public pages; what is on NEAR and X stays.</li>
         <li>Download your profile as JSON at <a href="/me/export.json">/me/export.json</a>, following pagination.next until it is null. When historyContinues is true, the next page repeats the saves with their next batch of revisions.</li>
-        <li>Remove any save from its page.</li>
+        <li>Remove a save from its page unless a bet relies on it; those saves stay to protect the stakes.</li>
         <li>Claim your NEAR account from your wallet page. Stated then erases its copy of the key.</li>
         <li>Ask us to delete your account. We will delete your saves, notes and inbox and remove your name and picture from your profile. We keep what is on NEAR or X, the records of bets you took part in, and what we must keep for security or by law.</li>
         <li>Depending on where you live, you may have rights to see, correct or delete your information, or to object to how it is used. To use them, ask us.</li>

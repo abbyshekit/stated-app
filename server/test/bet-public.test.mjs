@@ -225,6 +225,43 @@ test('public identity requires a bound acceptance and separate consent', async (
   assert.equal((await publicBet(s.db, boundBet.id)).acceptor_username, other.x_username);
 });
 
+test('public evidence HTML and projection withhold unconsented acceptors on this Bet and a sibling', async () => {
+  const current = await makeBet();
+  const sibling = await makeBet();
+  const source = await s.db.one(`insert into sources (platform,platform_id,url,text,acquisition)
+    values ('x',$1,'https://example.org/post','Shared post','mention') returning id`, [randomUUID()]);
+  const statement = await s.db.one(`insert into statements (source_id,span,speaker)
+    values ($1,'Shared post','@author') returning id`, [source.id]);
+  const save = await s.db.one(`insert into saves (owner_x_user_id,owner_user_id,statement_id,relation,intake)
+    values ($1,$2,$3,'following','mention') returning id`, [creator.x_user_id, creator.id, statement.id]);
+  for (const [index, bet] of [current, sibling].entries()) {
+    await s.db.query('update bilateral_bets set source_save_id=$2 where id=$1', [bet.id, save.id]);
+    await storeFinalizedSnapshot(bet, { status: 'accepted', acceptor: 'joiner.testnet', acceptedUser: other });
+    await publishBet(s.db, creator, bet.id);
+    const body = 'Official evidence';
+    await s.db.query(`insert into bet_evidence (statement_id,bet_id,user_id,side,url,title,body,body_hash,via)
+      values ($1,$2,$3,'no',$4,$5,$6,$7,'page')`, [statement.id, bet.id, other.id,
+      `https://example.org/consent/${index}`, `Evidence ${index}`, body, sha256(Buffer.from(body))]);
+  }
+  let projection = await publicBet(s.db, current.id);
+  assert.equal(projection.acceptor_username, null);
+  assert.deepEqual(projection.evidence.items.map(item => [item.side, item.by]), [['no', null], ['no', null]]);
+  let page = await s.browser().get(`/bets/${current.id}`);
+  assert.equal(page.status, 200);
+  assert.match(page.text, /Bet no:/);
+  assert.match(page.text, /Evidence 0/);
+  assert.match(page.text, /Evidence 1/);
+  assert.doesNotMatch(page.text, /public_other/);
+  await consentToPublicBet(s.db, other, current.id);
+  projection = await publicBet(s.db, current.id);
+  assert.deepEqual(projection.evidence.items.map(item => item.by), [other.x_username, null]);
+  page = await s.browser().get(`/bets/${current.id}`);
+  assert.match(page.text, /Evidence 0<\/a>, @public_other/);
+  assert.doesNotMatch(page.text, /Evidence 1<\/a>, @public_other/);
+  await consentToPublicBet(s.db, other, sibling.id);
+  assert.deepEqual((await publicBet(s.db, current.id)).evidence.items.map(item => item.by), [other.x_username, other.x_username]);
+});
+
 test('settled and refunded public bets remain readable from finalized snapshots', async () => {
   for (const status of ['settled', 'refunded']) {
     const bet = await makeBet();
