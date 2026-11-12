@@ -125,7 +125,7 @@ test('the hall counts only verified publications, limits rows and distinguishes 
     const page = await browser.get('/');
     assert.equal(page.status, 200);
     assert.match(page.text, /8 bets, 8 settled, [0-9.]+ test NEAR won/);
-    assert.match(page.text, /@public_creator won 0\.2 test NEAR/);
+    assert.match(page.text, /@public_creator won the 0\.2 test NEAR pot/);
     for (const bet of bets.slice(8)) assert.doesNotMatch(page.text, new RegExp(`/bets/${bet.id}`));
     assert.doesNotMatch(page.text, /private fixture note|private\.example\.org/);
   }
@@ -313,10 +313,10 @@ test('public settlement proof requires a matching referee event and publication'
   assert.match(privatePage.text, /<b>Did not come true<\/b>/);
   const shareText = (response) => new URL(response.text.match(/href="(https:\/\/x\.com\/intent\/post\?[^"]+)"/)[1]
     .replaceAll('&amp;', '&')).searchParams.get('text');
-  assert.equal(shareText(privatePage), 'Result: No. The no side won 0.2 test NEAR.');
+  assert.equal(shareText(privatePage), 'Result: No. The no side won the 0.2 test NEAR pot.');
   await consentToPublicBet(s.db, other, privateWinner.id);
   assert.equal(shareText(await s.browser().get(`/bets/${privateWinner.id}`)),
-    'Result: No. @public_other won 0.2 test NEAR.');
+    'Result: No. @public_other won the 0.2 test NEAR pot.');
 
   const invalidCases = [
     ['agreement resolution', { method: 'agreement' }],

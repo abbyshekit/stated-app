@@ -103,6 +103,13 @@ export function registerBetStartRoutes({ route, db, config, layout, send, redire
     const chosenDate = presetDate ? presetDate.toISOString().slice(0, 10) : date;
     const pickedDate = /^\d{4}-\d{2}-\d{2}$/.test(chosenDate) ? new Date(`${chosenDate}T00:00:00Z`) : null;
     const validDate = pickedDate && Number.isFinite(pickedDate.getTime()) && pickedDate.toISOString().slice(0, 10) === chosenDate;
+    const dateParts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(chosenDate);
+    const dateMonth = dateParts ? Number(dateParts[2]) : 0;
+    const dateDay = dateParts ? Number(dateParts[3]) : 0;
+    const impossibleDate = Boolean(dateParts && !validDate);
+    const impossibleDateLabel = impossibleDate
+      ? `${dateMonth >= 1 && dateMonth <= 12 ? `${dateDay} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][dateMonth - 1]} ${dateParts[1]}` : chosenDate} is not a date.`
+      : null;
 
     let error = null;
     if (link && !postId) error = BAD_LINK;
@@ -110,6 +117,7 @@ export function registerBetStartRoutes({ route, db, config, layout, send, redire
     else if (go && !side) error = 'Choose bet yes or bet no.';
     else if (go && !stake) error = `Choose a stake of up to 1 ${unit()}.`;
     else if (go && limit && aboveLimit(stake, limit)) error = limitReply(config, limit);
+    else if (go && needsDate && impossibleDate) error = impossibleDateLabel;
     else if (go && needsDate && (!validDate || (effectivePreset === 'year' ? yearUnavailable : chosenDate < minDate || chosenDate > maxDate))) error = 'Choose a date from tomorrow to a year away.';
     else if (go) return redirect(ctx.res, replyComposerUrl(config, bot, postId, stake, side, needsDate ? chosenDate : null));
 
@@ -197,20 +205,19 @@ export function registerBetStartRoutes({ route, db, config, layout, send, redire
           <p class="meta"><span>Replying to ${postHandle ? `@${postHandle}` : 'that post'}</span></p>
           <p class="said cmd"><b>@${bot}</b> bet ${STAKES.map((value, i) => html`<i class="k${i}">${value}</i>`)} <i class="yes">yes</i><i class="no">no</i><i class="unset">yes or no</i>${needsDate ? previewDate : ''}</p>
         </div></li></ul>
-        <p class="gut quiet">Anyone can take the other side.</p>
         <p class="meta stake-label">Your side</p>
         <div class="seg side-choice" role="radiogroup" aria-label="Your side">
           ${SIDES.map((value) => html`<input type="radio" id="side-${value}" name="side" value="${value}" required${value === side ? ' checked' : ''}><label for="side-${value}">Bet ${value}</label>`)}
         </div>
         <p class="meta stake-label">Stake each, in ${unit()}</p>
         <div class="seg side-choice" role="radiogroup" aria-label="Stake each, in ${unit()}">
-          ${STAKES.map((value, i) => html`<input type="radio" id="stake-${i}" name="stake" value="${value}"${value === stakeNow ? ' checked' : ''}${limit && aboveLimit(value, limit) ? ' disabled' : ''}><label for="stake-${i}">${value}</label>`)}
+          ${STAKES.map((value, i) => html`<input type="radio" id="stake-${i}" name="stake" value="${value}"${value === stakeNow ? ' checked' : ''}${limit && aboveLimit(value, limit) ? html` disabled aria-disabled="true"` : ''}><label for="stake-${i}"${limit && aboveLimit(value, limit) ? html` aria-disabled="true"` : ''}>${value}</label>`)}
         </div>
         ${hint ? html`<p class="gut quiet">${hint}</p>` : ''}
         ${needsDate ? html`<p class="meta stake-label" id="deadline-label">Deadline, 23:59 UTC</p><div class="seg side-choice date-presets" role="radiogroup" aria-labelledby="deadline-label">
           ${[['week', '1 week'], ['month', '1 month'], ...(!yearUnavailable ? [['year', '31 Dec']] : []), ['custom', 'Other']].map(([value, label]) => html`<input type="radio" id="date-${value}" name="datePreset" value="${value}"${effectivePreset === value ? ' checked' : ''}><label for="date-${value}">${label}</label>`)}
         </div><div class="gut custom-date">
-          <input type="${effectivePreset === 'custom' && date && !validDate ? 'text' : 'date'}" id="bet-date" name="date" value="${date}" min="${minDate}" max="${maxDate}" aria-labelledby="deadline-label"${error && effectivePreset === 'custom' && (!validDate || chosenDate < minDate || chosenDate > maxDate) ? html` aria-invalid="true"` : ''}>
+          <input type="${effectivePreset === 'custom' && date && !validDate ? 'text' : 'date'}" id="bet-date" name="date" value="${date}" min="${minDate}" max="${maxDate}" aria-labelledby="deadline-label"${effectivePreset === 'custom' && date && !validDate ? html` placeholder="YYYY-MM-DD"` : ''}${error && effectivePreset === 'custom' && (!validDate || chosenDate < minDate || chosenDate > maxDate) ? html` aria-invalid="true"` : ''}>
         </div>` : ''}
         ${error ? html`<p class="err" role="alert">${error}</p>` : ''}
         <div class="acts"><button class="primary big send" type="submit"><span class="need">Choose yes or no</span><span class="go">${X_MARK}Reply ${config.x.simulatedOrigin ? 'in simulated X' : 'on X'}</span></button></div>

@@ -43,7 +43,7 @@ function signFixtureEvidence(record) {
     const bytes = Buffer.from(JSON.stringify(request));
     verdict.requestBody = bytes.toString('base64');
     verdict.requestHash = sha256(bytes);
-    verdict.parsed.confidence = [0.97, 0.92, 0.99][index];
+    verdict.parsed.confidence = record.evidence.kind === 'coinbase-candles' ? [0.99, 1, 0.99][index] : [0.97, 0.92, 0.99][index];
     verdict.verdict.confidence = verdict.parsed.confidence;
     const response = JSON.parse(Buffer.from(verdict.responseBody, 'base64').toString('utf8'));
     response.choices[0].message.content = JSON.stringify(verdict.parsed);
@@ -306,7 +306,7 @@ async function gallery(stack) {
       claim: 'Toronto council will approve the waterfront ferry terminal budget before the deadline.',
       criteria: 'The published council minutes record approval of the terminal budget before the deadline.',
       source: 'evidence', mode: 'review', rulingOutcome: 'yes', settledOutcome: 'yes',
-      reason: 'The published council minutes record the budget approval before the deadline, matching the settled Yes outcome.',
+      reason: 'The published council minutes record the vote approving the waterfront ferry terminal budget before the deadline.',
       evidence: [{ side: 'yes', url: 'https://council.example.org/minutes/ferry-terminal-budget', title: 'Council minutes: ferry terminal budget approved',
         body: 'The council minutes record the motion approving the waterfront ferry terminal budget. The vote took place before the deadline.' }] },
   ];

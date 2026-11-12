@@ -45,8 +45,9 @@ One family: the system sans (`--sans`), as X uses. No display face, no monospace
 | --- | --- | --- |
 | Wordmark | 22px | 800 |
 | The words on a Prediction page | 28px (22px at 320) | 400 |
+| The words on a Bet or ruling page | 28px; 24px over 120 characters (both 22px at 320); 20px over 200 (18px below 360) | 400 |
 | The words in a list | 16px | 400 |
-| Yes / No | 36px | 700 |
+| Yes / No / Undecided on a ruling page | 22px (20px at 320); 18px for posts over 200 characters (16px below 360) | 600 |
 | Stake figure | 28px | 600 |
 | Body and names | 15 to 17px | 400 / 700 |
 | Supporting lines | 14px | 400, `--dim` |
@@ -80,7 +81,7 @@ The words are the largest thing on a Prediction page. Yes and No sit beside the 
 
 ## The jury
 
-The ruling page starts with the post, marked Yes or struck through for No, then the outcome word. Three jurors show their makers’ logos and their verdicts, such as “Yes, 97% sure”. One reason line beneath them gives the price and deadline, or quotes a model’s reason beside its name and the deadline. Reasons and checks stay in folds. One filled button makes the next bet.
+The ruling page starts with the author above the post, marked Yes or struck through for No, at the Bet page’s claim sizes. The smaller outcome word sits on one line with the date, followed by the jury sentence, three jurors, a reason line and the filled button to make the next bet. The button stays in the first screen at 390 by 844. Jurors show their makers’ logos and verdicts, such as “Yes, 99% sure”; a dissenting verdict uses ink while the majority stays grey. The reason gives the price and deadline, or quotes a model’s reason beside its name and the deadline. Links, model reasons and checks stay in folds after the button.
 
 Bettors post links until the window closes. Their page leads with “Links are open” and “Links close in …”, followed by UTC; visitors and bettors open the same “Links, 2” fold. The filled button says “Add a link”. On the links page, paste first, list second, with saved text in “What the jury reads”.
 

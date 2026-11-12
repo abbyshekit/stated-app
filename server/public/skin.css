@@ -109,6 +109,7 @@ button.primary, .button.primary, .btn, .pill.solid { background: var(--ink); col
 button.link, .tl, button.tl { font-family: var(--sans); font-size: 15px; font-weight: 400; display: inline-flex; align-items: center; min-height: 44px; padding: 0; border: 0; border-radius: 0; background: none; color: var(--ink); text-decoration: underline; text-decoration-color: var(--dim); text-underline-offset: 3px; cursor: pointer; }
 .tl.center { justify-content: center; }
 .tl:has(> .xmark) { gap: 8px; }
+.acts > .tl, .acts .two > .tl { padding: 12px 0; line-height: 20px; }
 @media (prefers-reduced-motion: no-preference) {
   button, .button, .btn, .pill { transition: transform 100ms ease-out, background-color 120ms ease-out; }
   button:active, .button:active, .btn:active, .pill:active { transform: scale(0.97); }
@@ -162,12 +163,12 @@ label.check { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10
 .blank b { font-weight: 700; }
 
 /* The marks. Came true: a highlighter bar over the words, line by line. Did not: a line through them. */
-.hl { background: var(--mark); color: var(--on-mark); padding: 0.24em 0.16em; margin: 0 -0.16em; border-radius: 2px; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
-.post .hl { padding: 0.19em 0.14em; margin: 0 -0.14em; }
+.hl { background: var(--mark); color: var(--on-mark); padding: 0.16em 0; margin: 0; border-radius: 0; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.post .hl { padding: 0.19em 0; }
 .struck { color: var(--ink); opacity: 1; text-decoration: line-through; text-decoration-thickness: 2px; text-decoration-color: var(--ink); }
 @media (prefers-reduced-motion: no-preference) {
   .hl.sweep { background: linear-gradient(var(--mark), var(--mark)) no-repeat 0 0 / 0% 100%; color: inherit; animation: sweep 480ms cubic-bezier(0.22, 1, 0.36, 1) 250ms forwards; }
-  @keyframes sweep { to { background-size: 100% 100%; color: var(--on-mark); } }
+  @keyframes sweep { 99% { background-size: 100% 100%; color: var(--on-mark); } to { background: var(--mark); color: var(--on-mark); } }
 }
 
 /* One post, full size: the words are the largest thing on the page. */
@@ -187,20 +188,23 @@ label.check { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10
 .verdict span { color: var(--dim); font-size: 15px; }
 .verdict .tl { font-size: 15px; color: var(--dim); min-height: 36px; align-self: center; }
 /* DESIGN.md: the jury's faces carry the verdict; its technical detail stays folded. */
-.ruling-post .prow .said, .evidence-post .prow .said { display: block; overflow: visible; -webkit-line-clamp: unset; }
-.ruling-verdict { flex-wrap: wrap; gap: 8px 12px; }
-.ruling-verdict > span { font-size: 14px; }
+.evidence-post .prow .said { display: block; overflow: visible; -webkit-line-clamp: unset; }
+.ruling-verdict { flex-wrap: nowrap; gap: 8px 12px; }
+.ruling-verdict b { font-size: 22px; font-weight: 600; white-space: nowrap; }
+.ruling-verdict b .hl { font-size: inherit; color: var(--on-mark); }
+.ruling-post:has(.bet-claim.long) + .ruling-verdict b { font-size: 18px; }
+.ruling-verdict > span { font-size: 14px; white-space: nowrap; }
 .jury-rail { list-style: none; margin: 0; padding: 24px 16px 8px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .jury-rail .seat { grid-template-rows: auto 1fr auto; }
 .jury-rail .seat b { font-size: 14px; font-weight: 400; overflow-wrap: anywhere; }
 .jury-rail .seat > span:last-child { font-variant-numeric: tabular-nums; }
+.jury-rail .seat.dissent > span:last-child { color: var(--ink); }
 .jury-rail .seat .model-logo { border-radius: 0; background: var(--ink); mask-position: center; mask-size: contain; mask-repeat: no-repeat; }
 .model-logo.qwen { mask-image: url('/static/models/qwen.svg'); }
 .model-logo.deepseek { mask-image: url('/static/models/deepseek.svg'); }
 .model-logo.zai { mask-image: url('/static/models/zai.svg'); }
 @media (prefers-color-scheme: light) {
   .verdict.yes b { color: var(--ink); }
-  .ruling-verdict.yes b { background: var(--mark); color: var(--on-mark); }
 }
 .proof { display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; padding: 4px 16px 12px; margin: 0; border-bottom: 1px solid var(--line); font-size: 15px; min-height: 0; }
 .proof:empty { padding: 6px 0; }
@@ -238,6 +242,7 @@ label.check { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10
 .prop.bet-claim.long { font-size: 20px; }
 @media (max-width: 340px) {
   .prop.bet-claim:not(.long) { font-size: 22px; }
+  .ruling-verdict b { font-size: 20px; }
 }
 @media (max-width: 359px) {
   .prop.bet-claim.long { font-size: 18px; }
@@ -439,7 +444,7 @@ input.bad[aria-invalid="true"],
 .acct { overflow-wrap: anywhere; }
 /* The post above a Bet: its author, then a quiet link to it on X at the end of the row. */
 .source-author .head .src { margin-left: auto; color: var(--dim); font-size: 14px; font-weight: 400; white-space: nowrap; }
-.prop .hl { padding: 0.16em 0.14em; margin: 0 -0.14em; }
+.prop .hl { padding: 0.16em 0; }
 
 /* A row's bet line: the two names stay together, and the stake drops to its own line before either is squeezed. */
 .meta.bet { flex-wrap: wrap; }
@@ -456,12 +461,13 @@ input.bad[aria-invalid="true"],
 @media (max-width: 420px) { .seat b { font-size: 15px; } }
 .bet-seats .seat b { overflow-wrap: anywhere; }
 .bet-seats .seat b.long-handle { font-size: 13px; white-space: nowrap; overflow-wrap: normal; max-width: 100%; }
-/* DESIGN.md: below 360 the stake sits above two full-width seats and the jury uses rows. */
+/* DESIGN.md: below 360 the stake sits above two half-width seats and the jury uses rows. */
 @media (max-width: 359px) {
-  .bet-seats .versus { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 0; }
+  .bet-seats .versus { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
   .bet-seats .pot { grid-column: 1 / -1; grid-row: 1; padding-top: 0; }
   .bet-seats .seat { grid-row: 2; }
-  .bet-seats .seat b.long-handle { white-space: nowrap; overflow-wrap: normal; }
+  .bet-seats .seat b.long-handle { white-space: normal; overflow-wrap: anywhere; }
+  .ruling-post:has(.bet-claim.long) + .ruling-verdict b { font-size: 16px; }
   .jury-rail { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .jury-rail .seat { grid-template-columns: 32px minmax(0, 1fr) auto; grid-template-rows: auto; align-items: center; gap: 8px; }
   .jury-rail .seat .face { width: 32px; height: 32px; margin: 0; font-size: 16px; }
@@ -473,7 +479,7 @@ input.bad[aria-invalid="true"],
 .say { margin: 4px 0 0; padding: 0 16px 6px; font-size: 24px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; overflow-wrap: anywhere; }
 /* A long name wraps on the post's own page. It is never cut. */
 .post .head b { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
-.source-author .head .src { display: inline-flex; align-items: center; min-height: 44px; }
+.source-author .head .src { display: inline-flex; align-items: center; min-height: 44px; padding: 12px 0; line-height: 20px; }
 .fold form.takekey { display: grid; gap: 8px; padding: 0 0 4px; }
 
 /* The home page's dare: the open bet sits with the post it is on. */
@@ -546,7 +552,7 @@ h1.send .sel { font-weight: inherit; user-select: all; -webkit-user-select: all;
 /* A line of text or a link set in from the page's edge. (Not .pad: that is the layout's own class on main.) */
 .gut { margin: 10px 0 0; padding: 0 16px; }
 .gut.link-row { margin-top: 0; }
-.gut.link-row .tl { padding: 0; min-height: 44px; }
+.gut.link-row .tl { padding: 12px 0; min-height: 44px; line-height: 20px; }
 .pays { list-style: none; margin: 16px 16px 0; padding: 0; border-top: 1px solid var(--line); }
 .pays.past { margin: 0; border-top: 0; }
 .pays li { border-top: 1px solid var(--line); }
@@ -581,6 +587,11 @@ form:has(#date-custom:checked) .cmd .date-custom { display: inline; }
 form:has(#date-custom:checked) .custom-date { display: block; }
 .date-presets label { min-width: 0; padding: 4px; text-align: center; white-space: normal; line-height: 20px; }
 .date-presets input:disabled + label { opacity: 0.45; cursor: default; }
+/* Four presets share 288px at 320: keep each on one line ("1 month" wrapped when selected and bold). */
+@media (max-width: 360px) {
+  .seg.side-choice.date-presets { gap: 6px; }
+  .date-presets label { white-space: nowrap; font-size: 14px; padding: 4px 2px; }
+}
 .stake-label { margin: 16px 16px 0; }
 .stake-label + .seg { margin-top: 8px; }
 .send .go { display: none; align-items: center; gap: 8px; }
@@ -596,9 +607,10 @@ form:not(:has(input[name="side"]:checked)) .send { opacity: 0.45; }
 /* DESIGN.md: side, stake and deadline use the same outline choice. */
 .seg.side-choice { background: none; border: 0; border-radius: 0; padding: 0; gap: 8px; }
 .seg.side-choice label { border: 1px solid var(--line); color: var(--ink); min-height: 44px; font-weight: 400; }
-.seg.side-choice input:checked + label { background: none; color: var(--ink); border-color: var(--ink); font-weight: 700; }
+.seg.side-choice input:checked + label { background: var(--sel); color: var(--ink); border: 2px solid var(--ink); font-weight: 700; }
 /* DESIGN.md: unavailable stakes keep the existing quiet tokens and control size. */
-.seg.side-choice input:disabled + label { color: var(--dim); background: var(--ground); border-color: var(--line); cursor: default; }
+.seg.side-choice input:disabled + label { color: var(--dim); background: none; border: 0; font-weight: 400; cursor: default; }
+.custom-date input[aria-invalid="true"] { border: 1px solid var(--err); }
 .tl.unread { font-size: 14px; overflow-wrap: anywhere; }
 /* The paste button appears once the field holds a link. */
 form:not(:has(#bet-link:valid)) .acts.paste { display: none; }

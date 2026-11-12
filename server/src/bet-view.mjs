@@ -20,7 +20,10 @@ export const betTime = (value) => new Intl.DateTimeFormat('en-GB', {
 
 // DESIGN.md: the Result marks the words, on both the Bet and its ruling page.
 export function markedClaim(claim, outcome) {
-  if (outcome === 'yes') return html`<span class="hl">${claim}</span>`;
+  if (outcome === 'yes') {
+    const words = claim.trimEnd();
+    return html`<span class="hl">${words}</span>${claim.slice(words.length)}`;
+  }
   if (outcome === 'no') return html`<span class="struck">${claim}</span>`;
   return claim;
 }
@@ -66,7 +69,7 @@ export function betCertificate(bet, { joinHref = null, viewer = null, faces = nu
 }
 
 // The terms as a fold. `extra` is more definition-list rows from the caller.
-export function betTerms(bet, { extra = '', open = false, title = 'Terms', juryReview = false } = {}) {
+export function betTerms(bet, { extra = '', open = false, title = 'Rules', juryReview = false } = {}) {
   return html`<details class="fold"${open ? ' open' : ''}><summary>${title}</summary><dl class="bet-terms">
     <dt>Counts as yes</dt><dd>${bet.criteria}</dd>
     <dt>Link source</dt><dd><a href="${bet.evidence_source_url}" rel="noopener noreferrer">${bet.evidence_source_url}</a></dd>
@@ -101,7 +104,7 @@ export function betShareLink(baseUrl, bet, { label = null, ghost = false, mine =
     if (outcome && bet.settled_by === 'referee') {
       const winner = bet.outcome === bet.creator_side ? bet.creator_username : bet.acceptor_username;
       const pot = formatTestNear((BigInt(bet.stake_yocto) * 2n).toString());
-      text = `Result: ${outcome}. ${winner ? `@${winner}` : `The ${bet.outcome} side`} won ${pot} ${unit()}.`;
+      text = `Result: ${outcome}. ${winner ? `@${winner}` : `The ${bet.outcome} side`} won the ${pot} ${unit()} pot.`;
     }
   }
   const intent = new URL('https://x.com/intent/post');
@@ -121,7 +124,7 @@ export function betList(rows, { viewer = null, faces = null, hall = false } = {}
     if (hall) {
       const winner = bet.outcome === bet.creator_side ? bet.creator_username : bet.acceptor_username;
       const phrase = bet.status === 'settled' && ['yes', 'no'].includes(bet.outcome)
-        ? `${winner ? `@${winner}` : `The ${bet.outcome} side`} won ${formatTestNear((BigInt(bet.stake_yocto) * 2n).toString())} ${unit()}`
+        ? `${winner ? `@${winner}` : `The ${bet.outcome} side`} won the ${formatTestNear((BigInt(bet.stake_yocto) * 2n).toString())} ${unit()} pot`
         : status === 'Offer expired' ? status : bet.status === 'offered' ? `Offer closes ${nextBetTime(bet.accept_by)}`
           : ['accepted', 'proposed', 'disputed'].includes(bet.status) ? 'Both sides are in'
             : bet.status === 'settled' && bet.outcome === 'void' ? 'Called off'

@@ -201,7 +201,8 @@ test('a bad link, side or stake stays on the page with the reason and what was t
   assert.match(noSide.text, /name="stake" value="0\.5" checked/, 'the chosen stake is kept');
   const invalidDate = await s.browser().request('GET', `/bets/new?link=${post}&side=no&stake=0.25&datePreset=custom&date=2026-02-31&go=1`);
   assert.equal(invalidDate.status, 400);
-  assert.match(invalidDate.text, /type="text" id="bet-date" name="date" value="2026-02-31"[^>]*aria-invalid="true"/);
+  assert.match(invalidDate.text, /type="text" id="bet-date" name="date" value="2026-02-31"[^>]*placeholder="YYYY-MM-DD" aria-invalid="true"/);
+  assert.match(invalidDate.text, /role="alert">31 Feb 2026 is not a date\./);
   assert.match(invalidDate.text, /name="side" value="no" required checked/);
   assert.match(invalidDate.text, /name="stake" value="0\.25" checked/);
   assert.match(invalidDate.text, /name="datePreset" value="custom" checked/);

@@ -76,7 +76,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
     if (evidencePhase(bet)) return { text: participant ? 'Links are open' : 'Both sides are in', aside: `Links close ${nextBetTime(bet.evidence.closesAt)}` };
     return juryDecides(bet) && !bet.enclave && bet.evidence && !bet.evidence.open
       && ['accepted', 'proposed', 'disputed'].includes(bet.status)
-      ? { text: 'The NEAR AI enclave jury is deciding', aside: 'Links are closed' } : null;
+      ? { text: 'The NEAR AI enclave jury is deciding', aside: `Links closed ${betTime(bet.evidence.closesAt)}` } : null;
   };
   const copyBetLink = (bet) => html`
     <a class="tl" id="bet-link" href="${config.baseUrl}${pathFor(bet.id)}">Bet link</a>
@@ -265,7 +265,9 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
     // That page lists the open offers too, so this one does not also point at one.
     const start = closed && eligible && config.play?.enabled ? `/bets/new?from=${bet.id}` : null;
     const next = eligible && closed && !start ? await nextOpenPublicBet(db, ctx.user?.id) : null;
-    const share = betShareLink(config.baseUrl, bet, { mine: false, ghost: Boolean(next || start), label: pendingRuling(bet) ? 'Post the result' : null });
+    const juryRefunded = bet.enclave?.mode === 'ruling' && bet.enclave.outcome === 'unclear'
+      && (bet.status === 'refunded' || (bet.status === 'settled' && bet.outcome === 'void'));
+    const share = betShareLink(config.baseUrl, bet, { mine: false, ghost: Boolean(next || start), label: juryRefunded ? 'Post on X' : pendingRuling(bet) ? 'Post the result' : null });
     let primary = share;
     if (next) primary = html`<a class="pill solid big" href="${pathFor(next.id)}">Take another bet</a>`;
     if (start) primary = html`<a class="pill solid big" href="${start}">${bet.enclave?.mode === 'ruling' && bet.enclave.outcome === 'unclear' && (bet.status === 'refunded' || bet.outcome === 'void') ? 'Make another bet' : 'Make your own bet'}</a>`;
@@ -437,7 +439,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
         </div>` : ''}
         <div class="acts"><button class="primary big" type="submit">Offer the bet</button></div>
         <div class="folds">
-          ${fold('Terms', html`
+          ${fold('Rules', html`
             <p class="quiet">${text(draft.wordingOrigin)}.</p>
             <label for="claim">Bet proposition</label>
             <textarea id="claim" name="claim" required maxlength="1000" rows="3">${text(draft.claim)}</textarea>
@@ -614,7 +616,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
         <div class="two">${betShareLink(config.baseUrl, published, { mine: creator, ghost: true, label: 'Post on X' })}</div></div>`;
     } else if ((lost || juryRefunded) && published && !primary) {
       primary = html`<div class="acts"><a class="pill solid big" href="/bets/new?from=${bet.id}">Make another bet</a>
-        <div class="two">${betShareLink(config.baseUrl, published, { mine: creator, ghost: true, label: 'Post the result' })}</div></div>`;
+        <div class="two">${betShareLink(config.baseUrl, published, { mine: creator, ghost: true, label: juryRefunded ? 'Post on X' : 'Post the result' })}</div></div>`;
     }
     const refundInFold = refundable && !refundPrimary;
     const quietShare = published && !primary
@@ -698,7 +700,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
           <form method="post" action="${pathFor(bet.id)}/verify">${csrfField(ctx)}<button type="submit">Verify escrow</button></form>
           <h3>Terms fingerprint</h3><p class="mono">${bet.terms_hash}</p><p class="quiet">The funded contract commits to this salted fingerprint. Source text and private notes stay off-chain.</p>`)}
         ${refundInFold ? fold('Reclaim stake', mutationForm(ctx, bet, 'refund', 'Reclaim stake')) : ''}
-        ${creator && (published || bet.status === 'offered') ? fold(published ? (bet.status === 'offered' ? 'Publication and cancellation' : 'Make this bet private') : 'Cancel offer', html`
+        ${creator && (published || bet.status === 'offered') ? fold(published ? (bet.status === 'offered' ? 'Publication and cancellation' : 'Who can see this bet') : 'Cancel offer', html`
           ${published && bet.status === 'offered' && !expired && bet.chain_state ? html`<label for="invite-link">Invitation link</label><input id="invite-link" type="text" readonly value="${invite}">` : ''}
           ${published ? html`<form method="post" action="${pathFor(bet.id)}/unpublish">${csrfField(ctx)}<p class="quiet">Withdrawing takes the public page down. Chain data stays public.</p><button type="submit">Make this bet private</button></form>` : ''}
           ${bet.status === 'offered' ? mutationForm(ctx, bet, 'cancel', 'Cancel offer') : ''}`, { id: 'invite' }) : ''}

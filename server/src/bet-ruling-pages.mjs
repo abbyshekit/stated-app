@@ -23,6 +23,11 @@ const modelFace = (id) => {
     : face({ name: modelName(id) });
 };
 const percent = (value) => `${new Decimal(value).times(100).toFixed()}%`;
+const majorityOutcome = (record) => {
+  const counts = new Map();
+  for (const { parsed } of record.verdicts) counts.set(parsed.outcome, (counts.get(parsed.outcome) || 0) + 1);
+  return [...counts].find(([, count]) => count > record.verdicts.length / 2)?.[0];
+};
 // Thousands separated, decimals as Coinbase gave them: US$100,000 and US$3.689.
 const price = (value) => {
   const [whole, cents] = new Decimal(value).toFixed().split('.');
@@ -54,19 +59,16 @@ async function postRow(db, bet, outcome) {
   const handle = available ? (direct ? source.author_username : null) : bet.creator_username;
   const pictures = available ? await facesFor(db, [source]) : await facesByUsername(db, [handle]);
   const picture = pictures.get(available ? String(source.speaker_x_user_id) : String(handle || '').toLowerCase());
-  return html`<ul class="posts ruling-post"><li class="prow">${face({ url: picture, name: author })}<div>
-    <p class="pwho"><b>${author}</b>${handle && `@${handle}` !== author ? html`<span>@${handle}</span>` : ''}</p>
-    <p class="said">${markedClaim(bet.claim, outcome)}</p>
-  </div></li></ul>`;
+  return html`<div class="ruling-post"><div class="post"><div class="head">${face({ url: picture, name: author })}<b>${author}</b>${handle && `@${handle}` !== author ? html`<span>@${handle}</span>` : ''}</div></div>
+    <p class="prop bet-claim${bet.claim.length > 200 ? ' long' : bet.claim.length > 120 ? ' mid' : ''}">${markedClaim(bet.claim, outcome)}</p>
+  </div>`;
 }
 
 function evidenceLine(record, bet) {
   const evidence = JSON.parse(record.evidence.text);
   const deadline = `${clock(bet.resolve_at)} UTC ${dayMonth(bet.resolve_at)}`;
   if (record.evidence.kind === 'submitted') {
-    const counts = new Map();
-    for (const { parsed } of record.verdicts) counts.set(parsed.outcome, (counts.get(parsed.outcome) || 0) + 1);
-    const majority = [...counts].find(([, count]) => count > record.verdicts.length / 2)?.[0];
+    const majority = majorityOutcome(record);
     const juror = record.outcome === 'unclear'
       ? majority && record.verdicts.find(verdict => verdict.parsed.outcome !== majority) : record.verdicts[0];
     return html`${juror ? html`“${juror.parsed.reason.replace(/[.,!?]+$/, '')},” ${modelName(juror.model)} wrote. ` : ''}The deadline was ${deadline}.`;
@@ -89,9 +91,8 @@ function rulingLine(record, bet) {
   }
   const creatorWon = record.outcome === bet.creator_side;
   const winner = creatorWon ? bet.creator_username : bet.acceptor_username;
-  const loser = creatorWon ? bet.acceptor_username : bet.creator_username;
   const pot = formatTestNear((BigInt(bet.stake_yocto) * 2n).toString());
-  return `The NEAR AI enclave jury agreed, so ${winner ? `@${winner}` : `the ${record.outcome} side`} ${settled ? 'won' : 'wins'} ${pot} ${unit()} from ${loser ? `@${loser}` : `the ${record.outcome === 'yes' ? 'no' : 'yes'} side`}.`;
+  return `The NEAR AI enclave jury agreed, so ${winner ? `@${winner}` : `the ${record.outcome} side`} ${settled ? 'won' : 'wins'} the ${pot} ${unit()} pot.`;
 }
 
 function evidenceFold(record) {
@@ -139,15 +140,17 @@ export function registerBetRulingRoutes({ route, db, config, layout, send, notFo
       ? [...VERIFIED, 'Each model’s NVIDIA GPU attestation was verified by NVIDIA’s attestation service'] : VERIFIED;
     const evidence = evidenceLine(record, bet);
     const line = rulingLine(record, bet);
+    const majority = record.outcome === 'unclear' ? majorityOutcome(record) : null;
     const body = html`
       <h1 class="visually-hidden">Ruling</h1>
       ${post}
-      <div class="verdict ruling-verdict${record.outcome === 'yes' ? ' yes' : ''}"><b>${outcomeWord(record.outcome)}</b><span>${dayMonth(record.decidedAt, { year: true })}</span></div>
+      <div class="verdict ruling-verdict${record.outcome === 'yes' ? ' yes' : ''}"><b>${record.outcome === 'yes' ? html`<span class="hl">Yes</span>` : outcomeWord(record.outcome)}</b><span>${dayMonth(record.decidedAt, { year: true })}</span></div>
       ${line ? html`<p class="gut quiet">${line}</p>` : ''}
-      <ul class="jury-rail">${record.verdicts.map(verdict => html`<li class="seat">
+      <ul class="jury-rail">${record.verdicts.map(verdict => html`<li class="seat${majority && verdict.parsed.outcome !== majority ? ' dissent' : ''}">
         ${modelFace(verdict.model)}<b>${modelName(verdict.model)}</b><span>${outcomeWord(verdict.parsed.outcome)}, ${percent(verdict.parsed.confidence)} sure</span>
       </li>`)}</ul>
       ${evidence ? html`<p class="gut">${evidence}</p>` : ''}
+      <div class="acts"><a class="pill solid big" href="/bets/new?from=${bet.id}">${record.mode === 'ruling' && record.outcome === 'unclear' && ['settled', 'refunded'].includes(bet.status) ? 'Make another bet' : 'Make your own bet'}</a></div>
       <div class="folds">
       ${evidenceFold(record)}
       <details class="fold"><summary>Why each model decided</summary>
@@ -164,8 +167,7 @@ export function registerBetRulingRoutes({ route, db, config, layout, send, notFo
         <p><a class="tl" href="/bets/${bet.id}/enclave-ruling.json">Ruling JSON</a></p>
         ${quotes.map(quote => html`<p class="quiet acct">${quote.role} ${quote.model} <code>${quote.mrtd.slice(0, 16)}</code></p>`)}
       </details>
-      </div>
-      <div class="acts"><a class="pill solid big" href="/bets/new?from=${bet.id}">${record.mode === 'ruling' && record.outcome === 'unclear' && ['settled', 'refunded'].includes(bet.status) ? 'Make another bet' : 'Make your own bet'}</a></div>`;
+      </div>`;
     send(ctx.res, 200, await layout(ctx, 'Ruling', body, { flush: true, back: `/bets/${bet.id}`, signin: false }));
   });
 }

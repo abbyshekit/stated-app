@@ -187,7 +187,7 @@ test('pending outcomes use the recorded Result time rather than the jury decisio
         assert.doesNotMatch(page, />Post on X<\/a>/);
         assert.ok(page.includes(`<span class="${outcome === 'yes' ? 'hl' : 'struck'}">${bet.claim}</span>`));
         assert.ok(page.includes(`<div class="gut link-row"><a class="tl" href="${rulingPath()}">See the ruling</a></div>`));
-        assert.match(page, /<summary>Terms<\/summary>[\s\S]*A reviewer can correct a ruling before it pays out\.<\/dd>/);
+        assert.match(page, /<summary>Rules<\/summary>[\s\S]*A reviewer can correct a ruling before it pays out\.<\/dd>/);
         assert.doesNotMatch(page, /unless a reviewer corrects it|<summary>Propose a result<\/summary>/);
       }
       await clearRuling();

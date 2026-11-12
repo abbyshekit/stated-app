@@ -258,7 +258,7 @@ test('public date composer validates missing and impossible dates, then redirect
   assert.match(missing.text, /name="datePreset" value="custom" checked/);
   const impossible = await stack.browser().request('GET', `/bets/new?link=${link}&side=yes&stake=0.1&datePreset=custom&date=2026-02-31&go=1`);
   assert.equal(impossible.status, 400);
-  assert.match(impossible.text, /Choose a date/);
+  assert.match(impossible.text, /31 Feb 2026 is not a date\./, 'an impossible date names its fault');
   assert.match(impossible.text, /name="date" value="2026-02-31"/);
   for (const date of [ymd(new Date()), ymd(new Date(Date.now() + 366 * DAY))]) {
     const outOfRange = await stack.browser().request('GET', `/bets/new?link=${link}&side=yes&stake=0.1&date=${date}&go=1`);

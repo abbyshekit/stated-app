@@ -42,7 +42,7 @@ test('hall uses the public verified projection and totals beyond the six rows', 
   assert.equal(hall.rows.length, 6);
   assert.equal(hall.paidYocto, '200000000000000000000000');
   const html = String(betList(hall.rows, { hall: true }));
-  assert.match(html, /@creator won 0\.2 test NEAR/);
+  assert.match(html, /@creator won the 0\.2 test NEAR pot/);
   assert.doesNotMatch(html, /private_identity|<script>/);
   assert.match(html, /&lt;script&gt;/);
   assert.equal((html.match(/class="prow note"/g) || []).length, 6);
