@@ -59,7 +59,8 @@ export function recordTestRun({ spawn = spawnSync, exec = execFileSync, fs = { e
   if (child.stderr) process.stderr.write(child.stderr);
   const combined = `${child.stdout ?? ''}\n${child.stderr ?? ''}`;
   const counts = parseTap(combined);
-  const pgUnavailable = /PostgreSQL is required \(STATED_TEST_REQUIRE_PG=1\)/.test(combined);
+  // The runner prints this at the start of a line. Inside TAP a test's own output is a '# ' diagnostic, so it cannot match.
+  const pgUnavailable = /^PostgreSQL is required \(STATED_TEST_REQUIRE_PG=1\)/m.test(combined);
   const complete = !child.error && !child.signal && postgres && !pgUnavailable && counts;
   const status = !complete ? 'incomplete' : child.status === 0 && counts.tests > 0 && counts.fail === 0 && counts.cancelled === 0 ? 'passed' : 'failed';
   const record = { commit, worktreeDirty: dirty, node, postgres, startedAt, status, counts, durationMs: counts?.durationMs ?? null };

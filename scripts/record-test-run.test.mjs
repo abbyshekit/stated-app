@@ -50,6 +50,8 @@ test('records complete passes and marks cancellation or a nonzero child status a
   const run = child => recordTestRun({ cwd: '/work', fs, log: () => {}, exec, now: () => { order.push('started'); return '2026-11-12T01:02:03.000Z'; }, spawn: (_bin, _args, options) => { order.push('suite'); assert.equal(options.maxBuffer, 16 * 1024 * 1024); return child; } });
   const passed = run({ status: 0, stdout: tap.replace('# pass 3', '# pass 4').replace('# fail 1', '# fail 0'), stderr: '' });
   assert.equal(passed.record.status, 'passed');
+  const quoted = run({ status: 0, stdout: `# PostgreSQL is required (STATED_TEST_REQUIRE_PG=1), but unavailable.\n${tap.replace('# pass 3', '# pass 4').replace('# fail 1', '# fail 0')}`, stderr: '' });
+  assert.equal(quoted.record.status, 'passed', 'a test that prints the runner message as a diagnostic does not make the run incomplete');
   assert.equal(passed.record.startedAt, '2026-11-12T01:02:03.000Z');
   assert.deepEqual(order.slice(0, 2), ['started', 'suite']);
   assert.equal(run({ status: 0, stdout: tap.replace('# pass 3', '# pass 2').replace('# cancelled 0', '# cancelled 1'), stderr: '' }).record.status, 'failed');
