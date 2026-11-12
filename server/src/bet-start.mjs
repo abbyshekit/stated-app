@@ -180,16 +180,17 @@ export function registerBetStartRoutes({ route, db, config, layout, send, redire
         <input type="hidden" name="go" value="1">
         ${from ? html`<input type="hidden" name="from" value="${from}">` : ''}
         <input type="hidden" name="link" value="${link}">
+        ${needsDate ? html`<p class="lead">Bet on this post</p>` : ''}
         ${picked ? fileList([picked], publicRow, faces)
     : oembed ? html`<ul class="posts"><li class="prow">${face({ url: null, name: postAuthor || postHandle || 'Post author' })}<div><p class="pwho"><b>${postAuthor || postHandle}</b>${postHandle ? html`<span>@${postHandle}</span>` : ''}</p><p class="said">${oembed.text}</p></div></li></ul>`
-    : html`<p class="gut">${needsDate ? 'Pick a date for this post.' : 'This post already has a date on Stated.'} <a class="tl unread" href="${postUrl}" rel="noopener noreferrer">${link.replace(/^https?:\/\//i, '').replace(/[?#].*$/, '')}</a></p>`}
+    : html`<p class="gut">${needsDate ? '' : 'This post already has a date on Stated.'} <a class="tl unread" href="${postUrl}" rel="noopener noreferrer">${link.replace(/^https?:\/\//i, '').replace(/[?#].*$/, '')}</a></p>`}
         <ul class="posts"><li class="prow">${face({ url: ctx.user?.x_avatar_url || null, name: ctx.user?.x_username || 'You' })}<div>
           <p class="pwho"><b>You</b>${ctx.user?.x_username ? html`<span>@${ctx.user.x_username}</span>` : ''}</p>
           <p class="meta"><span>Replying to ${postHandle ? `@${postHandle}` : 'that post'}</span></p>
           <p class="said cmd"><b>@${bot}</b> bet ${STAKES.map((value, i) => html`<i class="k${i}">${value}</i>`)} <i class="yes">yes</i><i class="no">no</i><i class="unset">yes or no</i>${needsDate ? previewDate : ''}</p>
         </div></li></ul>
         <p class="meta stake-label">Your side</p>
-        <div class="seg line" role="radiogroup" aria-label="Your side">
+        <div class="seg side-choice" role="radiogroup" aria-label="Your side">
           ${SIDES.map((value) => html`<input type="radio" id="side-${value}" name="side" value="${value}" required${value === side ? ' checked' : ''}><label for="side-${value}">Bet ${value}</label>`)}
         </div>
         <p class="meta stake-label">Stake each, in ${unit()}</p>

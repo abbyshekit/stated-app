@@ -116,7 +116,10 @@ test('a chosen post asks for a side with the smallest stake and a month chosen',
     assert.match(page.text, /class="date-year"/);
   }
   assert.match(page.text, /<label for="date-custom">Other<\/label>/);
-  for (const label of ['Your side', 'Stake each, in test NEAR', 'Decide by']) {
+  assert.match(page.text, /<p class="lead">Bet on this post<\/p>/);
+  assert.match(page.text, /<nav aria-label="More"><a href="\/search">Search<\/a><a href="\/privacy">Privacy<\/a><\/nav>/);
+  assert.match(page.text, /<p class="meta stake-label">Your side<\/p>\s*<div class="seg side-choice"/);
+  for (const label of ['Stake each, in test NEAR', 'Decide by']) {
     assert.match(page.text, new RegExp(`<p class="meta stake-label">${label}</p>\\s*<div class="seg line`));
   }
   assert.match(page.text, /type="date" id="bet-date" name="date" value="" min="\d{4}-\d{2}-\d{2}" max="\d{4}-\d{2}-\d{2}"/);
@@ -126,7 +129,8 @@ test('a chosen post asks for a side with the smallest stake and a month chosen',
   assert.match(page.text, /<p class="said cmd"><b>@statedbot<\/b> bet <i class="k0">0\.1<\/i><i class="k1">0\.25<\/i><i class="k2">0\.5<\/i><i class="k3">1<\/i> <i class="yes">yes<\/i><i class="no">no<\/i><i class="unset">yes or no<\/i>[\s\S]*class="date-week"[\s\S]*class="date-month"[\s\S]*class="date-custom"[\s\S]*<\/p>/,
     'the reply is drawn with every choice the stylesheet can show');
   const anonymousLink = await s.browser().get(`/bets/new?link=${encodeURIComponent('https://x.com/i/web/status/1234567890123456789')}`);
-  assert.match(anonymousLink.text, /Pick a date for this post\./);
+  assert.match(anonymousLink.text, /<p class="lead">Bet on this post<\/p>/);
+  assert.doesNotMatch(anonymousLink.text, /Pick a date for this post\./);
   assert.match(page.text, /<a class="tl unread" href="https:\/\/x\.com\/i\/web\/status\/1234567890123456789" rel="noopener noreferrer">x\.com\/someone\/status\/1234567890123456789<\/a>/, 'an unread post is named by its own link and can be opened');
   assert.equal(filled(page.text).length, 1);
 });
@@ -144,7 +148,8 @@ test('a pasted public post is shown from oEmbed with escaped author and words, a
   assert.doesNotMatch(page.text, /<script>alert\("x"\)<\/script>|<img src=x/);
   assert.equal(s.fakeX.calls.filter((call) => call.path === '/oembed').length, before + 1);
   const unavailable = await s.browser().get('/bets/new?link=' + encodeURIComponent('https://x.com/i/web/status/1999999999999999999'));
-  assert.match(unavailable.text, /Pick a date for this post\./);
+  assert.match(unavailable.text, /<p class="lead">Bet on this post<\/p>/);
+  assert.doesNotMatch(unavailable.text, /Pick a date for this post\./);
   assert.match(unavailable.text, /x\.com\/i\/web\/status\/1999999999999999999/);
 });
 

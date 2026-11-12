@@ -51,7 +51,13 @@ export function nearChain({ urls = rpcUrls(), fetchImpl = fetch } = {}) {
     const status = result?.status || {};
     const hash = result?.transaction?.hash || null;
     const ok = Boolean(hash) && result.final_execution_status === 'FINAL' && typeof status.SuccessValue === 'string';
-    return { hash, ok, failure: ok ? null : Object.hasOwn(status, 'Failure') ? JSON.stringify(status.Failure).slice(0, 400) : 'Final success not established' };
+    // The call's return value (a DAO's add_proposal returns the new proposal id), parsed as JSON when it is JSON.
+    let value = null;
+    if (ok && status.SuccessValue) {
+      const text = Buffer.from(status.SuccessValue, 'base64').toString('utf8');
+      try { value = JSON.parse(text); } catch { value = text; }
+    }
+    return { hash, ok, value, failure: ok ? null : Object.hasOwn(status, 'Failure') ? JSON.stringify(status.Failure).slice(0, 400) : 'Final success not established' };
   };
   const send = async (id, secret, receiverId, list) => sent(await signer(id, secret).signAndSendTransaction({
     receiverId, actions: list, waitUntil: 'FINAL', throwOnFailure: false }));

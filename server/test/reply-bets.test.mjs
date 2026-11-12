@@ -258,7 +258,7 @@ test('when the Result is recorded, the referee settles on NEAR, the winner is pa
   const page = await s.browser().get(`/bets/${betId}`);
   assert.match(page.text, /@lena won/);
   assert.doesNotMatch(page.text, /Cross-chain quote/);
-  assert.match(page.text, /<p class="prop"><span class="hl">Nightjar 2\.0 ships/, 'settled from the post’s Result, so the words carry the post’s mark');
+  assert.match(page.text, /<p class="prop bet-claim"><span class="hl">Nightjar 2\.0 ships/, 'settled from the post’s Result, so the words carry the post’s mark');
   assert.match(page.text, /<div class="versus">/, 'and the winner’s ring may be yellow');
   assert.deepEqual(await settle(), { settled: 0, reclaimed: 0, errors: 0 }, 'a settled Bet is never settled again');
   assert.equal(near.sent.filter((t) => t.method === 'referee_resolve').length, 1);

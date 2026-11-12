@@ -16,6 +16,7 @@ import { sha256, verifyAttestedRecord } from './attested-signature.mjs';
 import { readPublicBet } from './bet-public.mjs';
 import { canonicalJson } from './canonical.mjs';
 import { parseTdxQuote } from './tdx-quote.mjs';
+import { getGpuJwks, verifyGpuJwt } from './gpu-attestation.mjs';
 import * as evidenceIntake from './bet-evidence.mjs';
 import { resolveStatement } from './notify.mjs';
 import { refereeId } from './play.mjs';
@@ -50,7 +51,9 @@ const OPEN_STATUSES = `('accepted', 'proposed', 'disputed')`;
 
 const iso = (value) => new Date(value).toISOString();
 const hashText = (text) => sha256(Buffer.from(text, 'utf8'));
-const pick = (value, keys) => Object.fromEntries(keys.map((key) => [key, value[key]]));
+// Preserve optional GPU proof whenever projecting an attested call, including for persistence.
+const pick = (value, keys) => ({ ...Object.fromEntries(keys.map((key) => [key, value[key]])),
+  ...(keys === ATTESTED && Object.hasOwn(value, 'gpu') ? { gpu: value.gpu } : {}) });
 
 function fail(message) { throw new Error(message); }
 
@@ -406,9 +409,24 @@ function signedMessages(attested) {
   return { system: messages[0].content, user: messages[1].content };
 }
 
-function verifyPlan(plan, material, roots) {
-  keysExactly(plan, [...ATTESTED, 'parsed'], 'plan');
+/** Offline GPU check for one call; older calls explicitly report no stored evidence. */
+export function verifyRulingGpu(call, { jwks } = {}) {
+  if (!Object.hasOwn(call, 'gpu')) return { checked: false, verdict: null, reason: 'GPU not checked: no GPU evidence stored' };
+  const gpu = keysExactly(call.gpu, ['jwt', 'verdict', 'checkedAt'], 'gpu');
+  if (gpu.verdict !== true) fail('gpu.verdict must be true');
+  const checkedAt = isoField(gpu.checkedAt, 'gpu.checkedAt');
+  if (checkedAt < isoField(call.startedAt, 'startedAt') || checkedAt > isoField(call.completedAt, 'completedAt')) {
+    fail('gpu.checkedAt must be within the call');
+  }
+  const verified = verifyGpuJwt(gpu.jwt, { jwks });
+  if (verified.claims.eat_nonce.toLowerCase() !== call.nonce.toLowerCase()) fail('GPU JWT nonce does not match call nonce');
+  return { checked: true, ...verified };
+}
+
+function verifyPlan(plan, material, roots, jwks) {
+  keysExactly(plan, [...ATTESTED, 'parsed', ...(Object.hasOwn(plan, 'gpu') ? ['gpu'] : [])], 'plan');
   verifyAttestedRecord(pick(plan, ATTESTED), { checkContent: planShape, roots });
+  verifyRulingGpu(plan, { jwks });
   const { system, user } = signedMessages(plan);
   if (system !== PLAN_PROMPT || user !== planInput(material)) fail('signed plan request does not match the material');
   if (!isDeepStrictEqual(plan.parsed, checkPlan(plan.verdict, material))) fail('parsed plan does not follow from the signed plan');
@@ -432,9 +450,10 @@ function checkJury(jury, minConfidence) {
  * policy); there is one verdict per roster model, in roster order; every hash
  * matches; and the outcome follows from the signed verdicts at the signed
  * threshold. Pure: no database and no network. roots overrides the TDX trust
- * roots (tests only; the default is the pinned Intel root).
+ * roots (tests only; the default is the pinned Intel root). GPU JWTs use supplied
+ * jwks or NVIDIA keys already loaded by an async verification boundary.
  */
-export function verifyEnclaveRecord(record, { roots } = {}) {
+export function verifyEnclaveRecord(record, { roots, jwks } = {}) {
   keysExactly(record, RECORD_KEYS, 'record');
   if (record.version !== 1) fail('record.version must be 1');
   if (!['ruling', 'review'].includes(record.mode)) fail('record.mode must be ruling or review');
@@ -450,7 +469,7 @@ export function verifyEnclaveRecord(record, { roots } = {}) {
   isoField(material.deadline, 'material.deadline');
   if (record.materialHash !== materialHash(material)) fail('materialHash does not match the material');
 
-  verifyPlan(object(record.plan, 'plan'), material, roots);
+  verifyPlan(object(record.plan, 'plan'), material, roots, jwks);
   const plan = record.plan.parsed;
 
   const evidence = object(record.evidence, 'evidence');
@@ -475,8 +494,9 @@ export function verifyEnclaveRecord(record, { roots } = {}) {
     fail('there must be exactly one verdict per roster model, in roster order');
   }
   for (const verdict of record.verdicts) {
-    keysExactly(verdict, [...ATTESTED, 'parsed'], 'verdict');
+    keysExactly(verdict, [...ATTESTED, 'parsed', ...(Object.hasOwn(verdict, 'gpu') ? ['gpu'] : [])], 'verdict');
     verifyAttestedRecord(pick(verdict, ATTESTED), { checkContent: verdictShape, roots });
+    verifyRulingGpu(verdict, { jwks });
     if (!isDeepStrictEqual(verdict.parsed, verdict.verdict)) fail('parsed verdict does not match the signed verdict');
     const { system, user } = signedMessages(verdict);
     let now;
@@ -494,6 +514,15 @@ export function verifyEnclaveRecord(record, { roots } = {}) {
   return record;
 }
 
+/** Load NVIDIA keys once for the whole run, then verify all stored tokens offline. */
+export async function verifyEnclaveRecordWithGpu(record, { roots, jwks, fetchImpl = fetch, signal } = {}) {
+  const calls = [record?.plan, ...(Array.isArray(record?.verdicts) ? record.verdicts : [])];
+  if (jwks === undefined && calls.some(call => call && Object.hasOwn(call, 'gpu'))) {
+    jwks = await getGpuJwks({ fetchImpl, signal });
+  }
+  return verifyEnclaveRecord(record, { roots, jwks });
+}
+
 /**
  * The TDX measurements a ruling ran under, read from its verified quotes: each
  * distinct gateway, and each verdict's signing model. Pure. The record is
@@ -501,8 +530,8 @@ export function verifyEnclaveRecord(record, { roots } = {}) {
  * expected value: no measurement allowlist exists yet, so a reader must judge
  * these numbers themselves.
  */
-export function quoteSummary(record, { roots } = {}) {
-  verifyEnclaveRecord(record, { roots });
+export function quoteSummary(record, { roots, jwks } = {}) {
+  verifyEnclaveRecord(record, { roots, jwks });
   const read = (role, model, report) => {
     const { body } = parseTdxQuote(report.intel_quote);
     return { role, model, signingAddress: String(report.signing_address).replace(/^0x/i, '').toLowerCase(),
@@ -540,13 +569,13 @@ function aboutBet(material, bet) {
  * Bet, or null. agrees is computed here, from the record's outcome and the Bet's
  * settled outcome (review mode only); any stored value is ignored.
  */
-export async function readEnclaveRuling(tx, betId, { roots } = {}) {
+export async function readEnclaveRuling(tx, betId, { roots, jwks, fetchImpl = fetch, signal } = {}) {
   const row = await tx.one(`select e.detail, b.id, b.status, b.outcome, b.claim, b.resolve_at, b.evidence_source_url, b.terms_hash
     from bilateral_bet_events e join bilateral_bets b on b.id = e.bet_id
     where e.bet_id = $1 and e.kind = 'enclave_ruling' order by e.id limit 1`, [betId]);
   if (!row) return null;
   try {
-    const record = verifyEnclaveRecord(row.detail, { roots });
+    const record = await verifyEnclaveRecordWithGpu(row.detail, { roots, jwks, fetchImpl, signal });
     // A record moved from another Bet, or made for other terms, reads as absent.
     if (!aboutBet(record.material, row)) return null;
     const settled = row.status === 'settled' && ['yes', 'no'].includes(row.outcome);
@@ -702,7 +731,7 @@ export async function ensureJury(db) {
 // The reply Bets the referee holds on a post.
 const postBets = `select b.id, b.claim, b.resolve_at, b.created_at, b.evidence_source_url, b.terms_hash, b.status
   from saves s join bilateral_bets b on b.source_save_id = s.id
-  where s.statement_id = $1 and b.referee_wallet = $2 and b.chain_state is not null`;
+  where s.statement_id = $1 and b.referee_wallet = any($2::text[]) and b.chain_state is not null`;
 
 const sameGroup = `b.claim = $3 and b.resolve_at = $4::timestamptz and b.evidence_source_url = $5`;
 
@@ -744,10 +773,10 @@ async function storedRuling(db, statementId, judge, roots) {
   const rows = await db.many(`select distinct on (b.id) b.id, b.claim, b.resolve_at, b.evidence_source_url, b.terms_hash, e.detail
     from saves s join bilateral_bets b on b.source_save_id = s.id
     join bilateral_bet_events e on e.bet_id = b.id and e.kind = 'enclave_ruling'
-    where s.statement_id = $1 and b.referee_wallet = $2 order by b.id, e.id`, [statementId, judge]);
+    where s.statement_id = $1 and b.referee_wallet = any($2::text[]) order by b.id, e.id`, [statementId, judge]);
   for (const row of rows) {
     try {
-      const record = verifyEnclaveRecord(row.detail, { roots });
+      const record = await verifyEnclaveRecordWithGpu(row.detail, { roots });
       if (record.mode === 'ruling' && aboutBet(record.material, row)) return record;
     } catch { /* an unverifiable event never decides anything */ }
   }
@@ -813,7 +842,7 @@ async function finalize(ctx, statementId, material, record, { attempt = null, re
 
 // The open refereed Bets on post st.
 const OPEN_BETS = `from saves s join bilateral_bets b on b.source_save_id = s.id
-  where s.statement_id = st.id and b.referee_wallet = $2 and b.chain_state is not null and b.status in ${OPEN_STATUSES}`;
+  where s.statement_id = st.id and b.referee_wallet = any($2::text[]) and b.chain_state is not null and b.status in ${OPEN_STATUSES}`;
 
 /**
  * A post is ruled only when all its open refereed Bets share one claim, one
@@ -829,7 +858,7 @@ const UNIFORM_DUE = `st.status = 'open'
 async function uniformGroup(db, statementId, judge) {
   const rows = await db.many(`select distinct b.claim, b.resolve_at, b.evidence_source_url from saves s
     join bilateral_bets b on b.source_save_id = s.id
-    where s.statement_id = $1 and b.referee_wallet = $2 and b.chain_state is not null and b.status in ${OPEN_STATUSES}`,
+    where s.statement_id = $1 and b.referee_wallet = any($2::text[]) and b.chain_state is not null and b.status in ${OPEN_STATUSES}`,
   [statementId, judge]);
   return rows.length === 1 ? rows[0] : null;
 }
@@ -950,13 +979,13 @@ async function reviewOne(ctx) {
     join saves s on s.id = b.source_save_id
     join bilateral_bet_publications pub on pub.bet_id = b.id and pub.creator_user_id = b.creator_user_id and pub.withdrawn_at is null
     left join enclave_plans p on p.statement_id = s.statement_id
-    where b.referee_wallet = $2 and b.status = 'settled' and b.outcome in ('yes', 'no')
+    where b.referee_wallet = any($2::text[]) and b.status = 'settled' and b.outcome in ('yes', 'no')
       and b.chain_state->'resolution'->>'method' = 'referee'
       and b.resolve_at <= $1::timestamptz - interval '90 seconds'
       and not exists (select 1 from bilateral_bet_events e where e.bet_id = b.id and e.kind = 'enclave_ruling')
       -- A review never runs (or stores the post's plan) while another refereed Bet on the post may still need a ruling.
       and not exists (select 1 from saves s2 join bilateral_bets o on o.source_save_id = s2.id
-        where s2.statement_id = s.statement_id and o.referee_wallet = $2 and o.status in ('offered', 'accepted', 'proposed', 'disputed'))
+        where s2.statement_id = s.statement_id and o.referee_wallet = any($2::text[]) and o.status in ('offered', 'accepted', 'proposed', 'disputed'))
       and (p.statement_id is null or (p.source = 'coinbase-candles' and ${CLOSED})
         or (p.closes_at <= $1::timestamptz and exists (select 1 from bet_evidence x where x.bet_id = b.id)))
       and ${attemptsOk('bet_id', 'b.id', '$1')}
@@ -1049,8 +1078,10 @@ export async function ruleDue(db, config, { fetchImpl = fetch, fetchEvidence = f
     return result;
   }
   try {
-    const judge = await refereeId(db, config);
-    if (!judge) return result;
+    const referee = await refereeId(db, config);
+    if (!referee) return result;
+    // The referee seats whose Bets the jury rules: the referee account, and Stated Court when configured.
+    const judge = [referee, config.court?.dao].filter(Boolean);
     const ctx = { db, config, models, fetchImpl, fetchEvidence, now, judge, result, report };
     for (const step of [planOne, ruleOne, reviewOne]) {
       try { await step(ctx); } catch (error) { report(step.name, error); result.errors += 1; }

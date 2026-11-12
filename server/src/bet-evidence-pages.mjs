@@ -60,7 +60,7 @@ export function registerBetEvidenceRoutes({ route, db, config, layout, needPost,
         <p class="pwho"><b>${String(row.user_id) === String(ctx.user.id) ? 'You' : username ? `@${username}` : 'Bettor'} bet ${row.side}</b></p>
         <p class="evidence-title">${link ? html`<a class="tl" href="${link}" rel="noopener noreferrer">${row.title || host}</a>` : (row.title || row.final_url || row.url)}</p>
         <p class="meta">${host ? html`<span>${host}</span>` : ''}${postedHost ? html`<span class="quiet">posted as ${postedHost}</span>` : ''}</p>
-        <details class="fold"><summary>Page text</summary>${String(row.body || '').split('\n\n').map(text => html`<p>${text}</p>`)}</details>
+        <details class="fold"><summary>What the jury read</summary>${String(row.body || '').split('\n\n').map(text => html`<p>${text}</p>`)}</details>
       </div></li>`;
     });
     const body = html`
@@ -69,8 +69,8 @@ export function registerBetEvidenceRoutes({ route, db, config, layout, needPost,
         <p class="pwho"><b>${author}</b>${handle && `@${handle}` !== author ? html`<span>@${handle}</span>` : ''}</p>
         <p class="said">${bet.claim}</p>
       </div></li></ul>
-      <p class="gut quiet">Evidence closes at ${clock(closes)} UTC on ${dayMonth(closes)}. The jury reads the page text under each link.</p>
-      ${items.length ? html`<ul class="posts evidence-list">${items}</ul>` : html`<p class="empty">No links yet.</p>`}
+      <p class="gut quiet">Closes ${clock(closes)} UTC, ${dayMonth(closes)}. The jury reads the text under each link.</p>
+      ${items.length ? html`<ul class="posts evidence-list">${items}</ul>` : html`<p class="empty">Links from both sides appear here.</p>`}
       ${open ? html`<form method="post" action="${path}" class="evidence-form">
         ${csrfField(ctx)}
         <div class="gut">
@@ -80,7 +80,7 @@ export function registerBetEvidenceRoutes({ route, db, config, layout, needPost,
         <input type="hidden" name="side" value="${ownSide}">
         <div class="acts">${error ? html`<p class="err" role="alert">${error.message}</p>` : ''}<button class="primary big" type="submit">Add evidence</button></div>
       </form>` : html`<div class="gut">${error ? html`<p class="err" role="alert">${error.message}</p>${url ? html`<p>${url}</p>` : ''}` : ''}<p class="quiet">${accepted || bet.accepted_at ? 'The evidence window has closed.' : 'Evidence can be added once the bet is accepted.'}</p></div>`}`;
-    send(ctx.res, error?.status || 200, await layout(ctx, 'Evidence', body, { back: `/bets/${bet.id}`, kind: 'private', flush: true }), { kind: 'private' });
+    send(ctx.res, error?.status || 200, await layout(ctx, 'Evidence', body, { back: `/bets/${bet.id}`, extra: html`<span class="page-title">Evidence</span>`, kind: 'private', flush: true }), { kind: 'private' });
   }
 
   route('GET', new RegExp(`^/bets/${ID}/evidence$`), async (ctx) => {

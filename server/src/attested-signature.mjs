@@ -124,7 +124,7 @@ function timestamp(value, name) {
 
 /**
  * Before a completion: the report must answer this nonce, the gateway's quote must
- * verify, and at least one model candidate's quote must verify (the one whose key
+ * verify, and every model candidate's quote must verify (the one whose key
  * signs the response is checked again, by name, in verifyAttestedRecord).
  */
 export function validatePreflight(evidence, nonceHex, { roots, now = new Date() } = {}) {
@@ -137,11 +137,8 @@ export function validatePreflight(evidence, nonceHex, { roots, now = new Date() 
   }
   evidence.model_attestations.forEach((candidate, index) => report(candidate, `attestation.model_attestations[${index}]`, nonce));
   authenticate(evidence.gateway_attestation, 'attestation.gateway_attestation', nonceHex, roots, now);
-  const verified = evidence.model_attestations.some((candidate, index) => {
-    try { authenticate(candidate, `attestation.model_attestations[${index}]`, nonceHex, roots, now); return true; }
-    catch { return false; }
-  });
-  if (!verified) throw new Error('no model attestation quote verifies');
+  evidence.model_attestations.forEach((candidate, index) =>
+    authenticate(candidate, `attestation.model_attestations[${index}]`, nonceHex, roots, now));
 }
 
 /**
@@ -151,7 +148,8 @@ export function validatePreflight(evidence, nonceHex, { roots, now = new Date() 
  * certificate chain to the trusted Intel SGX root (valid at the record's
  * attestedAt), and report_data = signing key || nonce.
  * NOT checked: the platform TCB level and revocation collateral (no network),
- * the NVIDIA GPU payload, event-log replay or any measurement allowlist.
+ * any measurement allowlist. Event logs, when present, are replayed against RTMR3;
+ * GPU evidence is checked separately by the completion/ruling verification path.
  * checkContent validates the parsed reply; the agrees/reason verdict of the
  * signed second opinion is the default, and the enclave ruling passes its own.
  * roots overrides the trust roots (tests only; the default is the pinned Intel root).
@@ -224,12 +222,12 @@ export function verifyAttestedRecord(record, { checkContent = verdict, roots } =
     throw new Error('Ed25519 signature verification failed');
   }
   return { requestHash: true, responseHash: true, signature: true, modelSigner: true, quote: 'tdx_chain_verified',
-    // The platform TCB level, revocation, the GPU payload and the event log are still not checked.
+    // The platform TCB level and revocation are still not checked.
     hardwareAttestation: 'not_verified' };
 }
 
 export const verificationRecipe = Object.freeze({
-  scope: 'This helper verifies exact signed bytes, signer consistency, and the Intel TDX quotes of the gateway and the signing model: quote and QE signatures, the certificate chain to the pinned Intel SGX root, and report_data = signing key || nonce. Not verified: TCB level and revocation collateral, the NVIDIA GPU payload, and event-log replay.',
+  scope: 'This helper verifies exact signed bytes, signer consistency, and the Intel TDX quotes of the gateway and the signing model: quote and QE signatures, the certificate chain to the pinned Intel SGX root, report_data = signing key || nonce, and event-log replay against RTMR3 when a log is present. Ruling verification also checks stored NVIDIA GPU tokens when present. Not verified: TCB level and revocation collateral or measurement allowlists.',
   preflight: 'Generate and retain a fresh 32-byte nonce. Before completion, request /v1/attestation/report with canonical model, provider=near, signing_algo=ed25519, nonce, and x-no-aliasing:true. Retain every returned model candidate and the gateway report.',
   exactBytes: 'Send the canonical request model with x-no-aliasing:true and Accept-Encoding:identity. Preserve exact request and decompressed response bytes. Request the response signature with signing_algo=ed25519.',
   hardware: 'Use the official Verification Center or a DCAP quote verifier on the gateway and every model candidate. Apply explicit TCB/advisory and measurement/provenance policy; reject debug mode. Read signer and nonce binding from the verified quote report data and compare echoed fields.',

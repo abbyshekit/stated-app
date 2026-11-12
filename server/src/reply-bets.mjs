@@ -8,6 +8,7 @@
 import { createHash } from 'node:crypto';
 import { evidencePrompts, parseEvidenceCommand, runEvidenceCommands } from './bet-evidence.mjs';
 import { JURY_X_ID, ruleDue, rulingSettles } from './enclave-ruling.mjs';
+import { approveRuling, courtDao, fileRuling, hasReject, isCourtBet, readProposal } from './court-dao.mjs';
 import { createBet } from './bets.mjs';
 import { consentToPublicBet, publicBet, publishBet } from './bet-public.mjs';
 import { dayMonth } from './marked.mjs';
@@ -217,7 +218,8 @@ async function offer(db, config, chain, cmd, deps) {
       acceptBy: new Date(Math.min(due - 60000, Date.now() + 7 * DAY)).toISOString(),
       resolveAt: new Date(due).toISOString(),
       sourceSaveId: String(cmd.save_id),
-      refereeAccount: judge.id,
+      // New Bets name Stated Court (a Sputnik DAO) as referee when one is configured; old Bets keep theirs.
+      refereeAccount: courtDao(config) || judge.id,
     });
     betId = bet.id;
     // The post's words now live in the Bet's own terms; the queue keeps no copy.
@@ -334,6 +336,51 @@ export async function runBetCommands(db, config, chain, { limit = 5, fetchImpl =
   return result;
 }
 
+/**
+ * The Stated Court path for one locked Bet and Result. The proposal is filed at
+ * once (fileRuling never files twice). After the correction window the proposal
+ * is read: in progress with no Reject vote, the jury member approves it and the
+ * DAO executes referee_resolve; approved, the Bet is synced from the chain and
+ * paid as usual; rejected, removed, expired or failed, the Bet stays open and a
+ * 'court_rejected' event says so. Returns the settled decision or null.
+ */
+async function courtStep(db, config, chain, { bet, creator, outcome, reviewer, windowClosed, fetchImpl }) {
+  const filed = await fileRuling(db, config, chain, bet, outcome, { rulingUrl: `${config.baseUrl}/bets/${bet.id}`, actorId: creator.id, reviewer });
+  if (!windowClosed) return null;
+  let proposal = await readProposal(chain, filed.dao, filed.proposalId);
+  if (proposal.status === 'InProgress') {
+    // A council member has voted it down, or is about to: the jury member never outvotes them.
+    if (hasReject(proposal)) return null;
+    // One vote per proposal: after an earlier approval, a lagging RPC is read again on a later pass.
+    const votedBefore = await db.one(`select 1 as voted from bilateral_bet_events where bet_id = $1 and kind = 'court_approved'
+      and (detail->>'proposalId')::bigint = $2 limit 1`, [bet.id, filed.proposalId]);
+    if (votedBefore) return null;
+    const approved = await approveRuling(db, config, chain, filed);
+    proposal = approved.proposal;
+    await db.query(`insert into bilateral_bet_events (bet_id, actor_user_id, kind, detail) values ($1, $2, 'court_approved', $3)`,
+      [bet.id, creator.id, { dao: filed.dao, proposalId: filed.proposalId, outcome, txHash: approved.hash }]);
+  }
+  if (proposal.status === 'Approved') {
+    const synced = await syncNearBet(db, config, creator, bet.id, { fetchImpl });
+    if (synced.status !== 'settled') return null;
+    const vote = await db.one(`select detail->>'txHash' as hash from bilateral_bet_events where bet_id = $1 and kind = 'court_approved'
+      and (detail->>'proposalId')::bigint = $2 order by id desc limit 1`, [bet.id, filed.proposalId]);
+    // The transaction that carried the DAO's referee_resolve is the public proof of settlement.
+    await db.query(`insert into bilateral_bet_events (bet_id, actor_user_id, kind, detail)
+      select $1, $2, 'referee_resolved', $3 where not exists
+        (select 1 from bilateral_bet_events where bet_id = $1 and kind = 'referee_resolved')`,
+    [bet.id, creator.id, { outcome, transactionHash: vote?.hash || null, referee: filed.dao, proposalId: filed.proposalId }]);
+    return { bet, creator, outcome };
+  }
+  if (['Rejected', 'Removed', 'Expired', 'Failed', 'Moved'].includes(proposal.status)) {
+    await db.query(`insert into bilateral_bet_events (bet_id, actor_user_id, kind, detail)
+      select $1, $2, 'court_rejected', $3 where not exists (select 1 from bilateral_bet_events where bet_id = $1
+        and kind = 'court_rejected' and (detail->>'proposalId')::bigint = $4)`,
+    [bet.id, creator.id, { dao: filed.dao, proposalId: filed.proposalId, outcome, status: proposal.status }, filed.proposalId]);
+  }
+  return null;
+}
+
 const RESULT_TO_OUTCOME = { yes: 'yes', no: 'no', ambiguous: 'void', annulled: 'void' };
 
 /**
@@ -343,16 +390,19 @@ const RESULT_TO_OUTCOME = { yes: 'yes', no: 'no', ambiguous: 'void', annulled: '
  */
 export async function settleReplyBets(db, config, chain, { limit = 5, fetchImpl = fetch } = {}) {
   const judge = await referee(db, config, chain);
+  // The referee seats this server acts for: its own referee account, and Stated Court when configured.
+  const referees = [judge.id, courtDao(config)].filter(Boolean);
   const due = await db.many(`select b.id
     from bilateral_bets b join saves s on s.id = b.source_save_id join statements st on st.id = s.statement_id
-    where b.referee_wallet = $1 and b.chain_state is not null and b.status in ('accepted', 'proposed', 'disputed')
+    where b.referee_wallet = any($1::text[]) and b.chain_state is not null and b.status in ('accepted', 'proposed', 'disputed')
       -- A reviewer's Yes can be known early (it happened before the date); a No, a void or a jury ruling cannot.
       and (b.resolve_at <= clock_timestamp() or (st.status = 'yes'
         and st.resolved_by is distinct from (select id from users where x_user_id = $4)))
       and st.status in ('yes', 'no', 'ambiguous', 'annulled')
-      and st.resolved_at <= clock_timestamp() - make_interval(secs => $3)
+      -- A Stated Court Bet's proposal is filed at once; the window applies to its approval.
+      and (b.referee_wallet = $5 or st.resolved_at <= clock_timestamp() - make_interval(secs => $3))
       and (b.settle_checked_at is null or b.settle_checked_at < clock_timestamp() - interval '60 seconds')
-    order by b.settle_checked_at asc nulls first, b.created_at limit $2`, [judge.id, limit, config.play.settleDelaySeconds, JURY_X_ID]);
+    order by b.settle_checked_at asc nulls first, b.created_at limit $2`, [referees, limit, config.play.settleDelaySeconds, JURY_X_ID, courtDao(config)]);
   const result = { settled: 0, reclaimed: 0, errors: 0 };
   const people = async (bet) => ({
     creator: await db.one('select * from users where id = $1', [bet.creator_user_id]),
@@ -404,8 +454,10 @@ export async function settleReplyBets(db, config, chain, { limit = 5, fetchImpl 
           from saves s join statements st on st.id = s.statement_id
           left join users u on u.x_user_id = $2 where s.id = $1 for share of st`, [bet.source_save_id, JURY_X_ID]);
         const outcome = RESULT_TO_OUTCOME[statement?.status];
-        if (!outcome || !statement.resolved_at
-          || !(new Date(statement.resolved_at).getTime() <= Date.now() - config.play.settleDelaySeconds * 1000)) return null;
+        if (!outcome || !statement.resolved_at) return null;
+        const court = isCourtBet(config, bet);
+        const windowClosed = new Date(statement.resolved_at).getTime() <= Date.now() - config.play.settleDelaySeconds * 1000;
+        if (!court && !windowClosed) return null;
         const jury = statement.resolved_by != null && statement.jury_user_id != null
           && String(statement.resolved_by) === String(statement.jury_user_id);
         if (jury && !await rulingSettles(tx, bet, statement.status)) return null;
@@ -422,6 +474,7 @@ export async function settleReplyBets(db, config, chain, { limit = 5, fetchImpl 
         // Chain sync also opens transactions; keep those reads and writes on
         // this connection so they cannot wait on locks held by this settlement.
         const locked = { ...tx, tx: (fn) => fn(locked) };
+        if (court) return courtStep(locked, config, chain, { bet, creator, outcome, reviewer: !jury, windowClosed, fetchImpl });
         // One referee transaction per Bet. If an earlier one succeeded but a lagging RPC has not
         // shown the settlement yet, read the chain again rather than send a second, failing call.
         const sentBefore = await tx.one(`select 1 as sent from bilateral_bet_events where bet_id = $1 and kind = 'referee_resolved' limit 1`, [bet.id]);
@@ -449,10 +502,10 @@ export async function settleReplyBets(db, config, chain, { limit = 5, fetchImpl 
   // An offer nobody took, on a post that now has a result or whose window has closed: the stake goes back.
   const idle = await db.many(`select b.id, (b.accept_by <= clock_timestamp()) as expired
     from bilateral_bets b left join saves s on s.id = b.source_save_id left join statements st on st.id = s.statement_id
-    where b.referee_wallet = $1 and b.chain_state is not null and b.status = 'offered'
+    where b.referee_wallet = any($1::text[]) and b.chain_state is not null and b.status = 'offered'
       and (b.accept_by <= clock_timestamp() or st.status in ('yes', 'no', 'ambiguous', 'annulled'))
       and (b.settle_checked_at is null or b.settle_checked_at < clock_timestamp() - interval '5 minutes')
-    order by b.settle_checked_at asc nulls first limit $2`, [judge.id, limit]);
+    order by b.settle_checked_at asc nulls first limit $2`, [referees, limit]);
   for (const row of idle) {
     await db.query('update bilateral_bets set settle_checked_at = clock_timestamp() where id = $1', [row.id]);
     try {
@@ -467,10 +520,10 @@ export async function settleReplyBets(db, config, chain, { limit = 5, fetchImpl 
   }
   // Finished reply Bets whose winnings or returned stake have not reached the play account yet.
   const unpaid = await db.many(`select b.id from bilateral_bets b
-    where b.referee_wallet = $1 and b.status in ('settled', 'cancelled', 'expired', 'refunded') and b.chain_state is not null
+    where b.referee_wallet = any($1::text[]) and b.status in ('settled', 'cancelled', 'expired', 'refunded') and b.chain_state is not null
       and not exists (select 1 from bilateral_bet_events e where e.bet_id = b.id and e.kind = 'play_paid_out')
       and (b.settle_checked_at is null or b.settle_checked_at < clock_timestamp() - interval '5 minutes')
-    order by b.settle_checked_at asc nulls first limit $2`, [judge.id, limit]);
+    order by b.settle_checked_at asc nulls first limit $2`, [referees, limit]);
   for (const row of unpaid) {
     await db.query('update bilateral_bets set settle_checked_at = clock_timestamp() where id = $1', [row.id]);
     const bet = await db.one('select * from bilateral_bets where id = $1', [row.id]);

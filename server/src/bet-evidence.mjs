@@ -12,8 +12,11 @@ function evidenceUrl(raw) {
   let url;
   try { url = new URL(text); } catch { throw new UserError('Use a public https link outside X.'); }
   const host = url.hostname.replace(/\.+$/, '');
-  if (url.protocol !== 'https:' || url.username || url.password || /(^|\.)(x|twitter)\.com$/i.test(host)) {
+  if (url.protocol !== 'https:' || url.username || url.password) {
     throw new UserError('Use a public https link outside X.');
+  }
+  if (/(^|\.)(x|twitter)\.com$/i.test(host)) {
+    throw new UserError('The jury can’t open X posts. Paste a public web page.');
   }
   const link = url.toString();
   if (link.length > 600) throw new UserError('Use a public https link outside X.');

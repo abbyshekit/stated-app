@@ -7,6 +7,7 @@ import { registerPlayRoutes } from './play-pages.mjs';
 import { registerBetRoutes } from './bet-pages.mjs';
 import { registerBetStartRoutes } from './bet-start.mjs';
 import { registerBetRulingRoutes } from './bet-ruling-pages.mjs';
+import { registerCourtRoutes } from './court-pages.mjs';
 import { registerBetEvidenceRoutes } from './bet-evidence-pages.mjs';
 
 // One policy for every page. A page that must hand a form to another origin widens form-action for itself only.
@@ -318,7 +319,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
     </header>
     <main id="content"${flush ? '' : raw(' class="pad"')}>${body}</main>
     <footer>
-      <nav aria-label="More"><a href="/search">Search</a><a href="/desk">Desk</a><a href="/privacy">Privacy</a></nav>
+      <nav aria-label="More"><a href="/search">Search</a>${isAdmin(user) ? html`<a href="/desk">Desk</a>` : ''}<a href="/privacy">Privacy</a></nav>
     </footer>
   </div>
 </body>
@@ -1929,6 +1930,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
   registerBetRoutes({ route, db, config, layout, needUser, needAdmin, isAdmin, needPost, csrfField, send, redirect, notFound, fetchImpl, walletVersion: WALLET_VERSION, payVersion: PAY_VERSION, botUsername, chain: chainFor, quotes });
   registerBetStartRoutes({ route, db, config, layout, send, redirect, botUsername, fileList, betLinesFor, publicRow, csp: CONTENT_SECURITY_POLICY });
   registerBetRulingRoutes({ route, db, config, layout, send, notFound });
+  registerCourtRoutes({ route, db, config, layout, send, notFound, chain: chainFor });
   registerBetEvidenceRoutes({ route, db, config, layout, needPost, csrfField, send, redirect, notFound });
   registerPlayRoutes({ botUsername, route, db, config, layout, needUser, needPost, csrfField, send, redirect, notFound, chain: chainFor, quotes, payVersion: PAY_VERSION });
   registerWalletRpc({ route, config, needUser, json, fetchImpl });

@@ -1,6 +1,6 @@
 // INTEGRATION: production HTTP routes and real PostgreSQL; enclave records and keys are synthetic.
 import assert from 'node:assert/strict';
-import { randomUUID, sign } from 'node:crypto';
+import { generateKeyPairSync, randomUUID, sign } from 'node:crypto';
 import { before, after, beforeEach, test } from 'node:test';
 import { createBet } from '../src/bets.mjs';
 import { publishBet, withdrawBetPublication } from '../src/bet-public.mjs';
@@ -9,15 +9,16 @@ import { quoteSummary, submittedEvidence, verdictInput, verifyEnclaveRecord } fr
 import { startStack } from './support/app.mjs';
 import { resetDb } from './support/pg.mjs';
 import { enclaveEnv, enclaveRulingFixture, JURORS, keyFor } from './support/enclave.mjs';
+import { dayMonth } from '../src/marked.mjs';
 
 let s, creatorBrowser, creator, acceptor, bet, statement;
 const SOURCE = 'https://example.org/result';
 const MODELS = [...JURORS, 'Qwen/Qwen3.8-27B'];
 const ns = value => (BigInt(new Date(value).getTime()) * 1000000n).toString();
 const path = () => `/bets/${bet.id}/ruling`;
-const time = value => new Intl.DateTimeFormat('en-GB', {
-  timeZone: 'UTC', dateStyle: 'medium', timeStyle: 'short',
-}).format(new Date(value)) + ' UTC';
+const clock = value => new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'UTC', hour: '2-digit', minute: '2-digit',
+}).format(new Date(value));
 const VERIFIED = [
   'Each model ran in an Intel TDX enclave whose quote chains to Intel’s root certificate',
   'Each enclave’s signing key and this request’s fresh nonce are inside its quote',
@@ -115,25 +116,26 @@ test('price ruling shows the post, three models, confidence, window, price and v
   assert.match(response.headers.get('content-security-policy'), /style-src 'self'/);
   assert.doesNotMatch(response.text, /\sstyle=|<style\b|<script(?![^>]*\bsrc=)/i);
   assert.ok(response.text.includes('<p class="pwho"><b>public_bettor</b><span>@public_bettor</span></p>'));
-  assert.ok(response.text.includes(`<p class="said">${bet.claim}</p>`));
+  assert.ok(response.text.includes(`<p class="said"><span class="hl">${bet.claim}</span></p>`));
   assert.doesNotMatch(response.text, /Private source words|private_author/);
-  assert.ok(response.text.includes(`<p class="lead">Ruled yes<span>${time(record.decidedAt)}</span></p>`));
+  assert.ok(response.text.includes(`<h2>NEAR AI enclave jury</h2><b>Yes</b><span>${dayMonth(record.decidedAt, { year: true })}</span>`));
+  assert.match(response.text, /<ul class="jury-rail">/);
+  assert.equal((response.text.match(/<span>Yes, 95%<\/span>/g) || []).length, MODELS.length);
+  assert.match(response.text, /<b>Qwen3\.8 27B<\/b>/);
   const rows = response.text.match(/<li class="prow">[\s\S]*?<\/li>/g);
   for (const model of MODELS) {
     const row = rows.find(row => row.includes(`<b>${model}</b>`));
     assert.ok(row, `Missing model: ${model}`);
-    assert.ok(row.includes('<b>yes</b><span>95%</span>'));
-    assert.ok(row.includes('<p class="meta">The source confirms the outcome.</p>'));
+    assert.ok(row.includes('<p>The source confirms the outcome.</p>'));
   }
   assert.ok(response.text.includes('Every model has to agree at 80% or more, or both stakes go back.'));
-  assert.ok(response.text.includes(`Coinbase BTC-USD price, ${time(record.plan.parsed.start)} to ${time(record.plan.parsed.end)}`));
-  assert.ok(response.text.includes('opened at US$100000'));
-  assert.ok(response.text.includes(`href="${record.evidence.urls[0].replaceAll('&', '&amp;')}"`));
-  assert.match(response.text, />Coinbase data<\/a>/);
-  assert.match(response.text, /<h2>Verified<\/h2>/);
-  for (const line of VERIFIED) assert.ok(response.text.includes(`✓ ${line}`), `Missing verified check: ${line}`);
-  assert.equal((response.text.match(/✓ /g) || []).length, VERIFIED.length);
-  assert.ok(response.text.includes('<p class="gut quiet">Not checked: enclave measurements against a published list, TCB level and revocation, the GPU’s own attestation.</p>'));
+  assert.ok(response.text.includes(`Coinbase BTC-USD opened at US$100,000 at ${clock(record.plan.parsed.start)} UTC on ${dayMonth(record.plan.parsed.start)}.`));
+  assert.match(response.text, /Each verdict was signed inside an Intel TDX enclave, and every signature checked out\./);
+  assert.doesNotMatch(response.text, /<h2>Verified<\/h2>|✓/);
+  for (const line of VERIFIED) assert.ok(response.text.includes(`<div>${line}</div>`), `Missing verified check: ${line}`);
+  assert.ok(response.text.includes('<p class="quiet">Not checked: enclave measurements against a published list, TCB level and revocation, the GPU’s own attestation.</p>'));
+  assert.ok(response.text.indexOf('<summary>Why each model decided</summary>') < response.text.indexOf('<summary>Check it yourself</summary>'));
+  assert.ok(response.text.indexOf('<summary>Check it yourself</summary>') < response.text.indexOf(VERIFIED[0]));
   assert.match(response.text, /<summary>Check it yourself<\/summary>/);
   assert.ok(response.text.includes(`<code>node scripts/verify-enclave-ruling.mjs ${s.config.baseUrl} ${bet.id}</code>`));
   assert.ok(response.text.includes(`href="/bets/${bet.id}/enclave-ruling.json"`));
@@ -143,7 +145,42 @@ test('price ruling shows the post, three models, confidence, window, price and v
   }
 });
 
-test('submitted evidence shows each side, final link, host and escaped stored page text', async () => {
+test('the GPU verified line requires valid stored proof for every juror', async (t) => {
+  const record = await insertRuling();
+  const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'secp384r1' });
+  const jwks = { keys: [{ ...publicKey.export({ format: 'jwk' }), kid: 'nras-page' }] };
+  const nras = 'https://nras.attestation.nvidia.com';
+  let keyReads = 0;
+  const realFetch = globalThis.fetch;
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    if (new URL(url).origin === new URL(s.base).origin) return realFetch(url, options);
+    assert.equal(String(url), `${nras}/.well-known/jwks.json`);
+    keyReads += 1;
+    return Response.json(jwks);
+  });
+  for (const call of record.verdicts) {
+    const input = [{ alg: 'ES384', kid: 'nras-page' },
+      { iss: nras, eat_nonce: call.nonce, 'x-nvidia-overall-att-result': true }]
+      .map(value => Buffer.from(JSON.stringify(value)).toString('base64url')).join('.');
+    call.gpu = { verdict: true, checkedAt: call.attestedAt,
+      jwt: `${input}.${sign('sha384', Buffer.from(input), { key: privateKey, dsaEncoding: 'ieee-p1363' }).toString('base64url')}` };
+  }
+  const save = () => s.db.query("update bilateral_bet_events set detail=$2 where bet_id=$1 and kind='enclave_ruling'", [bet.id, record]);
+  await save();
+  let response = await s.browser().get(path());
+  assert.equal(response.status, 200);
+  assert.ok(response.text.includes('Each model’s NVIDIA GPU attestation was verified by NVIDIA’s attestation service'));
+  assert.doesNotMatch(response.text, /the GPU’s own attestation/);
+  assert.equal(keyReads, 1);
+  delete record.verdicts[0].gpu;
+  await save();
+  response = await s.browser().get(path());
+  assert.equal(response.status, 200);
+  assert.doesNotMatch(response.text, /Each model’s NVIDIA GPU/);
+  assert.match(response.text, /Not checked:.*the GPU’s own attestation/);
+});
+
+test('submitted evidence shows its link count and keeps the signed text in the JSON', async () => {
   const yes = await addEvidence({ side: 'yes', title: 'Official report', url: 'https://posted.example.org/report',
     finalUrl: 'https://news.example.org/report', text: '<script>alert("owned")</script>\n\nThe event happened.' });
   const no = await addEvidence({ side: 'no', title: 'Public record', url: 'https://records.example.org/result',
@@ -151,17 +188,15 @@ test('submitted evidence shows each side, final link, host and escaped stored pa
   await insertRuling({ source: 'evidence' }, [yes, no]);
   const response = await s.browser().get(path());
   assert.equal(response.status, 200);
-  assert.match(response.text, /<b>Bet yes<\/b>/);
-  assert.match(response.text, /<b>Bet no<\/b>/);
-  assert.match(response.text, /href="https:\/\/news\.example\.org\/report"[^>]*>Official report<\/a>/);
-  assert.match(response.text, /href="https:\/\/records\.example\.org\/result"[^>]*>Public record<\/a>/);
-  assert.doesNotMatch(response.text, /href="https:\/\/posted\.example\.org\/report"/);
-  assert.match(response.text, /<p class="meta">news\.example\.org<\/p>/);
-  assert.equal((response.text.match(/<summary>Page text<\/summary>/g) || []).length, 2);
-  assert.ok(response.text.includes('&lt;script&gt;alert(&quot;owned&quot;)&lt;/script&gt;'));
-  assert.doesNotMatch(response.text, /<script>alert/);
-  assert.ok(response.text.includes('The event happened.'));
-  assert.ok(response.text.includes('The recorded result.'));
+  assert.match(response.text, /From 2 links posted by both sides\./);
+  assert.ok(response.text.includes(`href="/bets/${bet.id}/enclave-ruling.json"`));
+  assert.doesNotMatch(response.text, /<script>alert|<summary>Page text<\/summary>|Official report|Public record/);
+  const json = await s.browser().get(`/bets/${bet.id}/enclave-ruling.json`);
+  assert.equal(json.status, 200);
+  const items = JSON.parse(JSON.parse(json.text).record.evidence.text).items;
+  assert.equal(items[0].url, yes.final_url);
+  assert.equal(items[0].text, yes.body);
+  assert.equal(items[1].text, no.body);
 });
 
 test('review mode computes agreement from the settled Bet rather than the stored flag', async () => {
@@ -169,7 +204,8 @@ test('review mode computes agreement from the settled Bet rather than the stored
   await insertRuling({ mode: 'review', outcome: 'yes', agrees: false });
   const response = await s.browser().get(path());
   assert.equal(response.status, 200);
-  assert.match(response.text, /<p class="lead">Second opinion: agrees<span>/);
+  assert.match(response.text, /<h2>NEAR AI enclave jury<\/h2><b>Yes<\/b>/);
+  assert.match(response.text, /<p class="gut quiet">Agrees with the recorded result<\/p>/);
   assert.doesNotMatch(response.text, /Ruled yes/);
   assert.ok(response.text.includes('A second opinion does not change the payout.'));
   assert.doesNotMatch(response.text, /both stakes go back/, 'a second opinion never moves money');

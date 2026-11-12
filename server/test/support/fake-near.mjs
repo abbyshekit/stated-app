@@ -34,6 +34,9 @@ export class FakeNear {
     this.keySeq = 0;
     // The wrapped-NEAR token contract: who is registered with it, and what each holds.
     this.wrapped = new Map();
+    // Sputnik DAOs (v2 rules) by account: their policy and proposals.
+    this.daos = new Map();
+    this.daoFaults = [];
     this.fetchImpl = (url, options) => (url === primaryRpc() ? this.rpc(JSON.parse(options.body)) : fetch(url, options));
     this.chain = {
       newKey: () => {
@@ -80,8 +83,13 @@ export class FakeNear {
         account.keys.delete(removePublicKey);
         return this.record({ signer: accountId, receiver: accountId });
       },
-      call: async (input) => (input.contractId === network().wrap ? this.wrapCall(input) : this.call(input)),
+      call: async (input) => {
+        if (input.contractId === network().wrap) return this.wrapCall(input);
+        if (this.daos.has(input.contractId)) return this.daoCall(input);
+        return this.call(input);
+      },
       view: async ({ contractId, method, args }) => {
+        if (this.daos.has(contractId)) return this.daoView(contractId, method, args || {});
         if (contractId !== network().wrap) throw new Error(`unsupported fake view ${contractId}.${method}`);
         if (method === 'storage_balance_of') return this.wrapped.has(args.account_id) ? { total: '1250000000000000000000', available: '0' } : null;
         if (method === 'ft_balance_of') return (this.wrapped.get(args.account_id) || 0n).toString();
@@ -124,6 +132,94 @@ export class FakeNear {
     return fail(`MethodNotFound ${method}`);
   }
 
+  // A Sputnik v2 DAO: role permissions as '<kind label>:<action>' with '*' wildcards, RoleWeight voting with
+  // threshold max(quorum, floor(size * num / den) + 1) per role, and on approval the FunctionCall actions
+  // run with the DAO as predecessor. Only what Stated uses (FunctionCall proposals) is modelled.
+  addDao(daoId, policy, { balance = 6n * 10n ** 24n } = {}) {
+    this.accounts.set(daoId, { balance, keys: new Set() });
+    this.daos.set(daoId, { policy: structuredClone(policy), proposals: [] });
+  }
+
+  daoAllowed(dao, signer, label, action) {
+    const roles = dao.policy.roles.filter((role) => role.kind === 'Everyone' || role.kind?.Group?.includes(signer));
+    const grants = [`${label}:${action}`, `${label}:*`, `*:${action}`, '*:*'];
+    return roles.filter((role) => role.permissions.some((permission) => grants.includes(permission)));
+  }
+
+  daoStatus(dao, proposal) {
+    const { quorum, threshold: [num, den] } = dao.policy.default_vote_policy;
+    for (const [name, [approve, reject, remove]] of Object.entries(proposal.vote_counts)) {
+      const size = dao.policy.roles.find((role) => role.name === name)?.kind?.Group?.length || 1;
+      const needed = Math.max(Number(quorum), Math.floor((size * num) / den) + 1);
+      if (approve >= needed) return 'Approved';
+      if (reject >= needed) return 'Rejected';
+      if (remove >= needed) return 'Removed';
+    }
+    return 'InProgress';
+  }
+
+  daoCall({ signerId, contractId, method, args, depositYocto = '0' }) {
+    const dao = this.daos.get(contractId);
+    this.sent.push({ signerId, contractId, method, args, depositYocto });
+    const fault = this.daoFaults.shift();
+    if (fault === 'reject') return { hash: null, ok: false, failure: 'RPC refused the transaction' };
+    const fail = (failure) => this.record({ signer: signerId, receiver: contractId, method, args, deposit: depositYocto, failure });
+    if (!this.accounts.has(signerId)) return { hash: null, ok: false, failure: 'unknown account' };
+    if (method === 'add_proposal') {
+      const kind = args.proposal?.kind;
+      if (!kind?.FunctionCall) return fail('Only FunctionCall proposals are modelled');
+      if (!this.daoAllowed(dao, signerId, 'call', 'AddProposal').length) return fail('ERR_PERMISSION_DENIED');
+      if (BigInt(depositYocto) < BigInt(dao.policy.proposal_bond)) return fail('ERR_MIN_BOND');
+      const id = dao.proposals.length;
+      dao.proposals.push({ id, proposer: signerId, description: args.proposal.description, kind: structuredClone(kind),
+        status: 'InProgress', vote_counts: {}, votes: {}, submission_time: this.nowNs().toString() });
+      // 'lost': the proposal lands but the caller never hears back.
+      if (fault === 'lost') throw new Error('socket hang up');
+      return this.record({ signer: signerId, receiver: contractId, method, args, deposit: depositYocto, value: JSON.stringify(id) });
+    }
+    if (method === 'act_proposal') {
+      if (BigInt(depositYocto) !== 0n) return fail("Method act_proposal doesn't accept deposit");
+      const proposal = dao.proposals[args.id];
+      if (!proposal) return fail('ERR_NO_PROPOSAL');
+      if (args.proposal !== undefined && JSON.stringify(args.proposal) !== JSON.stringify(proposal.kind)) return fail('ERR_WRONG_KIND');
+      const vote = { VoteApprove: 0, VoteReject: 1, VoteRemove: 2 }[args.action];
+      if (vote === undefined) return fail('ERR_WRONG_ACTION');
+      const roles = this.daoAllowed(dao, signerId, 'call', args.action);
+      if (!roles.length) return fail('ERR_PERMISSION_DENIED');
+      if (proposal.status !== 'InProgress') return fail('ERR_PROPOSAL_NOT_READY_FOR_VOTE');
+      if (proposal.votes[signerId]) return fail('ERR_ALREADY_VOTED');
+      proposal.votes[signerId] = ['Approve', 'Reject', 'Remove'][vote];
+      for (const role of roles) {
+        proposal.vote_counts[role.name] ||= [0, 0, 0];
+        proposal.vote_counts[role.name][vote] += 1;
+      }
+      proposal.status = this.daoStatus(dao, proposal);
+      if (proposal.status === 'Approved') {
+        const call = proposal.kind.FunctionCall;
+        for (const action of call.actions) {
+          const done = this.call({ signerId: contractId, contractId: call.receiver_id, method: action.method_name,
+            args: JSON.parse(Buffer.from(action.args, 'base64').toString('utf8')), depositYocto: action.deposit });
+          if (!done.ok) proposal.status = 'Failed';
+        }
+      }
+      return this.record({ signer: signerId, receiver: contractId, method, args, deposit: depositYocto });
+    }
+    return fail(`MethodNotFound ${method}`);
+  }
+
+  daoView(daoId, method, args) {
+    const dao = this.daos.get(daoId);
+    if (method === 'get_policy') return structuredClone(dao.policy);
+    if (method === 'get_last_proposal_id') return dao.proposals.length;
+    if (method === 'get_proposal') {
+      if (!dao.proposals[args.id]) throw new Error('NEAR view error: ERR_NO_PROPOSAL');
+      return structuredClone(dao.proposals[args.id]);
+    }
+    if (method === 'get_proposals') return structuredClone(dao.proposals.slice(args.from_index, args.from_index + args.limit));
+    if (method === 'version') return '2.0.0';
+    throw new Error(`unsupported fake DAO view ${method}`);
+  }
+
   nowNs() { return BigInt(Date.now() + this.offsetMs) * 1000000n; }
   advance(ms) { this.offsetMs += ms; }
 
@@ -135,7 +231,9 @@ export class FakeNear {
         actions: method ? [{ FunctionCall: { method_name: method, args: Buffer.from(JSON.stringify(args)).toString('base64'), deposit, gas: 100000000000000 } }] : [{ Transfer: {} }] },
       status: failure ? { Failure: { ActionError: { kind: { FunctionCallError: { ExecutionError: failure } } } } } : { SuccessValue: Buffer.from(value).toString('base64') } };
     this.txs.set(hash, tx);
-    return { hash, ok: !failure, failure };
+    let parsed = null;
+    if (!failure && value) { try { parsed = JSON.parse(value); } catch { parsed = value; } }
+    return { hash, ok: !failure, value: parsed, failure };
   }
 
   credit(account, amount) { this.credits.set(account, (this.credits.get(account) || 0n) + amount); }

@@ -91,8 +91,14 @@ test('betBlock: an agreed result rings the winner in ink; only a Prediction that
   assert.match(agreed, /<div class="versus agreed">/);
   assert.match(agreed, /<div class="seat won">[^]*?<b>@priya<\/b><span>bet yes<\/span><\/div>/);
   assert.match(agreed, /<div class="seat lost">[^]*?<b>@oskar<\/b><span>bet no<\/span><\/div>/);
-  assert.match(agreed, /<b>0\.2<\/b><small>test NEAR<\/small><small>pot<\/small>/);
+  assert.match(agreed, /<b>0\.2<\/b><small>test NEAR pot<\/small>/);
   assert.match(text(betBlock(settled, { cameTrue: true })), /<div class="versus">/);
+  for (const ruling of ['yes', 'no']) {
+    const pending = bet({ status: 'accepted', acceptor_username: 'oskar' });
+    assert.ok(text(betBlock(pending, { ruling })).includes(`<div class="bet-seats" data-ruling="${ruling}">`));
+    assert.doesNotMatch(text(betBlock(pending)), /data-ruling=/);
+    assert.doesNotMatch(text(betBlock(bet(), { ruling })), /data-ruling=/);
+  }
   const called = text(betBlock(bet({ status: 'settled', outcome: 'void', acceptor_username: 'oskar' })));
   assert.doesNotMatch(called, /seat won|seat lost/);
   assert.match(called, /<small>escrow closed<\/small>/);

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { X509Certificate } from 'node:crypto';
+import * as quoteModule from '../src/tdx-quote.mjs';
 import {
   INTEL_SGX_ROOT_CA_PEM, bindingOf, makeTestQuote, makeTestRoot, parseTdxQuote,
   verifyAttestationReport, verifyTdxQuote,
@@ -14,6 +15,54 @@ const reports = [['gateway', fixture.gateway_attestation], ['model', fixture.mod
 const gateway = fixture.gateway_attestation;
 const parsedGateway = parseTdxQuote(gateway.intel_quote);
 const canonicalBytes = 636 + parsedGateway.signatureDataLength;
+
+test('exports RTMR3 replay', () => {
+  assert.equal(typeof quoteModule.replayRtmr3, 'function');
+});
+
+const events = [
+  { imr: 1, event_type: 0, event: 'ignored', event_payload: 'ff' },
+  { imr: 3, event_type: 1, event: 'app-id', event_payload: '68656c6c6f20e29883', digest: '' },
+  { imr: 3, event_type: 42, event: 'compose-hash', event_payload: 'deadbeef',
+    digest: '76a9f3ac037222e35acaea8a18e210b67e2ab2ee71947c00cb47d5c1aba02dcab36c591021474da41d8cdae2ee0c5c5e' },
+];
+const replayVector = '802fb622878bd9fccdc05b74e5d85a2496b90ce0a29e86095d040f0681a7e447114523346349802332dd85a2f83fb82f';
+
+test('replays the independent SHA-384 vector, preserving order and UTF-8', () => {
+  assert.equal(quoteModule.replayRtmr3(JSON.stringify(events)).toString('hex'), replayVector);
+  assert.equal(quoteModule.replayRtmr3(events).toString('hex'), replayVector);
+  assert.equal(quoteModule.replayRtmr3([{ imr: 3, event_type: 7, event: 'café', event_payload: '01' }]).toString('hex'),
+    '9b84e78271af86769613faa9aead6bfc3c0757cb2732bd15937485eb0cfa3dd9287a3bb26d3b312b5cb05300fd68bee1');
+  assert.notEqual(quoteModule.replayRtmr3([...events].reverse()).toString('hex'), replayVector);
+  assert.deepEqual(quoteModule.replayRtmr3([]), Buffer.alloc(48));
+  assert.deepEqual(quoteModule.replayRtmr3([{}, { imr: '3' }]), Buffer.alloc(48));
+});
+
+test('rejects invalid event data and bounds', () => {
+  const bad = [
+    [{ ...events[1], digest: '00'.repeat(48) }],
+    [{ ...events[1], event_payload: '0z' }],
+    [{ ...events[1], event_payload: 'abc' }],
+    [{ ...events[1], event_type: -1 }],
+    [{ ...events[1], event: 3 }],
+    [{ ...events[1], digest: 1 }],
+    [null], null, '{}', '[', ' '.repeat(1024 * 1024 + 1),
+    Array.from({ length: 4097 }, () => ({ imr: 0 })),
+  ];
+  for (const input of bad) assert.throws(() => quoteModule.replayRtmr3(input), Error);
+});
+
+test('authenticates event values against the signed RTMR3', () => {
+  const { rootKey, rootPem } = makeTestRoot();
+  const quote = makeTestQuote({ signingAddress: gateway.signing_address, nonceHex: nonce, rootKey, rtmr3: replayVector });
+  const report = { ...gateway, intel_quote: quote, info: undefined, event_log: JSON.stringify(events) };
+  const verified = verifyAttestationReport(report, nonce, { roots: [rootPem], now });
+  assert.deepEqual(verified.appId, Buffer.from('68656c6c6f20e29883', 'hex'));
+  assert.deepEqual(verified.composeHash, Buffer.from('deadbeef', 'hex'));
+  assert.throws(() => verifyAttestationReport({ ...report, event_log: JSON.stringify(events.slice(0, 2)) }, nonce,
+    { roots: [rootPem], now }), /event log does not match RTMR3/);
+  assert.throws(() => verifyAttestationReport({ ...report, event_log: null }, nonce, { roots: [rootPem], now }), /event_log/);
+});
 
 function flip(hex, offset) {
   const bytes = Buffer.from(hex, 'hex');

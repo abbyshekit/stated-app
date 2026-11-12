@@ -121,20 +121,21 @@ test('open evidence leads both pages, with one filled add action only for bettor
   await s.db.query("insert into enclave_plans (statement_id,source,closes_at,record) values ($1,'evidence',$2,'{}')", [statement.id, closes]);
   await addEvidence();
   const [publicPage, bettorPage] = await pages();
-  const line = 'Either side can post a link. Then a NEAR AI enclave jury rules on both sides’ links.';
-  for (const page of [publicPage, bettorPage]) {
-    assert.ok(page.includes(`<p class="lead">Evidence is open<span>Until ${clock(closes)} UTC, ${dayMonth(closes)}</span></p>`));
+  const line = 'After the deadline a NEAR AI enclave jury reads both sides’ links and decides.';
+  for (const [page, lead] of [[publicPage, 'Both sides are in'], [bettorPage, 'Evidence is open']]) {
+    assert.ok(page.includes(`<p class="lead">${lead}<span>Links close ${clock(closes)} UTC, ${dayMonth(closes)}</span></p>`));
     assert.ok(page.includes(line));
     assert.equal((page.match(new RegExp(`${clock(closes)} UTC`, 'g')) || []).length, 1);
-    assert.match(page, /<details class="fold"><summary>Evidence, 1 links<\/summary>/);
-    assert.match(page, /Bet yes: <a class="tl" href="https:\/\/news\.example\.org\/report"[^>]*>Official report<\/a>, @public_bettor/);
     assert.doesNotMatch(page, new RegExp(HIDDEN_TEXT));
     assert.doesNotMatch(page, new RegExp(sha256(Buffer.from(HIDDEN_TEXT))));
     assert.doesNotMatch(page, /enclave-ruling\.json/);
   }
+  assert.match(publicPage, /<details class="fold"><summary>Evidence, 1 links<\/summary>/);
+  assert.match(publicPage, /Bet yes: <a class="tl" href="https:\/\/news\.example\.org\/report"[^>]*>Official report<\/a>, @public_bettor/);
+  assert.doesNotMatch(bettorPage, /<summary>Evidence, \d+ links<\/summary>/);
   assert.doesNotMatch(publicPage, /Add evidence/);
   assert.ok(bettorPage.includes(`<a class="pill solid big" href="${path()}/evidence">Add evidence</a>`));
-  assert.match(bettorPage, /<a class="tl"[^>]*>Post the bet<\/a>/);
+  assert.match(bettorPage, /<a class="tl"[^>]*><svg class="xmark"[^>]*>[\s\S]*?<\/svg>Post on X<\/a>/);
   assert.doesNotMatch(bettorPage, /<summary>Propose a result<\/summary>|action="[^"\n]*\/propose"/);
   assert.match((await acceptorBrowser.get(path())).text, /Add evidence/);
   const stranger = await s.signIn(s.fakeX.addUser('1903', 'evidence_viewer'));
@@ -146,9 +147,9 @@ test('open evidence leads both pages, with one filled add action only for bettor
 test('evidence plans appear with no links, and close without an add link', async () => {
   const closes = new Date(Date.now() + 86400000).toISOString();
   await s.db.query("insert into enclave_plans (statement_id,source,closes_at,record) values ($1,'evidence',$2,'{}')", [statement.id, closes]);
-  assert.match((await creatorBrowser.get(path())).text, /Either side can post a link\./);
+  assert.match((await creatorBrowser.get(path())).text, /After the deadline a NEAR AI enclave jury reads both sides’ links and decides\./);
   await s.db.query("update enclave_plans set closes_at=clock_timestamp()-interval '1 minute' where statement_id=$1", [statement.id]);
-  for (const page of await pages()) assert.doesNotMatch(page, /Either side can post a link\.|Add evidence|Evidence, 0 links/);
+  for (const page of await pages()) assert.doesNotMatch(page, /After the deadline a NEAR AI enclave jury reads both sides’ links and decides\.|Add evidence|Evidence, 0 links/);
 });
 
 test('evidence before a plan uses the configured window and only public metadata', async () => {
@@ -177,10 +178,11 @@ test('pending outcomes use the recorded Result time rather than the jury decisio
       const favoured = outcome === 'yes' ? '@public_bettor' : '@other_bettor';
       const pendingPages = [...await pages(), (await acceptorBrowser.get(path())).text];
       for (const [index, page] of pendingPages.entries()) {
-        const who = (index === 1 && outcome === 'yes') || (index === 2 && outcome === 'no') ? 'you' : favoured;
-        assert.ok(page.includes(`<p class="lead">Ruled for ${who}<span>Pays out ${paysAt} UTC</span></p>`));
+        const who = (index === 1 && outcome === 'yes') || (index === 2 && outcome === 'no') ? 'You' : favoured;
+        assert.ok(page.includes(`<p class="lead">${who} won<span>Pays out ${paysAt} UTC</span></p>`));
+        assert.ok(page.includes(`<div class="bet-seats" data-ruling="${outcome}">`));
         assert.match(page, /class="pill solid big"[^>]*>[\s\S]*?Post the result<\/a>/);
-        assert.doesNotMatch(page, />Post the bet<\/a>/);
+        assert.doesNotMatch(page, />Post on X<\/a>/);
         assert.ok(page.includes(`<span class="${outcome === 'yes' ? 'hl' : 'struck'}">${bet.claim}</span>`));
         assert.ok(page.includes(`<div class="gut link-row"><a class="tl" href="${rulingPath()}">See the ruling</a></div>`));
         assert.match(page, /<summary>Terms<\/summary>[\s\S]*A reviewer can correct a ruling before it pays out\.<\/dd>/);
@@ -226,7 +228,7 @@ test('a settled loser starts another Bet while the winner keeps the result actio
     assert.equal((loserPage.match(/class="(?:pill solid big|primary big)"/g) || []).length, 1);
     assert.doesNotMatch((await winner.get(path())).text, /class="pill solid big"[^>]*>Make another bet/);
     for (const page of await pages()) {
-      assert.match(page, /<b>0\.2<\/b><small>test NEAR<\/small><small>pot<\/small>/);
+      assert.match(page, /<b>0\.2<\/b><small>test NEAR pot<\/small>/);
       assert.doesNotMatch(page, /<small>won<\/small>|<small>credited<\/small>/);
     }
     await clearRuling();

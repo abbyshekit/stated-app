@@ -1,0 +1,128 @@
+{
+  "escrow": "stated-escrow-52081551be.testnet",
+  "dao": "stated-court.sputnik-v2.testnet",
+  "startedAt": "2026-11-12T04:07:34.035Z",
+  "steps": [
+    {
+      "name": "escrow is version 2",
+      "pass": true,
+      "note": "version 2"
+    },
+    {
+      "name": "DAO is Sputnik 2.0.0 with the court policy",
+      "pass": true
+    },
+    {
+      "name": "two faucet accounts",
+      "pass": true,
+      "note": "court-check-feea5b70-a.testnet, court-check-9c3815e0-b.testnet"
+    },
+    {
+      "name": "bet 1: create_bet with referee stated-court.sputnik-v2.testnet",
+      "pass": true,
+      "hash": "5Gk6of4uBKJgVSipZjP3HSP2Wa2oaisj1TXrjDeR68s8"
+    },
+    {
+      "name": "bet 1: accept_bet",
+      "pass": true,
+      "hash": "29Mu3Lppk9aJoU8yNsEjKPQnXoqybinv78hRV2XRDR4x"
+    },
+    {
+      "name": "bet 1: get_bet shows accepted, referee = DAO",
+      "pass": true,
+      "note": "status accepted, referee stated-court.sputnik-v2.testnet"
+    },
+    {
+      "name": "bet 1: add_proposal returns the proposal id",
+      "pass": true,
+      "hash": "3MqimnHnvLtZD2jpu1rnofnrQEHCCsde9wgWabAU8NcB",
+      "proposalId": 0,
+      "note": "id 0"
+    },
+    {
+      "name": "bet 1: act_proposal {id, action: VoteApprove, proposal: kind} accepted by Sputnik 2.0.0",
+      "pass": true,
+      "hash": "DFuwDPAoLPbC317aCBiohA8hqYCBd4PgNJfHVVdKprom"
+    },
+    {
+      "name": "bet 1: proposal is Approved",
+      "pass": true,
+      "note": "status Approved"
+    },
+    {
+      "name": "bet 1: get_bet shows settled by the referee, outcome yes",
+      "pass": true,
+      "note": "status settled, resolution {\"outcome\":\"yes\",\"method\":\"referee\",\"resolved_at_ns\":\"1794456478957727661\"}"
+    },
+    {
+      "name": "bet 1: the winner withdraws both stakes",
+      "pass": true,
+      "hash": "4QFeznL4QyiNLFeCuaYDDecpH1cU3WyBxUfDK6bSFw6e",
+      "note": "credit 200000000000000000000000, balance +199593772367099300000000"
+    },
+    {
+      "name": "bet 2: create_bet with referee stated-court.sputnik-v2.testnet",
+      "pass": true,
+      "hash": "4KhZXMFnn5vRYzS6YwJaQR2guDUYBDrXuJLUBY1P7J26"
+    },
+    {
+      "name": "bet 2: accept_bet",
+      "pass": true,
+      "hash": "Cp5nKZMiwTSen85oEfqYiWFbXe2WQVbhSoWyVNbjvpdZ"
+    },
+    {
+      "name": "bet 2: get_bet shows accepted, referee = DAO",
+      "pass": true,
+      "note": "status accepted, referee stated-court.sputnik-v2.testnet"
+    },
+    {
+      "name": "bet 2: add_proposal returns the proposal id",
+      "pass": true,
+      "hash": "AjRokff3mrbZAiVdhWEEHPEC4zarrcWum6XuBDCfZqwL",
+      "proposalId": 1,
+      "note": "id 1"
+    },
+    {
+      "name": "bet 2: council VoteReject accepted",
+      "pass": true,
+      "hash": "GCnz6tifBA1P1DgH4DadbF6iwNNRRcXyd8Re5YKUUBCj"
+    },
+    {
+      "name": "bet 2: proposal is Rejected",
+      "pass": true,
+      "note": "status Rejected"
+    },
+    {
+      "name": "bet 2: the bet stays active",
+      "pass": true,
+      "note": "status accepted"
+    }
+  ],
+  "accounts": {
+    "creator": "court-check-feea5b70-a.testnet",
+    "acceptor": "court-check-9c3815e0-b.testnet",
+    "council": "stated-court-18ecdebd.testnet"
+  },
+  "actProposalForm": "id, action, proposal (accepted by 2.0.0)",
+  "bets": {
+    "approved": "ef68f087-e926-4003-b4d9-b1d6c68a1324",
+    "rejected": "23e1b9e0-ac01-4c5b-a18c-5438b6623618"
+  },
+  "proposals": {
+    "approved": 0,
+    "rejected": 1
+  },
+  "finishedAt": "2026-11-12T04:08:25.003Z",
+  "links": {
+    "bet 1: create_bet with referee stated-court.sputnik-v2.testnet": "https://testnet.nearblocks.io/txns/5Gk6of4uBKJgVSipZjP3HSP2Wa2oaisj1TXrjDeR68s8",
+    "bet 1: accept_bet": "https://testnet.nearblocks.io/txns/29Mu3Lppk9aJoU8yNsEjKPQnXoqybinv78hRV2XRDR4x",
+    "bet 1: add_proposal returns the proposal id": "https://testnet.nearblocks.io/txns/3MqimnHnvLtZD2jpu1rnofnrQEHCCsde9wgWabAU8NcB",
+    "bet 1: act_proposal {id, action: VoteApprove, proposal: kind} accepted by Sputnik 2.0.0": "https://testnet.nearblocks.io/txns/DFuwDPAoLPbC317aCBiohA8hqYCBd4PgNJfHVVdKprom",
+    "bet 1: the winner withdraws both stakes": "https://testnet.nearblocks.io/txns/4QFeznL4QyiNLFeCuaYDDecpH1cU3WyBxUfDK6bSFw6e",
+    "bet 2: create_bet with referee stated-court.sputnik-v2.testnet": "https://testnet.nearblocks.io/txns/4KhZXMFnn5vRYzS6YwJaQR2guDUYBDrXuJLUBY1P7J26",
+    "bet 2: accept_bet": "https://testnet.nearblocks.io/txns/Cp5nKZMiwTSen85oEfqYiWFbXe2WQVbhSoWyVNbjvpdZ",
+    "bet 2: add_proposal returns the proposal id": "https://testnet.nearblocks.io/txns/AjRokff3mrbZAiVdhWEEHPEC4zarrcWum6XuBDCfZqwL",
+    "bet 2: council VoteReject accepted": "https://testnet.nearblocks.io/txns/GCnz6tifBA1P1DgH4DadbF6iwNNRRcXyd8Re5YKUUBCj"
+  },
+  "daoLink": "https://testnet.nearblocks.io/address/stated-court.sputnik-v2.testnet"
+}

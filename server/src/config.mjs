@@ -44,6 +44,12 @@ export function loadConfig(env = process.env) {
     // until claimed. Needs a version 2 escrow contract. The treasury creates the
     // accounts; its key comes from the environment, or on testnet only
     // (STATED_PLAY_AUTOPROVISION=1, for demos) from the faucet at first use.
+    // Stated Court: a Sputnik DAO that holds the referee seat of new reply Bets. The
+    // jury member is the play referee account (play.mjs referee()), which files each
+    // ruling as a DAO proposal and approves it after the correction window.
+    court: {
+      dao: /^[a-z0-9._-]{2,64}$/.test(env.STATED_COURT_DAO || '') ? env.STATED_COURT_DAO : '',
+    },
     play: {
       enabled: env.STATED_PLAY === '1' && Boolean(env.STATED_NEAR_CONTRACT),
       treasury: env.STATED_PLAY_TREASURY || '',

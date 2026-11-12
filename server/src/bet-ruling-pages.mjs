@@ -6,13 +6,26 @@ import { readPublicBet } from './bet-public.mjs';
 import { face, facesByUsername, facesFor } from './certificate.mjs';
 import { readEnclaveRuling, quoteSummary } from './enclave-ruling.mjs';
 import { publicPredictionOwner, publicSave } from './store.mjs';
+import { dayMonth } from './marked.mjs';
+import { markedClaim } from './bet-view.mjs';
 
 const ID = '([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})';
 const percent = (value) => `${new Decimal(value).times(100).toFixed()}%`;
-const price = (value) => `US$${new Decimal(value).toFixed()}`;
+// Thousands separated, decimals as Coinbase gave them: US$100,000 and US$3.689.
+const price = (value) => {
+  const [whole, cents] = new Decimal(value).toFixed().split('.');
+  return `US$${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}${cents ? `.${cents}` : ''}`;
+};
 const time = (value) => new Intl.DateTimeFormat('en-GB', {
   timeZone: 'UTC', dateStyle: 'medium', timeStyle: 'short',
 }).format(new Date(value)) + ' UTC';
+const clock = (value) => new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'UTC', hour: '2-digit', minute: '2-digit',
+}).format(new Date(value));
+const outcomeWord = (outcome) => outcome === 'yes' ? 'Yes' : outcome === 'no' ? 'No' : 'Undecided';
+const modelName = (id) => id.split('/').at(-1)
+  .replace(/-(?:A\d+B|FP\d+|BF\d+|Flash|Instruct|Thinking|\d{4,8})(?=-|$)/gi, '')
+  .replaceAll('-', ' ');
 const VERIFIED = [
   'Each model ran in an Intel TDX enclave whose quote chains to Intel’s root certificate',
   'Each enclave’s signing key and this request’s fresh nonce are inside its quote',
@@ -22,7 +35,7 @@ const VERIFIED = [
 ];
 
 // Public pages never enrich the source identity from the viewer's private save.
-async function postRow(db, bet) {
+async function postRow(db, bet, outcome) {
   const linked = await db.one('select source_save_id from bilateral_bets where id=$1', [bet.id]);
   const owner = linked?.source_save_id ? await publicPredictionOwner(db, linked.source_save_id) : null;
   const source = owner ? await publicSave(db, owner, linked.source_save_id) : null;
@@ -32,51 +45,23 @@ async function postRow(db, bet) {
   const handle = available ? (direct ? source.author_username : null) : bet.creator_username;
   const pictures = available ? await facesFor(db, [source]) : await facesByUsername(db, [handle]);
   const picture = pictures.get(available ? String(source.speaker_x_user_id) : String(handle || '').toLowerCase());
-  return html`<ul class="posts"><li class="prow">${face({ url: picture, name: author })}<div>
+  return html`<ul class="posts ruling-post"><li class="prow">${face({ url: picture, name: author })}<div>
     <p class="pwho"><b>${author}</b>${handle && `@${handle}` !== author ? html`<span>@${handle}</span>` : ''}</p>
-    <p class="said">${bet.claim}</p>
+    <p class="said">${markedClaim(bet.claim, outcome)}</p>
   </div></li></ul>`;
 }
 
-function submittedRows(items) {
-  return items.map(item => {
-    let link = null;
-    let host = null;
-    // A signature authenticates stored text; it does not make an arbitrary URL safe to open.
-    try {
-      const url = new URL(item.url);
-      if (url.protocol === 'https:' && !url.username && !url.password) {
-        link = url.href;
-        host = url.host;
-      }
-    } catch { /* Show the stored title without a link when an old URL is invalid. */ }
-    return html`<li class="prow"><div>
-      <p class="pwho"><b>Bet ${item.side}</b></p>
-      <p class="evidence-title">${link ? html`<a class="tl" href="${link}" rel="noopener noreferrer">${item.title || host}</a>` : item.title || item.url}</p>
-      ${host ? html`<p class="meta">${host}</p>` : ''}
-      <details class="fold"><summary>Page text</summary>${item.text.split(/\n\n+/u).map(text => html`<p class="acct">${text}</p>`)}</details>
-    </div></li>`;
-  });
-}
-
-function evidenceRows(record) {
+function evidenceLine(record) {
   const evidence = JSON.parse(record.evidence.text);
-  if (record.evidence.kind === 'submitted') return html`<ul class="posts evidence-list">${submittedRows(evidence.items)}</ul>`;
+  if (record.evidence.kind === 'submitted') return evidence.items.length
+    ? (evidence.items.length === 1 ? 'From 1 link posted as evidence.'
+      : new Set(evidence.items.map((item) => item.side)).size > 1 ? `From ${evidence.items.length} links posted by both sides.`
+        : `From ${evidence.items.length} links posted by one side.`)
+    : 'No links were posted.';
   const plan = record.plan.parsed;
-  return html`<ul class="posts evidence-list"><li class="prow"><div>
-    <p>Coinbase ${plan.product} price, ${time(plan.start)} to ${time(plan.end)}</p>
-    <p>${plan.kind === 'moment' ? `opened at ${price(evidence.summary.priceAtMoment)}` : `low ${price(evidence.summary.lowestLow)}, high ${price(evidence.summary.highestHigh)}`}</p>
-    <a class="tl" href="${record.evidence.urls[0]}" rel="noopener noreferrer">Coinbase data</a>
-  </div></li></ul>`;
-}
-
-function heading(record) {
-  if (record.outcome === 'unclear') return 'The jury could not decide';
-  if (record.mode === 'review') {
-    if (record.agrees === null) return 'The jury could not decide';
-    return `Second opinion: ${record.agrees ? 'agrees' : 'disagrees'}`;
-  }
-  return `Ruled ${record.outcome}`;
+  return plan.kind === 'moment'
+    ? `Coinbase ${plan.product} opened at ${price(evidence.summary.priceAtMoment)} at ${clock(plan.start)} UTC on ${dayMonth(plan.start)}.`
+    : `Coinbase ${plan.product} ranged from ${price(evidence.summary.lowestLow)} to ${price(evidence.summary.highestHigh)} between ${time(plan.start).replace(/ UTC$/, '')} and ${time(plan.end)}.`;
 }
 
 export function registerBetRulingRoutes({ route, db, config, layout, send, notFound }) {
@@ -92,33 +77,38 @@ export function registerBetRulingRoutes({ route, db, config, layout, send, notFo
         if (!record) return null;
         quotes = quoteSummary(record);
       } catch { return null; }
-      return { bet, record, quotes, post: await postRow(tx, bet) };
+      return { bet, record, quotes, post: await postRow(tx, bet, record.outcome) };
     });
     if (!result) return notFound(ctx);
     const { bet, record, quotes, post } = result;
+    const gpuVerified = record.verdicts.every(verdict => verdict.gpu?.verdict === true);
+    const verified = gpuVerified
+      ? [...VERIFIED, 'Each model’s NVIDIA GPU attestation was verified by NVIDIA’s attestation service'] : VERIFIED;
     const body = html`
       <h1 class="visually-hidden">Ruling</h1>
       ${post}
-      <p class="lead">${heading(record)}<span>${time(record.decidedAt)}</span></p>
-      <h2>Jury</h2>
-      <ul class="posts evidence-list">${record.verdicts.map(verdict => html`<li class="prow"><div>
-        <p class="pwho"><b>${verdict.model}</b></p>
-        <p class="meta"><b>${verdict.parsed.outcome}</b><span>${percent(verdict.parsed.confidence)}</span></p>
-        <p class="meta">${verdict.parsed.reason}</p>
-      </div></li>`)}</ul>
-      <p class="gut">${record.mode === 'review'
-        ? `Every model has to agree at ${percent(record.minConfidence)} or more for the jury to give a verdict. A second opinion does not change the payout.`
-        : `Every model has to agree at ${percent(record.minConfidence)} or more, or both stakes go back.`}</p>
-      <h2>Evidence</h2>
-      ${evidenceRows(record)}
-      <h2>Verified</h2>
-      <ul class="posts evidence-list">${VERIFIED.map(line => html`<li class="prow"><div>✓ ${line}</div></li>`)}</ul>
-      <p class="gut quiet">Not checked: enclave measurements against a published list, TCB level and revocation, the GPU’s own attestation.</p>
+      <div class="verdict ruling-verdict${record.outcome === 'yes' ? ' yes' : ''}"><h2>NEAR AI enclave jury</h2><b>${outcomeWord(record.outcome)}</b><span>${dayMonth(record.decidedAt, { year: true })}</span></div>
+      ${record.mode === 'review' && record.agrees !== null ? html`<p class="gut quiet">${record.agrees ? 'Agrees with the recorded result' : 'Disagrees with the recorded result'}</p>` : ''}
+      <ul class="jury-rail${record.outcome === 'yes' ? '' : ' agreed'}">${record.verdicts.map(verdict => html`<li class="seat${verdict.parsed.outcome === record.outcome ? ' won' : ''}">
+        ${face({ name: modelName(verdict.model) })}<b>${modelName(verdict.model)}</b><span>${outcomeWord(verdict.parsed.outcome)}, ${percent(verdict.parsed.confidence)}</span>
+      </li>`)}</ul>
+      <p class="gut">${evidenceLine(record)}</p>
+      <p class="gut quiet">Each verdict was signed inside an Intel TDX enclave, and every signature checked out.</p>
+      <div class="folds">
+      <details class="fold"><summary>Why each model decided</summary>
+        <ul class="posts evidence-list">${record.verdicts.map(verdict => html`<li class="prow"><div><p class="pwho"><b>${verdict.model}</b></p><p>${verdict.parsed.reason}</p></div></li>`)}</ul>
+      </details>
       <details class="fold"><summary>Check it yourself</summary>
+        <ul class="posts evidence-list">${verified.map(line => html`<li class="prow"><div>${line}</div></li>`)}</ul>
+        <p class="quiet">Not checked: enclave measurements against a published list, TCB level and revocation${gpuVerified ? '' : ', the GPU’s own attestation'}.</p>
+        <p>${record.mode === 'review'
+          ? `Every model has to agree at ${percent(record.minConfidence)} or more for the jury to give a verdict. A second opinion does not change the payout.`
+          : `Every model has to agree at ${percent(record.minConfidence)} or more, or both stakes go back.`}</p>
         <p class="acct"><code>node scripts/verify-enclave-ruling.mjs ${config.baseUrl} ${bet.id}</code></p>
         <p><a class="tl" href="/bets/${bet.id}/enclave-ruling.json">Ruling JSON</a></p>
         ${quotes.map(quote => html`<p class="quiet acct">${quote.role} ${quote.model} <code>${quote.mrtd.slice(0, 16)}</code></p>`)}
       </details>
+      </div>
       <div class="acts"><a class="pill solid big" href="/bets/new?from=${bet.id}">Make your own bet</a></div>`;
     send(ctx.res, 200, await layout(ctx, 'Ruling', body, { flush: true, back: `/bets/${bet.id}`, signin: false }));
   });

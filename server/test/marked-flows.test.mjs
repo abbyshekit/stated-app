@@ -180,7 +180,7 @@ test('a deposit that fails comes back to the Bet, with the reason above the butt
   assert.match(res.text, /Deposit stake<\/button>/, 'the action is still on the page');
   assert.ok(res.text.indexOf('role="alert"') < res.text.indexOf('Deposit stake</button>'), 'reason sits above the button');
   assert.doesNotMatch(res.text, /That didn’t work|Unable to continue/);
-  assert.match(res.text, /<p class="prop">A second offer, not funded\.<\/p>/, 'still on the same Bet');
+  assert.match(res.text, /<p class="prop bet-claim">A second offer, not funded\.<\/p>/, 'still on the same Bet');
   assert.match(res.text, /name="accountId" value="not a wallet"/, 'what they typed is kept, to correct');
 });
 

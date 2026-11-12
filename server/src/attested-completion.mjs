@@ -5,6 +5,7 @@
 // one place that decides what a verifiable completion record holds.
 import { randomBytes } from 'node:crypto';
 import { sha256, validatePreflight, verifyAttestedRecord } from './attested-signature.mjs';
+import { verifyGpuPayload } from './gpu-attestation.mjs';
 
 async function bytesFrom(response, maxBytes, signal) {
   if (!response.ok) throw new Error('NEAR AI request failed.');
@@ -55,6 +56,12 @@ export async function attestedCompletion(config, { model = config.nearai.model, 
   // Test stacks set config.nearai.quoteRoots to their own root; production uses the pinned Intel root.
   const roots = config.nearai?.quoteRoots;
   validatePreflight(attestation, nonce, { roots });
+  const gpuEvidence = new Map();
+  for (const candidate of attestation.model_attestations) {
+    if (!Object.hasOwn(candidate, 'nvidia_payload')) continue;
+    const { jwt, verdict } = await verifyGpuPayload(candidate.nvidia_payload, nonce, { fetchImpl, signal });
+    gpuEvidence.set(candidate, { jwt, verdict, checkedAt: new Date().toISOString() });
+  }
   const attestedAt = new Date().toISOString();
   const requestBytes = Buffer.from(JSON.stringify({ model, stream: false,
     response_format: { type: 'json_object' }, max_tokens: maxTokens,
@@ -73,6 +80,12 @@ export async function attestedCompletion(config, { model = config.nearai.model, 
     responseHash: sha256(responseBytes), completionId: response.id, signature, attestation, nonce, verdict,
     startedAt, attestedAt, completedAt: new Date().toISOString() };
   verifyAttestedRecord(record, checkContent ? { checkContent, roots } : { roots });
+  // The response signer must uniquely match a retained, verified preflight report.
+  const normalized = value => String(value).replace(/^0x/i, '').toLowerCase();
+  const signingCandidate = attestation.model_attestations.find(candidate =>
+    candidate.signing_algo === signature.signing_algo
+    && normalized(candidate.signing_address) === normalized(signature.signing_address));
+  if (gpuEvidence.has(signingCandidate)) record.gpu = gpuEvidence.get(signingCandidate);
   signal.throwIfAborted();
   return record;
 }

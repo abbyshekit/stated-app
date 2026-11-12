@@ -8,9 +8,9 @@ Bet on anything said on X. A NEAR AI enclave jury decides who won, and a NEAR co
 | Hosted app | https://stated-production.up.railway.app |
 | Demo video | [docs/stated-demo-70s.mp4](docs/stated-demo-70s.mp4) (recorded before the jury; a new cut follows the first live jury payout) |
 | 30-second check | `npm ci && node scripts/verify-hosted-payout.mjs`<br>`node scripts/verify-enclave-ruling.mjs` |
-| Tests | `npm test` (659 tests on 12 November 2026) |
+| Tests | `npm test` (684 tests on 12 November 2026) |
 
-The payout check verifies a recorded test NEAR transfer from two public RPC endpoints. The enclave check verifies the jury's signed second opinion on the same real-X Bet: on 12 November 2026 it printed 14 checks passed, 0 failed, 5 not checked. Read the ruling as a page: https://stated-production.up.railway.app/bets/c171de89-f223-4309-886e-180ad69af092/ruling
+The payout check verifies a recorded test NEAR transfer from two public RPC endpoints. The enclave check verifies the jury's signed second opinion on the same real-X Bet: on 12 November 2026 it printed 14 checks passed, 0 failed, 9 not checked. Read the ruling as a page: https://stated-production.up.railway.app/bets/c171de89-f223-4309-886e-180ad69af092/ruling
 
 ## How it works
 
@@ -18,13 +18,13 @@ The payout check verifies a recorded test NEAR transfer from two public RPC endp
 2. Someone takes the other side by replying `take` or on the Bet's page, without bringing a wallet: Stated creates a named NEAR account per X handle.
 3. After the deadline, an enclave model chooses where the answer comes from: Coinbase price candles, or links the bettors submit by replying `yes <link>` / `no <link>` or on the Bet's page.
 4. With three models configured and the default 80% confidence threshold, every juror in NEAR AI Cloud enclaves must agree on Yes or No at that confidence or more, or both stakes go back after the undecided retries.
-5. After the default ten-minute correction window, the referee worker sends the Result to escrow and withdraws the winner's payout for an unclaimed managed account.
+5. New reply Bets name Stated Court, a Sputnik DAO, as referee. The jury's ruling becomes a DAO proposal; the council can vote it down during the default ten-minute correction window. Otherwise the jury member approves it and the DAO settles the Bet. The worker withdraws the winner's payout for an unclaimed managed account.
 
 ## Why each track
 
 ### Privacy & Private AI (`privacy`)
 
-Every production jury call runs on NEAR AI Cloud in an Intel TDX enclave: the app fetches an attestation with a fresh nonce, verifies the gateway and signing model's TDX quote chains to Intel's pinned root and their signing-key/nonce bindings, and verifies the response signature over the exact request and response hashes. The **Verified** panel at `/bets/<id>/ruling` shows these checks; measurements against a published list, TCB level and revocation, GPU attestation and event-log replay remain unchecked.
+Every production jury call runs on NEAR AI Cloud in an Intel TDX enclave: the app fetches an attestation with a fresh nonce, verifies the gateway and signing model's TDX quote chains to Intel's pinned root and their signing-key/nonce bindings, and verifies the response signature over the exact request and response hashes. Each model's NVIDIA GPU evidence goes to NVIDIA's attestation service with the request nonce; the signed verdict is stored and re-verified offline. Supplied event logs are replayed against the quote's RTMR3, authenticating the app id and compose hash. Enclave measurements are not compared with a published list; TCB level and revocation are not checked.
 
 ### AI Security & Defense (`security`)
 
@@ -32,7 +32,7 @@ The AI decides an outcome but holds no keys: the contract lets the named referee
 
 ### Social Money (`social`)
 
-Bets happen between people in the thread where the argument happened, using NEAR accounts named for their X handles. Published Bet pages record who took each side and the Result.
+Bets happen between people in the thread where the argument happened, using NEAR accounts named for their X handles. New reply Bets name a Sputnik DAO, [Stated Court](https://stated-production.up.railway.app/court), as referee. Published Bet pages record who took each side and the Result.
 
 ### Open Innovation (`open`)
 
@@ -42,9 +42,15 @@ The Node.js/PostgreSQL app joins X reply intake, evidence-backed Results and Rus
 
 Enclave rulings require `STATED_ENCLAVE_RULINGS=1`, `NEARAI_API_KEY` and `NEARAI_RULING_MODELS` listing at least two distinct models. The three-model flow above requires a three-model roster; the engine accepts two to ten, and `NEARAI_RULING_MIN_CONFIDENCE` defaults to `0.8`.
 
+A failed NVIDIA GPU attestation blocks inference. Before recording a Result, the server re-verifies the GPU verdicts stored in the signed record and replays any supplied event logs against RTMR3.
+
 The routing model selects a Coinbase product and time window or bettor-submitted evidence. The server builds the Coinbase URLs and fetches the candles; for other claims, the evidence window defaults to a day after the deadline, and fetched page text enters the signed jury request. For a claim that something will happen, no credible evidence of it happening by the deadline means No; a claim that it will not happen applies the reverse rule.
 
 All jurors must agree at the configured confidence threshold. Three completed undecided attempts produce a void and return both stakes; network errors, invalid signatures and empty responses retry separately. A reviewer can correct the Result during the settlement delay, and the Bet page identifies a correction. With rulings off, a human reviewer records the Result. A saved second opinion on an already settled Bet changes neither its Result nor its payout.
+
+New reply Bets name `stated-court.sputnik-v2.testnet` as referee; the server files the jury's ruling or reviewer's Result as a DAO proposal to call the escrow's `referee_resolve`. The council can vote it down on-chain during the correction window; otherwise the jury member approves it after the window and the DAO itself settles the Bet.
+
+The council is one operator account for now, `stated-court-18ecdebd.testnet`; the jury member is the server's `referee.stated-play-6cf0876dd7.testnet` account. [DAO creation evidence](evidence/court-dao-stated-court-2026-11-12.json) records the policy and members; [Stated Court](https://stated-production.up.railway.app/court) reads members, voting rules and recent proposals from chain. Bets made before the DAO existed keep the server's referee account.
 
 Known limits: Coinbase evidence may omit up to a tenth of a segment's candles; moment claims use the minute's opening price, and range boundaries round outward to whole minutes. Submitted pages are read once, with late reads allowed up to two minutes after evidence closes; signed text establishes what the jury read, not the source's truth or the verdict's correctness. The attestation exclusions are listed above.
 
@@ -73,14 +79,17 @@ The script reads `/bets/<id>/enclave-ruling.json` and prints a status per check:
 | Output | Check |
 | --- | --- |
 | Arguments | Origin and Bet ID are valid. |
-| Signed ruling / Intel TDX quotes | Exact-byte hashes and Ed25519 signatures verify; gateway and signing-model quotes chain to Intel's root and bind signing keys and nonces. |
+| Signed ruling / Intel TDX quotes | Exact-byte hashes and Ed25519 signatures verify; gateway and signing-model quotes chain to Intel's root and bind signing keys and nonces. Supplied event logs replay to the quote's RTMR3, authenticating the app id and compose hash. |
+| GPU attestation | Re-verifies each stored NVIDIA signed verdict and its request nonce offline, after fetching NVIDIA's public signing keys. A call with no stored GPU evidence is NOT CHECKED. |
 | Bet coverage / Jury policy / Signed model verdict | The signed material names the Bet and terms hash; the roster, confidence threshold and verdicts produce the recorded outcome. |
-| Quote measurements / Attestation limits | Measurements are printed as NOT CHECKED, together with the excluded hardware checks. |
+| Quote measurements / Attestation limits | Measurements are printed as NOT CHECKED because they are not compared with a published list; TCB level and revocation remain unchecked. |
 | Coinbase source / Coinbase evidence hash | Every candle URL is fetched again and rebuilt evidence matches its signed hash; unavailable sources are NOT CHECKED. |
 | Submitted evidence / Evidence link | NOT RE-READ: prints the side, final URL, posted URL when different, and stored text hash. |
 | Public claim / Public deadline / Public terms hash / Public outcome | Compares the Bet page with the signed ruling; a missing page terms hash or pending settlement is NOT CHECKED. |
 
 Exit `1` means at least one FAIL; exit `0` can still include NOT CHECKED or NOT RE-READ. A missing or private ruling returns HTTP 404 and fails verification. These checks authenticate a record; they do not prove the jury reached the right answer.
+
+The ruling stored on completed Bet `c171de89-f223-4309-886e-180ad69af092`, used by the default command above, was made before the GPU check. Its ruling page and verifier therefore report GPU not checked.
 
 ## Run locally with Docker
 
@@ -113,6 +122,7 @@ cargo fmt --manifest-path contracts/bilateral-escrow/Cargo.toml -- --check
 
 ## Evidence files
 
+- [Stated Court live check](evidence/court-live-2026-11-12.json): [scripts/court-live-check.mjs](scripts/court-live-check.mjs) exercised two real testnet Bets outside the app. One was approved and paid; the other was voted down and left open. Every transaction link is in the evidence file.
 - [Hosted real-X payout](evidence/hosted-real-x-testnet-20261111.json): two operator-controlled identities, 0.1 test NEAR each, 0.2 test NEAR paid after a human-recorded Result; [starting another Bet from the Result](evidence/make-a-bet-real-x-20261111.json).
 - [Existing recording](docs/stated-demo-70s.mp4); [earlier simulated-X run with a 0.4 test NEAR payout](evidence/hackathon-demo-20261111.json); [funded Docker run](evidence/funded-judge-testnet-20261111.json).
 - [Default faucet run](evidence/default-faucet-judge-20261111.json) and [signed-out practice round](evidence/practice-judge-testnet-20261111.json).

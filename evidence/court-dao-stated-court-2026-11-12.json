@@ -1,0 +1,99 @@
+{
+  "dao": "stated-court.sputnik-v2.testnet",
+  "factory": "sputnik-v2.testnet",
+  "version": "2.0.0",
+  "creator": "stated-court-18ecdebd.testnet",
+  "transactionHash": "DwBEbzCGC16hnp2iVQVgiGiTTNZmcpWKe26qT7JY4LSe",
+  "transaction": "https://testnet.nearblocks.io/txns/DwBEbzCGC16hnp2iVQVgiGiTTNZmcpWKe26qT7JY4LSe",
+  "account": "https://testnet.nearblocks.io/address/stated-court.sputnik-v2.testnet",
+  "args": {
+    "config": {
+      "name": "stated-court",
+      "purpose": "Holds the referee seat for Stated bets. The enclave jury files each ruling here; the council can vote one down before it pays.",
+      "metadata": ""
+    },
+    "policy": {
+      "roles": [
+        {
+          "name": "jury",
+          "kind": {
+            "Group": [
+              "referee.stated-play-6cf0876dd7.testnet"
+            ]
+          },
+          "permissions": [
+            "call:AddProposal",
+            "call:VoteApprove"
+          ],
+          "vote_policy": {}
+        },
+        {
+          "name": "council",
+          "kind": {
+            "Group": [
+              "stated-court-18ecdebd.testnet"
+            ]
+          },
+          "permissions": [
+            "*:*"
+          ],
+          "vote_policy": {}
+        }
+      ],
+      "default_vote_policy": {
+        "weight_kind": "RoleWeight",
+        "quorum": "0",
+        "threshold": [
+          1,
+          2
+        ]
+      },
+      "proposal_bond": "0",
+      "proposal_period": "604800000000000",
+      "bounty_bond": "0",
+      "bounty_forgiveness_period": "86400000000000"
+    }
+  },
+  "policy": {
+    "roles": [
+      {
+        "name": "jury",
+        "kind": {
+          "Group": [
+            "referee.stated-play-6cf0876dd7.testnet"
+          ]
+        },
+        "permissions": [
+          "call:AddProposal",
+          "call:VoteApprove"
+        ],
+        "vote_policy": {}
+      },
+      {
+        "name": "council",
+        "kind": {
+          "Group": [
+            "stated-court-18ecdebd.testnet"
+          ]
+        },
+        "permissions": [
+          "*:*"
+        ],
+        "vote_policy": {}
+      }
+    ],
+    "default_vote_policy": {
+      "weight_kind": "RoleWeight",
+      "quorum": "0",
+      "threshold": [
+        1,
+        2
+      ]
+    },
+    "proposal_bond": "0",
+    "proposal_period": "604800000000000",
+    "bounty_bond": "0",
+    "bounty_forgiveness_period": "86400000000000"
+  },
+  "createdAt": "2026-11-12T04:05:32.007Z"
+}

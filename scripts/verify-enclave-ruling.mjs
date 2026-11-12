@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url';
 import * as engine from '../server/src/enclave-ruling.mjs';
 import { sha256 } from '../server/src/attested-signature.mjs';
 import { INTEL_SGX_ROOT_CA_PEM } from '../server/src/tdx-quote.mjs';
+import { getGpuJwks } from '../server/src/gpu-attestation.mjs';
 
 const DEFAULT_BASE = 'https://stated-production.up.railway.app';
 const DEFAULT_BET = 'c171de89-f223-4309-886e-180ad69af092';
@@ -79,12 +80,12 @@ function pageMaterial(page) {
   return { outcome, claim, deadline, termsHash: attributes.get('data-bet-terms-hash') };
 }
 
-function quoteMeasurements(record, add) {
+function quoteMeasurements(record, add, jwks) {
   if (typeof engine.quoteSummary !== 'function') {
     add('NOT CHECKED', 'Quote measurements', 'This engine does not export quoteSummary');
     return;
   }
-  const quotes = engine.quoteSummary(record, { roots: [INTEL_SGX_ROOT_CA_PEM] });
+  const quotes = engine.quoteSummary(record, { roots: [INTEL_SGX_ROOT_CA_PEM], jwks });
   const measurements = ['mrtd', 'rtmr0', 'rtmr1', 'rtmr2', 'rtmr3'];
   if (!Array.isArray(quotes) || !quotes.some(quote => quote?.role === 'gateway') || !quotes.some(quote => quote?.role === 'model')) {
     throw new Error('Quote summary must contain gateway and model measurements');
@@ -120,7 +121,7 @@ async function readText(url, limit, fetchImpl) {
   return new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks));
 }
 
-export async function verifyHostedEnclaveRuling(base = DEFAULT_BASE, betId = DEFAULT_BET, { fetchImpl = fetch } = {}) {
+export async function verifyHostedEnclaveRuling(base = DEFAULT_BASE, betId = DEFAULT_BET, { fetchImpl = fetch, jwks } = {}) {
   const checks = [];
   const add = (status, check, detail) => checks.push({ status, check, detail });
   let origin;
@@ -148,7 +149,11 @@ export async function verifyHostedEnclaveRuling(base = DEFAULT_BASE, betId = DEF
     if (typeof engine.verifyEnclaveRecord !== 'function' || typeof engine.rulingCovers !== 'function') {
       throw new Error('Engine must export verifyEnclaveRecord and rulingCovers');
     }
-    record = engine.verifyEnclaveRecord(document.record, { roots: [INTEL_SGX_ROOT_CA_PEM] });
+    const calls = [document.record.plan, ...(document.record.verdicts || [])];
+    if (jwks === undefined && calls.some(call => call && Object.hasOwn(call, 'gpu'))) {
+      jwks = await getGpuJwks({ fetchImpl });
+    }
+    record = engine.verifyEnclaveRecord(document.record, { roots: [INTEL_SGX_ROOT_CA_PEM], jwks });
     add('PASS', 'Signed ruling', `Verified ${record.mode} outcome ${record.outcome}`);
     add('PASS', 'Intel TDX quotes', 'Gateway and signing-model quotes chain to the pinned Intel SGX root and bind each signing key and request nonce. This is not a measurement match.');
   } catch (error) {
@@ -162,9 +167,15 @@ export async function verifyHostedEnclaveRuling(base = DEFAULT_BASE, betId = DEF
     return finish(checks);
   }
   add('PASS', 'Bet coverage', `Signed material lists Bet ${betId}; signed terms hash ${coveredBet.termsHash}`);
-  try { quoteMeasurements(record, add); }
+  try { quoteMeasurements(record, add, jwks); }
   catch (error) { add('FAIL', 'Quote measurements', error.message); }
-  add('NOT CHECKED', 'Attestation limits', 'No comparison against published enclave measurements; TCB level, revocation lists and other collateral, NVIDIA GPU payload and event-log replay are not checked.');
+  add('NOT CHECKED', 'Attestation limits', 'No comparison against published enclave measurements; TCB level, revocation lists and other collateral are not checked. Event logs are replayed when present; GPU evidence is reported per call.');
+
+  for (const [role, call] of [['plan', record.plan], ...record.verdicts.map(call => ['verdict', call])]) {
+    const label = `${role} ${JSON.stringify(call.model)}`;
+    if (call.gpu) add('PASS', 'GPU attestation', `NVIDIA NRAS verdict true, signed token verified; ${label}`);
+    else add('NOT CHECKED', 'GPU attestation', `no GPU evidence stored; ${label}`);
+  }
 
   add('PASS', 'Jury policy', `Models ${record.jury.models.map(model => JSON.stringify(model)).join(', ')}; minimum confidence ${record.jury.minConfidence}; every model must agree for Yes or No`);
   for (const verdict of record.verdicts) {

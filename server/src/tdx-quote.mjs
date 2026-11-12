@@ -23,6 +23,8 @@ AiEA4J0lrHoMs+Xo5o/sX6O9QWxHRAvZUGOdRQ7cvqRXaqI=
 -----END CERTIFICATE-----`;
 
 const MAX_QUOTE_BYTES = 64 * 1024;
+const MAX_EVENT_LOG_BYTES = 1024 * 1024;
+const MAX_EVENTS = 4096;
 const HEADER_BYTES = 48;
 const BODY_BYTES = 584;
 const SIGNED_BYTES = HEADER_BYTES + BODY_BYTES;
@@ -184,7 +186,8 @@ function verifyChain(pems, roots, now) {
 /**
  * Authenticate the quote, QE key binding and embedded certificate chain offline.
  * NOT checked: TCB level, QE identity collateral, certificate revocation collateral
- * (no network), NVIDIA GPU payload, event-log replay or workload allowlist policy.
+ * (no network), NVIDIA GPU payload or workload allowlist policy. Report-level
+ * event-log replay is applied by verifyAttestationReport below.
  * A valid chain/signature alone does not establish an acceptable platform TCB.
  */
 export function verifyTdxQuote(hex, { roots = [INTEL_SGX_ROOT_CA_PEM], now = new Date() } = {}) {
@@ -240,6 +243,50 @@ export function bindingOf(report, nonceHex) {
   return checkedBinding(report, nonceHex, parseTdxQuote(report?.intel_quote));
 }
 
+function parseEventLog(input) {
+  if (typeof input === 'string') {
+    if (Buffer.byteLength(input) > MAX_EVENT_LOG_BYTES) throw new Error('event_log exceeds 1 MiB');
+    try { input = JSON.parse(input); } catch { throw new Error('event_log must be valid JSON'); }
+  }
+  if (!Array.isArray(input) || input.length > MAX_EVENTS) throw new Error('event_log must be a bounded array');
+  let size = 0;
+  for (const event of input) {
+    if (!event || typeof event !== 'object' || Array.isArray(event)) throw new Error('Invalid event_log event');
+    if (event.imr !== 3) continue;
+    if (!Number.isInteger(event.event_type) || event.event_type < 0 || event.event_type > 0xffffffff
+        || typeof event.event !== 'string' || (event.event_payload != null && typeof event.event_payload !== 'string')
+        || (event.digest != null && typeof event.digest !== 'string')) {
+      throw new Error('Invalid RTMR3 event');
+    }
+    size += Buffer.byteLength(event.event) + (event.event_payload?.length ?? 0) + (event.digest?.length ?? 0);
+    if (size > MAX_EVENT_LOG_BYTES) throw new Error('event_log exceeds 1 MiB');
+    if (event.event_payload) hexBytes(event.event_payload, 'event_payload');
+    if (event.digest) hexBytes(event.digest, 'digest', 48);
+  }
+  return input;
+}
+
+function replayEvents(events) {
+  let rtmr3 = Buffer.alloc(48);
+  for (const event of events) {
+    if (event.imr !== 3) continue;
+    const eventType = Buffer.alloc(4);
+    eventType.writeUInt32LE(event.event_type);
+    const payload = event.event_payload ? hexBytes(event.event_payload, 'event_payload') : Buffer.alloc(0);
+    const digest = createHash('sha384').update(eventType).update(':').update(event.event, 'utf8')
+      .update(':').update(payload).digest();
+    if (event.digest && !equal(hexBytes(event.digest, 'digest', 48), digest)) {
+      throw new Error(`digest mismatch for event ${event.event}`);
+    }
+    rtmr3 = createHash('sha384').update(rtmr3).update(digest).digest();
+  }
+  return rtmr3;
+}
+
+export function replayRtmr3(eventLog) {
+  return replayEvents(parseEventLog(eventLog));
+}
+
 export function verifyAttestationReport(report, nonceHex, options = {}) {
   const parsed = verifyTdxQuote(report?.intel_quote, options);
   const { signingAddress } = checkedBinding(report, nonceHex, parsed);
@@ -255,7 +302,20 @@ export function verifyAttestationReport(report, nonceHex, options = {}) {
       throw new Error(`Quote ${name} does not match info.tcb_info`);
     }
   }
-  return { signingAddress, measurements };
+  const result = { signingAddress, measurements };
+  if (Object.hasOwn(report, 'event_log')) {
+    const events = parseEventLog(report.event_log);
+    if (!equal(replayEvents(events), Buffer.from(parsed.body.rtmr3, 'hex'))) {
+      throw new Error('event log does not match RTMR3');
+    }
+    for (const event of events) {
+      if (event.imr !== 3) continue;
+      const payload = event.event_payload ? hexBytes(event.event_payload, 'event_payload') : Buffer.alloc(0);
+      if (event.event === 'app-id') result.appId = payload;
+      if (event.event === 'compose-hash') result.composeHash = payload;
+    }
+  }
+  return result;
 }
 
 // Minimal DER writer used only for the exported, ephemeral test certificate factory.
@@ -299,7 +359,7 @@ function littleEndian(value, size) {
 }
 
 /** Test-only helper. Returns quote hex; its root is never trusted by default. debug sets TD_ATTRIBUTES bit 0. */
-export function makeTestQuote({ signingAddress, nonceHex, rootKey, debug = false }) {
+export function makeTestQuote({ signingAddress, nonceHex, rootKey, debug = false, rtmr3 }) {
   p256(rootKey, 'test root key');
   if (rootKey.type !== 'private') throw new Error('test root key must be private');
   const reportData = Buffer.concat([hexBytes(signingAddress, 'signingAddress', 32), hexBytes(nonceHex, 'nonce', 32)]);
@@ -313,6 +373,7 @@ export function makeTestQuote({ signingAddress, nonceHex, rootKey, debug = false
   header.writeUInt32LE(0x81, 4);
   Buffer.from(INTEL_QE_VENDOR_ID, 'hex').copy(header, 12);
   const body = Buffer.alloc(BODY_BYTES);
+  if (rtmr3 !== undefined) hexBytes(rtmr3, 'rtmr3', 48).copy(body, 472);
   reportData.copy(body, 520);
   // tdAttributes follows teeTcbSvn (16), mrseam (48), mrSignerSeam (48) and seamAttributes (8).
   if (debug) body[120] |= 1;

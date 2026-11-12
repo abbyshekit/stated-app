@@ -60,6 +60,9 @@ a:hover { color: inherit; text-decoration-color: currentColor; }
 :focus-visible { outline: 2px solid var(--x); outline-offset: 2px; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .grow { flex: 1; }
+/* DESIGN.md: sub-page titles sit beside the back arrow through layout's extra slot. */
+header .grow:has(+ .page-title) { display: none; }
+.page-title { margin-right: auto; font-size: 17px; font-weight: 700; }
 
 /* One column, the width of a timeline. */
 .wrap { width: min(600px, 100%); margin: 0 auto; padding: 0 0 72px; min-height: 100vh; }
@@ -105,6 +108,7 @@ button.primary, .button.primary, .btn, .pill.solid { background: var(--ink); col
 .pill svg, .btn svg, .button svg, .xmark { width: 18px; height: 18px; fill: currentColor; flex: none; }
 button.link, .tl, button.tl { font-family: var(--sans); font-size: 15px; font-weight: 400; display: inline-flex; align-items: center; min-height: 44px; padding: 0; border: 0; border-radius: 0; background: none; color: var(--ink); text-decoration: underline; text-decoration-color: var(--dim); text-underline-offset: 3px; cursor: pointer; }
 .tl.center { justify-content: center; }
+.tl:has(> .xmark) { gap: 8px; }
 @media (prefers-reduced-motion: no-preference) {
   button, .button, .btn, .pill { transition: transform 100ms ease-out, background-color 120ms ease-out; }
   button:active, .button:active, .btn:active, .pill:active { transform: scale(0.97); }
@@ -182,6 +186,15 @@ label.check { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10
 .verdict.yes b { color: var(--mark); }
 .verdict span { color: var(--dim); font-size: 15px; }
 .verdict .tl { font-size: 15px; color: var(--dim); min-height: 36px; align-self: center; }
+/* DESIGN.md: the jury's faces carry the verdict; its technical detail stays folded. */
+.ruling-post .prow .said { display: block; overflow: visible; -webkit-line-clamp: unset; }
+.ruling-verdict { flex-wrap: wrap; gap: 8px 12px; }
+.ruling-verdict h2 { margin: 0; font-size: 17px; }
+.ruling-verdict > span { font-size: 14px; }
+.jury-rail { list-style: none; margin: 0; padding: 24px 16px 8px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.jury-rail .seat { grid-template-rows: auto 1fr auto; }
+.jury-rail .seat b { font-size: 14px; font-weight: 400; overflow-wrap: anywhere; }
+.jury-rail .seat > span:last-child { font-variant-numeric: tabular-nums; }
 @media (prefers-color-scheme: light) {
   .verdict.yes b { color: var(--ink); }
 }
@@ -198,8 +211,12 @@ label.check { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10
 .seat b { font-size: 16px; max-width: 100%; white-space: normal; overflow-wrap: normal; word-break: normal; text-wrap: balance; text-overflow: clip; }
 .seat span { color: var(--dim); font-size: 14px; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 /* The winner's ring. The marker yellow is faint as a thin line on white, so the ring takes a deeper one there. */
-.seat.won .face { outline: 3px solid var(--mark-ring); outline-offset: 3px; }
-.versus.no .seat.won .face, .versus.agreed .seat.won .face { outline-color: var(--ink); }
+.seat.won .face,
+.bet-seats[data-ruling="yes"] .seat:first-child .face,
+.bet-seats[data-ruling="no"] .seat:last-child .face { outline: 3px solid var(--mark-ring); outline-offset: 3px; }
+.versus.no .seat.won .face, .versus.agreed .seat.won .face,
+.jury-rail.agreed .seat.won .face,
+.bet-seats[data-ruling="no"] .seat:last-child .face { outline-color: var(--ink); }
 .seat.lost b { color: var(--dim); }
 .pot { align-self: start; padding-top: 12px; }
 .pot b { font-size: 28px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; display: block; font-variant-numeric: tabular-nums; }
@@ -213,6 +230,12 @@ label.check { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10
 .mini { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 0 12px; padding: 6px 16px 16px; border-bottom: 1px solid var(--line); }
 .mini .said { font-size: 17px; line-height: 1.4; }
 .prop { margin: 0; padding: 6px 16px 16px; font-size: 22px; line-height: 1.36; letter-spacing: -0.01em; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.prop.bet-claim { font-size: 28px; }
+.prop.bet-claim.mid { font-size: 24px; }
+.prop.bet-claim.long { font-size: 20px; }
+@media (max-width: 340px) {
+  .prop.bet-claim:not(.long) { font-size: 22px; }
+}
 .stepper { display: flex; justify-content: center; gap: 16px; margin-top: 10px; }
 .stepper .step { width: 44px; height: 44px; min-height: 44px; padding: 0; border-radius: 50%; border: 1px solid var(--dim); display: grid; place-items: center; font-size: 22px; font-weight: 400; line-height: 1; flex: none; }
 .seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; border: 1px solid var(--line); border-radius: 999px; padding: 3px; background: var(--lift); margin: 0 16px; }
@@ -420,15 +443,15 @@ input.bad[aria-invalid="true"],
 .source-author .head > span:not(.face) { grid-column: 2; grid-row: 2; }
 .source-author .head .src { grid-column: 3; grid-row: 1 / span 2; align-self: center; margin-left: 12px; }
 /* DESIGN.md: Bet seats leave the stake its natural width and keep handles whole. */
-.bet-seats .versus { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
+.bet-seats .versus { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); padding-left: 16px; padding-right: 16px; }
+.bet-seats .pot small { white-space: nowrap; overflow-wrap: normal; text-wrap: nowrap; }
 .seat b { white-space: normal; word-break: normal; overflow-wrap: normal; overflow: visible; text-overflow: clip; text-wrap: wrap; }
 @media (max-width: 420px) { .seat b { font-size: 15px; } }
 @media (max-width: 340px) { .seat b { min-height: 3em; } }
-.bet-seats .seat b.long-handle { font-size: 14px; white-space: nowrap; max-width: none; }
-@media (max-width: 340px) {
-  .bet-seats .seat:first-child b.long-handle { justify-self: start; }
-  .bet-seats .seat:last-child b.long-handle { justify-self: end; }
-}
+.bet-seats .seat b { overflow-wrap: anywhere; }
+.bet-seats .seat b.long-handle { font-size: 13px; white-space: nowrap; overflow-wrap: normal; max-width: 100%; }
+/* At 320 a 15-character handle cannot fit whole; it is cut at the end, never broken in the middle. */
+@media (max-width: 340px) { .bet-seats .seat b.long-handle { font-size: 12px; overflow: hidden; text-overflow: ellipsis; } }
 
 /* The reply that makes a bet, set as the thing to type. */
 .say { margin: 4px 0 0; padding: 0 16px 6px; font-size: 24px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; overflow-wrap: anywhere; }
@@ -455,7 +478,7 @@ input.bad[aria-invalid="true"],
   .wrap.two .pri .post .said { font-size: 36px; line-height: 1.2; letter-spacing: -0.02em; }
   .wrap.two .pri .post .said.mid { font-size: 28px; line-height: 1.3; }
   .wrap.two .pri .post .said.long { font-size: 22px; line-height: 1.4; }
-  .wrap.two .pri .prop { font-size: 32px; line-height: 1.25; letter-spacing: -0.02em; border-bottom: 0; padding-top: 10px; }
+  .wrap.two .pri .prop { border-bottom: 0; padding-top: 10px; }
   .wrap.two .pri .pitch.own { border-bottom: 0; }
 }
 
@@ -554,6 +577,10 @@ form:not(:has(input[name="side"]:checked)) .send { opacity: 0.45; }
 .seg.line { background: none; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 0; }
 .seg.line label { font-size: 15px; font-weight: 400; border: 0; border-bottom: 2px solid transparent; border-radius: 0; white-space: nowrap; }
 .seg.line input:checked + label { background: none; color: var(--ink); border-color: var(--ink); }
+/* DESIGN.md: side choices are outline pills; stake and date stay underlined. */
+.seg.side-choice { background: none; border: 0; border-radius: 0; padding: 0; gap: 8px; }
+.seg.side-choice label { border: 1px solid var(--line); color: var(--ink); min-height: 44px; font-weight: 400; }
+.seg.side-choice input:checked + label { background: var(--ink); color: var(--ground); border-color: var(--ink); }
 .tl.unread { font-size: 14px; overflow-wrap: anywhere; }
 /* The paste button appears once the field holds a link. */
 form:not(:has(#bet-link:valid)) .acts.paste { display: none; }

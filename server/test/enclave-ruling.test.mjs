@@ -6,6 +6,7 @@
 // statement's deadline is never what the engine reads.
 import test, { after, before } from 'node:test';
 import assert from 'node:assert/strict';
+import { generateKeyPairSync, sign } from 'node:crypto';
 import { startStack } from './support/app.mjs';
 import { FakeNear } from './support/fake-near.mjs';
 import { JURORS, enclaveEnv, enclaveRulingFixture, fakeCoinbase, fakeNearAi, testRoots } from './support/enclave.mjs';
@@ -198,6 +199,44 @@ test('a range start months before the claim was made is clamped to madeAt; a mom
   assert.equal(text.summary.at, '2026-11-11T19:10:00.000Z');
   assert.equal(text.summary.priceAtMoment, 2.5, 'the opening price of that minute');
   assert.deepEqual([text.summary.lowestLow, text.summary.highestHigh], [2.41, 2.62]);
+});
+
+test('generated plans and verdicts retain NVIDIA proof through storage', async () => {
+  const savedAi = ai;
+  const savedCoin = coin;
+  const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'secp384r1' });
+  const jwks = { keys: [{ ...publicKey.export({ format: 'jwk' }), kid: 'nras-retention' }] };
+  const nras = 'https://nras.attestation.nvidia.com';
+  const item = await due(await acceptedBet('BTC trades above $1 by 30 November 2026.'), pastHour());
+  coin = fakeCoinbase({ price: () => 100 });
+  ai = fakeNearAi({ respond: ({ kind }) => kind === 'plan' ? candlePlan('BTC-USD', item.deadline) : verdict('yes') });
+  const nearFetch = ai.fetchImpl;
+  ai.fetchImpl = async (url, options) => {
+    if (String(url) === `${nras}/.well-known/jwks.json`) return Response.json(jwks);
+    if (String(url) === `${nras}/v3/attest/gpu`) {
+      const payload = JSON.parse(options.body);
+      const input = [{ alg: 'ES384', kid: 'nras-retention' },
+        { iss: nras, eat_nonce: payload.nonce, 'x-nvidia-overall-att-result': true }]
+        .map(value => Buffer.from(JSON.stringify(value)).toString('base64url')).join('.');
+      const jwt = `${input}.${sign('sha384', Buffer.from(input), { key: privateKey, dsaEncoding: 'ieee-p1363' }).toString('base64url')}`;
+      return Response.json([['JWT', jwt]]);
+    }
+    const response = await nearFetch(url, options);
+    if (!String(url).includes('/attestation/report?')) return response;
+    const report = await response.json();
+    for (const candidate of report.model_attestations) candidate.nvidia_payload = JSON.stringify({ nonce: candidate.request_nonce });
+    return Response.json(report);
+  };
+  try {
+    const result = await rule();
+    assert.equal(result.errors, 0);
+    assert.equal(result.ruled, 1);
+    const [event] = await events(item.betId);
+    assert.ok(event, 'the production rule path persisted its record');
+    for (const call of [event.detail.plan, ...event.detail.verdicts]) assert.equal(call.gpu?.verdict, true);
+    verifyEnclaveRecord(event.detail, { jwks });
+    assert.ok(await readEnclaveRuling(s.db, item.betId, { jwks }));
+  } finally { ai = savedAi; coin = savedCoin; }
 });
 
 test('a record verifies only while every byte, the roster and the signed threshold hold', () => {

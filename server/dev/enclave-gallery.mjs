@@ -103,7 +103,7 @@ async function seedBet(stack, creator, acceptor, now, spec) {
   };
   const record = spec.rulingOutcome ? enclaveRulingFixture({
     source: spec.source, outcome: spec.rulingOutcome, mode: spec.mode || 'ruling',
-    reason: spec.reason,
+    reason: spec.reason, models: ['Qwen/Qwen3.8-27B', 'Qwen/Qwen3.6-35B-A3B-FP8', 'deepseek-ai/DeepSeek-V4.1-Flash-1017'],
     material: { claim: spec.claim, madeAt, deadline, postUrl: source.url,
       bets: [{ id, termsHash }] },
   }) : null;
@@ -323,7 +323,7 @@ async function gallery(stack) {
   const emptyPath = `${empty.path}/evidence`;
   const emptyPage = await priya.browser.get(emptyPath);
   assert.equal(emptyPage.status, 200);
-  assert.match(emptyPage.text, /No links yet/);
+  assert.match(emptyPage.text, /Links from both sides appear here\./);
   const rejected = await priya.browser.submit(emptyPath, { side: 'yes', url: 'https://x.com/priya_m/status/123' }, { from: emptyPath });
   assert.equal(rejected.status, 400);
   assert.match(rejected.text, /role="alert"/);

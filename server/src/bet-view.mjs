@@ -15,6 +15,13 @@ export const betTime = (value) => new Intl.DateTimeFormat('en-GB', {
   timeZone: 'UTC', dateStyle: 'medium', timeStyle: 'short',
 }).format(new Date(value)) + ' UTC';
 
+// DESIGN.md: the Result marks the words, on both the Bet and its ruling page.
+export function markedClaim(claim, outcome) {
+  if (outcome === 'yes') return html`<span class="hl">${claim}</span>`;
+  if (outcome === 'no') return html`<span class="struck">${claim}</span>`;
+  return claim;
+}
+
 export function displayBetStatus(bet) {
   if (bet.status === 'offered' && new Date(bet.accept_by).getTime() <= Date.now()) return 'Offer expired';
   if (bet.status === 'offered' && !(bet.chain_state || bet.funded)) return 'Not funded';
@@ -35,8 +42,9 @@ export function betBlock(bet, options = {}) {
       return `<b${handle.length > 13 ? ' class="long-handle"' : ''}>${handle}</b>`;
     }));
   const body = betState(bet).decided
-    ? raw(String(seats).replace(/<small>(?:won|credited)<\/small>/, '<small>pot</small>')) : seats;
-  return html`${head ? html`<p class="lead">${head.text}${head.aside ? html`<span>${head.aside}</span>` : ''}</p>` : ''}<div class="bet-seats">${body}</div>`;
+    ? raw(String(seats).replace(/<\/small><small>(?:won|credited)<\/small>/, ' pot</small>')) : seats;
+  const ruling = ['accepted', 'proposed', 'disputed'].includes(bet.status) && ['yes', 'no'].includes(options.ruling) ? options.ruling : null;
+  return html`${head ? html`<p class="lead">${head.text}${head.aside ? html`<span>${head.aside}</span>` : ''}</p>` : ''}<div class="bet-seats"${ruling ? html` data-ruling="${ruling}"` : ''}>${body}</div>`;
 }
 
 // Kept for callers that import it: the two seats, with no lead line.
@@ -91,8 +99,8 @@ export function betShareLink(baseUrl, bet, { label = null, ghost = false, mine =
   const intent = new URL('https://x.com/intent/post');
   intent.searchParams.set('text', text);
   intent.searchParams.set('url', url);
-  const words = label || (bet.status === 'settled' ? 'Post the result' : (ghost ? 'Share on X' : 'Post the bet'));
-  return html`<a class="${ghost ? 'tl' : 'pill solid big'}" href="${intent.toString()}" rel="noopener noreferrer">${ghost ? '' : X_MARK}${words}</a>`;
+  const words = label || (bet.status === 'settled' ? 'Post the result' : (ghost ? 'Share on X' : 'Post on X'));
+  return html`<a class="${ghost ? 'tl' : 'pill solid big'}" href="${intent.toString()}" rel="noopener noreferrer">${!ghost || words === 'Post on X' ? X_MARK : ''}${words}</a>`;
 }
 
 // One row per Bet: the wording, then a line of plain facts.

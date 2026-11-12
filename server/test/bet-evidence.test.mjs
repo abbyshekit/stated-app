@@ -286,6 +286,8 @@ test('the private evidence form fetches a local article and preserves a failed l
   const acceptorBrowser = await s.signIn(s.fakeX.users.get(String(acceptor.x_user_id)));
   const form = await acceptorBrowser.get(path);
   assert.equal(form.status, 200);
+  assert.match(form.text, /<span class="page-title">Evidence<\/span>/);
+  assert.match(form.text, /Closes \d{2}:\d{2} UTC, \d{1,2} [A-Z][a-z]{2}\. The jury reads the text under each link\./);
   assert.match(form.text, /<form\b/i);
   assert.match(form.text, /name="(?:url|link)"/i);
   assert.match(form.text, /type="hidden" name="side" value="no"/);
@@ -293,6 +295,9 @@ test('the private evidence form fetches a local article and preserves a failed l
   assert.match(form.text, /<label for="evidence-url">Link to a public page<\/label>/);
   assert.match(form.text, /id="evidence-url"[^>]*placeholder="https:\/\/"/);
   assert.doesNotMatch(form.text, /aria-invalid="true"/);
+  const xFailure = await acceptorBrowser.submit(path, { side: 'no', url: 'https://x.com/official/status/123' }, { from: path });
+  assert.equal(xFailure.status, 400);
+  assert.match(xFailure.text, /The jury can’t open X posts\. Paste a public web page\./);
   const bad = `${fixtureBase}/missing`;
   const failure = await acceptorBrowser.submit(path, { side: 'no', url: bad }, { from: path });
   assert.match(failure.text, /That link could not be read\./);
@@ -765,7 +770,7 @@ test('redirects preserve the final URL and original title and refuse X or privat
     assert.match(shown.text, browser === creatorBrowser ? /<b>You bet yes<\/b>/ : /<b>@ev_creator bet yes<\/b>/);
     assert.match(shown.text, /@ev_creator/);
     assert.match(shown.text, browser === acceptorBrowser ? /<b>You bet no<\/b>/ : /@ev_acceptor/);
-    assert.equal((shown.text.match(/<summary>Page text<\/summary>/g) || []).length, 2);
+    assert.equal((shown.text.match(/<summary>What the jury read<\/summary>/g) || []).length, 2);
     assert.doesNotMatch(shown.text.match(/<ul class="posts evidence-list">([\s\S]*?)<\/ul>/)?.[1] || '', /class="face/);
     for (const row of [crossHost, redirected]) {
       assert.ok(shown.text.includes(row.body.split('\n\n').map(text => `<p>${esc(text)}</p>`).join('')));
