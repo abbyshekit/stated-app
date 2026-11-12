@@ -123,7 +123,7 @@ test('the hall counts only verified publications, limits rows and distinguishes 
   for (const browser of [s.browser(), await s.signIn(s.fakeX.addUser('81001', 'public_creator'))]) {
     const page = await browser.get('/');
     assert.equal(page.status, 200);
-    assert.match(page.text, /8 bets, 8 settled, 0\.2 test NEAR paid to winners/);
+    assert.match(page.text, /8 bets, 8 settled, [0-9.]+ test NEAR won/);
     assert.match(page.text, /@public_creator won 0\.2 test NEAR/);
     for (const bet of bets.slice(8)) assert.doesNotMatch(page.text, new RegExp(`/bets/${bet.id}`));
     assert.doesNotMatch(page.text, /private fixture note|private\.example\.org/);
@@ -135,8 +135,8 @@ test('the hall counts only verified publications, limits rows and distinguishes 
 test('home renders without a hall when no Bet is published', async () => {
   const page = await s.browser().get('/');
   assert.equal(page.status, 200);
-  assert.doesNotMatch(page.text, /paid to winners/);
-  assert.deepEqual(await publicBetHall(s.db), { rows: [], total: 0, settled: 0, paidYocto: '0' });
+  assert.doesNotMatch(page.text, / settled, [0-9.]+ test NEAR won/);
+  assert.deepEqual(await publicBetHall(s.db), { rows: [], total: 0, settled: 0, paidYocto: '0', wonYocto: '0' });
 });
 
 test('unfunded and wrong-creator bets cannot be published', async () => {

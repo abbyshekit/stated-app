@@ -90,6 +90,7 @@ export function betList(rows, { viewer = null, faces = null, hall = false } = {}
         ? `${winner ? `@${winner}` : `The ${bet.outcome} side`} won ${formatTestNear((BigInt(bet.stake_yocto) * 2n).toString())} ${unit()}`
         : status === 'Offer expired' ? status : bet.status === 'offered' ? `Open until ${dayMonth(bet.accept_by)}`
           : ['accepted', 'proposed', 'disputed'].includes(bet.status) ? 'Both sides are in'
+            : bet.status === 'settled' && bet.outcome === 'void' ? 'Called off'
             : BET_STATUS[bet.status];
       return html`<li class="prow note"><p class="said"><a href="/bets/${bet.id}">${bet.claim}</a></p><p class="meta">${phrase}</p></li>`;
     }

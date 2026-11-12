@@ -881,7 +881,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
       ${dareBet || fallback ? html`<div class="acts"><a class="pill solid big" href="${fallback ? `/bets/${fallback.id}?join=1#accept` : `/bets/${dareBet.id}`}">Take ${fallback ? fallbackOther : dareBet.other}</a></div>
         <p class="pitch own"><a href="/bets/new"><b>Or make your own.</b></a> Reply under any prediction on X: <b>@${bot} bet ${config.play.defaultStakeNear} no</b></p>`
       : html`<div class="acts line">${ctx.user ? html`<a class="pill solid big" href="/me">Your predictions</a>` : html`<a class="pill solid big" href="/signin">${X_MARK}Sign in with X</a>`}</div>`}
-      ${showDemo && !hall.total ? html`<p class="pitch">Operator-controlled test on NEAR testnet</p><div class="acts"><a class="pill big" href="/bets/${demo.id}">View test bet</a></div>` : ''}</div>
+      ${showDemo ? html`<p class="pitch">Operator-controlled test on NEAR testnet</p><div class="acts"><a class="pill big" href="/bets/${demo.id}">View test bet</a></div>` : ''}</div>
       ${hall.total ? html`<p class="pitch">${hall.total} ${hall.total === 1 ? 'bet' : 'bets'}, ${hall.settled} settled, ${formatTestNear(hall.wonYocto)} ${unit()} won</p>${betList(hall.rows, { hall: true })}` : ''}
       ${rest.length ? fileList(rest, publicRow, faces, betLines) : ''}
     `, { flush: true, signin: Boolean(dareBet || fallback), two: rest.length > 0 }), { headers: refCookie(ctx) });
