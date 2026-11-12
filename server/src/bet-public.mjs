@@ -198,7 +198,13 @@ export async function publicBetHall(db) {
     const paidYocto = settled.filter((bet) => bet.payout_completed
       && bet.settled_by === 'referee' && ['yes', 'no'].includes(bet.outcome))
       .reduce((sum, bet) => sum + BigInt(bet.stake_yocto) * 2n, 0n);
-    return { rows: bets.slice(0, 6), total: bets.length, settled: settled.length, paidYocto: paidYocto.toString() };
+    // "Won" is the pot of every Bet settled yes or no; "paid" stays the stricter figure above.
+    const wonYocto = settled.filter((bet) => ['yes', 'no'].includes(bet.outcome))
+      .reduce((sum, bet) => sum + BigInt(bet.stake_yocto) * 2n, 0n);
+    // An offer that was cancelled, refunded or ran out is history, not something to show a visitor.
+    const shown = bets.filter((bet) => !['cancelled', 'expired', 'refunded'].includes(bet.status));
+    return { rows: shown.slice(0, 6), total: shown.length, settled: settled.length,
+      paidYocto: paidYocto.toString(), wonYocto: wonYocto.toString() };
   });
 }
 

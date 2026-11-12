@@ -50,7 +50,7 @@ test('hall uses the public verified projection and totals beyond the six rows', 
 });
 
 test('an empty hall has no fabricated totals and plain statuses follow snapshots', async () => {
-  assert.deepEqual(await publicBetHall(database([])), { rows: [], total: 0, settled: 0, paidYocto: '0' });
+  assert.deepEqual(await publicBetHall(database([])), { rows: [], total: 0, settled: 0, paidYocto: '0', wonYocto: '0' });
   const hall = await publicBetHall(database([storedBet(), storedBet('accepted')]));
   const html = String(betList(hall.rows, { hall: true }));
   assert.match(html, /Open until 20 Nov/);

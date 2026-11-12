@@ -116,16 +116,16 @@ test('home excludes withdrawn, unverified, expired, invited and incompatible off
   for (const [disable, restore] of cases) {
     await s.db.query(disable, [bet.id]);
     assert.equal(await nextOpenPublicBet(s.db), null, disable);
-    assert.doesNotMatch((await s.browser().get('/')).text.split('paid to winners')[0], /Agreed public proposition/, disable);
+    assert.doesNotMatch((await s.browser().get('/')).text.split(' settled, ')[0], /Agreed public proposition/, disable);
     await s.db.query(restore, restore.includes('$2') ? [bet.id, bet.accept_by] : [bet.id]);
   }
   const enabled = s.config.play.enabled;
   s.config.play.enabled = false;
-  assert.doesNotMatch((await s.browser().get('/')).text.split('paid to winners')[0], /Agreed public proposition/);
+  assert.doesNotMatch((await s.browser().get('/')).text.split(' settled, ')[0], /Agreed public proposition/);
   s.config.play.enabled = enabled;
   const real = s.config.near.real;
   s.config.near.real = true;
-  assert.doesNotMatch((await s.browser().get('/')).text.split('paid to winners')[0], /Agreed public proposition/);
+  assert.doesNotMatch((await s.browser().get('/')).text.split(' settled, ')[0], /Agreed public proposition/);
   s.config.near.real = real;
 });
 
