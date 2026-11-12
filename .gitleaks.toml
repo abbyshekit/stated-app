@@ -1,0 +1,9 @@
+# Default gitleaks rules, plus one generated file: server/public/wallet.js is the minified
+# third-party Meteor wallet SDK bundle (scripts/build-wallet.mjs). Its identifier names, such as
+# "this.secp256k1Key||this.mlDsa65Key", match the generic-api-key rule; it holds no secrets.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Generated wallet SDK bundle"
+paths = ['''^server/public/wallet\.js$''']

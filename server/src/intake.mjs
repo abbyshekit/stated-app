@@ -1,7 +1,7 @@
 import { parseBetCommand, queueBetCommand } from './reply-bets.mjs';
 import { parseEvidenceCommand, targetEvidenceBet } from './bet-evidence.mjs';
 import { interpret, looksLikePrediction, missingTerms } from './interpret.mjs';
-import { INTAKES_PER_HOUR, intakesInLastHour } from './limits.mjs';
+import { reserveIntake } from './limits.mjs';
 import { inPilot } from './near-network.mjs';
 import { replyFor } from './replies.mjs';
 import { addInbox, restoreCommitment, userByXId } from './store.mjs';
@@ -412,14 +412,15 @@ export async function processMention(db, config, { mention, includes = {}, bot, 
       // A post that only links to Stated itself or its source, such as an announcement, is not a request to read an article.
       return { outcome: 'ignored_own_link', event: await recordEvent(db, config, mention, { outcome: 'ignored_own_link' }) };
     } else if (outside.length) {
-      if ((await intakesInLastHour(db, mention.author_id)) >= INTAKES_PER_HOUR) {
+      // The quota is counted and the intake reserved in one locked transaction (limits.mjs).
+      let intake;
+      try {
+        intake = await reserveIntake(db, { ownerXUserId: mention.author_id, url: outside[0], route: 'mention' });
+      } catch (error) {
+        if (error?.status !== 429) throw error;
         return { outcome: 'rate_limited', event: await recordEvent(db, config, mention, { outcome: 'rate_limited' }) };
       }
       const owner = await userByXId(db, mention.author_id);
-      const intake = await db.one(
-        `insert into url_intakes (owner_x_user_id, url, route, status) values ($1, $2, 'mention', 'queued') returning *`,
-        [mention.author_id, outside[0]],
-      );
       const replyText = replyFor({ outcome: 'article', owner, baseUrl: config.baseUrl, links: config.x.replyLinks });
       const event = await recordEvent(db, config, mention, {
         outcome: 'article',

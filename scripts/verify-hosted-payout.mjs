@@ -8,7 +8,10 @@ import { NEAR_CALL_GAS, rpc, viewEscrowSnapshot } from '../server/src/near-escro
 import { deliveryFromReceipts } from '../server/src/near-delivery.mjs';
 import { isAccount, isNamedAccount, network } from '../server/src/near-network.mjs';
 
-const ENDPOINTS = ['https://test.rpc.fastnear.com', 'https://rpc.testnet.near.org'];
+// Archival endpoints: ordinary testnet nodes drop transactions after about five epochs, so the
+// November payout stops answering there within days. Both endpoints below still return it.
+const ENDPOINTS = ['https://archival-rpc.testnet.fastnear.com', 'https://archival-rpc.testnet.near.org'];
+const NO_CODE = '11111111111111111111111111111111';
 const DEFAULT_EVIDENCE = Symbol('default evidence');
 const HASH = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const UINT = /^(?:0|[1-9][0-9]{0,38})$/;
@@ -246,6 +249,13 @@ async function provider(endpoint, record, fetchImpl, timeoutMs) {
     const options = { fetchImpl: boundedFetch, urls: [endpoint] };
     const snapshot = await viewEscrowSnapshot(record.contract, record.id, options);
     const bet = settledBet(snapshot, record);
+    // The contract that paid must have code and no access key, so nobody can change it or move its funds.
+    const account = await rpc('query', { request_type: 'view_account', finality: 'final', account_id: record.contract }, options);
+    requireThat(object(account) && typeof account.code_hash === 'string' && HASH.test(account.code_hash)
+      && account.code_hash !== NO_CODE, 'contract_code_missing');
+    const access = await rpc('query', { request_type: 'view_access_key_list', finality: 'final', account_id: record.contract }, options);
+    requireThat(object(access) && Array.isArray(access.keys), 'invalid_access_key_list');
+    requireThat(access.keys.length === 0, 'contract_has_access_keys');
     const referee = await rpc('tx_status', { tx_hash: record.refereeResolve, sender_account_id: bet.referee, wait_until: 'FINAL' }, options);
     const refereeGraph = execution(referee, { transactionHash: record.refereeResolve, signer: bet.referee,
       contract: record.contract, method: 'referee_resolve', args: { id: record.id, outcome: record.outcome } });
@@ -257,7 +267,7 @@ async function provider(endpoint, record, fetchImpl, timeoutMs) {
       && UUID.test(args.stated_request_id), 'withdraw_arguments_mismatch');
     const withdrawalGraph = withdrawal(withdrawn, record, args);
     return { endpoint, status: 'PASS', blockHeight: snapshot.blockHeight,
-      evidence: { ...record, bet, withdrawalReturnedTrue: true, deliveryKind: 'native',
+      evidence: { ...record, bet, contractCodeHash: account.code_hash, contractAccessKeys: 0, withdrawalReturnedTrue: true, deliveryKind: 'native',
         executionFingerprints: { refereeResolve: executionFingerprint(referee, refereeGraph),
           withdraw: executionFingerprint(withdrawn, withdrawalGraph) } } };
   };

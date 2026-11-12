@@ -112,7 +112,7 @@ before(async () => {
   s = await startStack({ STATED_NEAR_CONTRACT: 'escrow.testnet', STATED_PLAY: '1', STATED_PLAY_AUTOPROVISION: '1',
     STATED_PLAY_SETTLE_DELAY_SECONDS: '0', STATED_EVIDENCE_WINDOW_SECONDS: '3600',
     // Two new play accounts per Bet, for more than thirty Bets.
-    STATED_PLAY_NEW_ACCOUNTS_PER_HOUR: '100', ...enclaveEnv },
+    STATED_PLAY_NEW_ACCOUNTS_PER_HOUR: '200', ...enclaveEnv },
   { fetchImpl: near.fetchImpl, chain: near.chain });
   // Quotes in this file chain to the test root; the stack's own config carries it too.
   s.config.nearai.quoteRoots = testRoots;
@@ -489,6 +489,64 @@ test('no evidence at all still calls the jury with no items; a bad candle produc
   assert.equal(st.status, 'no');
   // No item on the winning side: the Bet's own page. The test server is http, so it is named as https.
   assert.equal(st.resolution_url, `${s.base.replace('http:', 'https:')}/bets/${bet.betId}`);
+});
+
+test('shared Results expose evidence only when every Bet is currently published', async () => {
+  for (const visibility of ['private', 'published', 'mixed', 'withdrawn']) {
+    // Both Bets exist before the post's deadline moves into the past: a later offer would be refused as too soon.
+    const accepted = await acceptedBet(`Privacy ${visibility} ships before March 1, ${NEXT}.`);
+    const second = visibility === 'mixed' ? await offerOn(accepted.post) : null;
+    const bet = await due(accepted, pastHour());
+    const other = second ? await due(second, bet.deadline) : null;
+    const hidden = other || bet;
+    if (visibility === 'private' || visibility === 'mixed') {
+      await s.db.query('delete from bilateral_bet_publications where bet_id = $1', [hidden.betId]);
+    } else if (visibility === 'withdrawn') {
+      await s.db.query('update bilateral_bet_publications set withdrawn_at = now() where bet_id = $1', [bet.betId]);
+    }
+    const url = `https://evidence.example.org/${visibility}-winning-secret`;
+    const posted = `https://posted.example.org/${visibility}-secret`;
+    const title = `${visibility} private title marker`;
+    const reason = `${title} proves the claim at ${url}.`;
+    const insertEvidence = async (owner, finalUrl, pageTitle) => {
+      const user = await one('select id from users where x_user_id = $1', [owner.taker.id]);
+      await s.db.query(`insert into bet_evidence
+        (statement_id, bet_id, user_id, side, url, final_url, title, body, body_hash, via)
+        values ($1,$2,$3,'yes',$4,$5,$6,$7,$8,'page')`,
+      [bet.statementId, owner.betId, user.id, posted, finalUrl, pageTitle, 'The release shipped.', sha256(Buffer.from('The release shipped.'))]);
+    };
+    // In the mixed case the private winning item precedes the public one.
+    await insertEvidence(hidden, url, title);
+    if (other) await insertEvidence(bet, 'https://public.example.org/release', 'Published release');
+    ai.respond = ({ kind }) => (kind === 'plan' ? { source: 'evidence' } : verdict('yes', 0.95, reason));
+    assert.deepEqual(await rule(), { ...zero, planned: 1, ruled: 1 }, visibility);
+    const record = await s.db.tx((tx) => readEnclaveRuling(tx, hidden.betId));
+    assert.equal(record.verdicts[0].parsed.reason, reason, 'the signed Bet record retains the actual reason');
+    assert.ok(record.evidence.items.some((item) => item.url === url && item.title === title));
+
+    // Publish a save independently of the Bet: shared statement fields and
+    // resolution history must remain safe on the anonymous prediction page.
+    const save = await one(`select s.id, s.owner_x_user_id, u.x_username from bilateral_bets b
+      join saves s on s.id = b.source_save_id join users u on u.x_user_id = s.owner_x_user_id where b.id = $1`, [bet.betId]);
+    await s.db.query(`update users set profile_visibility = 'public' where x_user_id = $1`, [save.owner_x_user_id]);
+    await s.db.query(`update saves set visibility = 'public', first_public_at = now() where id = $1`, [save.id]);
+    const page = await s.browser().get(`/u/${save.x_username}/${save.id}`);
+    assert.equal(page.status, 200, visibility);
+    const st = await statement(bet.statementId);
+    assert.equal(st.status, 'yes');
+    if (visibility === 'published') {
+      assert.equal(st.resolution_url, url, 'a currently published Bet still links its winning evidence');
+      assert.equal(st.resolution_note, `NEAR AI enclave ruling: ${reason}`);
+      assert.ok(page.text.includes(`href="${url}"`));
+    } else {
+      assert.equal(st.resolution_url, null, visibility);
+      assert.equal(st.resolution_note, 'Result recorded. Bet evidence stays on its Bet page.');
+      for (const secret of [url, posted, title, reason]) {
+        assert.ok(!JSON.stringify([st.resolution_url, st.resolution_note]).includes(secret), `${visibility}: shared fields omit ${secret}`);
+        assert.ok(!page.text.includes(secret), `${visibility}: anonymous save HTML omits ${secret}`);
+      }
+    }
+  }
 });
 
 test('incomplete Coinbase data is an infrastructure failure, not evidence, and does not use a jury attempt', async () => {

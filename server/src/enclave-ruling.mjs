@@ -802,6 +802,39 @@ function scoped(tx) {
   return db;
 }
 
+// A statement Result is shared by every save. Lock the statement's Bets before
+// reading publication consent, so publish/withdraw cannot race this projection.
+// A model reason can describe any evidence it read, including the losing side.
+async function publicResult(tx, statementId, bets, record, baseUrl) {
+  const linked = await tx.many(`select b.id from saves s join bilateral_bets b on b.source_save_id = s.id
+    where s.statement_id = $1 order by b.id for share of b`, [statementId]);
+  const published = await tx.many(`select p.bet_id from bilateral_bet_publications p
+    join bilateral_bets b on b.id = p.bet_id and b.creator_user_id = p.creator_user_id
+    where p.bet_id = any($1::uuid[]) and p.withdrawn_at is null`, [linked.map((bet) => bet.id)]);
+  const publicIds = new Set(published.map((bet) => bet.bet_id));
+  const allPublic = linked.every((bet) => publicIds.has(bet.id));
+  const decisive = record.outcome !== 'unclear';
+  let url = null;
+  if (allPublic && record.evidence.kind === 'coinbase-candles') url = record.evidence.urls.at(-1);
+  else if (allPublic && decisive) {
+    const evidence = await tx.many(`select id from bet_evidence
+      where statement_id = $1 and bet_id = any($2::uuid[])`, [statementId, [...publicIds]]);
+    const publicEvidenceIds = new Set(evidence.map((item) => String(item.id)));
+    url = record.evidence.items.find((item) => item.side === record.outcome && publicEvidenceIds.has(item.id))?.url || null;
+  }
+  if (!url && decisive) {
+    const bet = bets.find((item) => publicIds.has(item.id));
+    // resolveStatement validates a decisive Result's HTTPS link before the
+    // database trigger clears shared evidence for statements with private Bets.
+    // The app root satisfies that validator without exposing a private Bet ID.
+    const base = new URL(baseUrl);
+    base.protocol = 'https:';
+    url = bet ? `${base.origin}/bets/${bet.id}` : `${base.origin}/`;
+  }
+  return { url, note: !decisive ? AMBIGUOUS_NOTE : allPublic
+    ? `NEAR AI enclave ruling: ${record.verdicts[0].parsed.reason}` : 'Result recorded. Bet evidence stays on its Bet page.' };
+}
+
 /**
  * The terminal step, in one transaction holding the statement's row lock: the
  * attempt's final reason, the record on every Bet it covers, and the Result. A
@@ -825,21 +858,9 @@ async function finalize(ctx, statementId, material, record, { attempt = null, re
           (select 1 from bilateral_bet_events where bet_id = $1 and kind = 'enclave_ruling')`, [bet.id, jury, record]);
     }
     const decisive = record.outcome !== 'unclear';
-    let url = null;
-    // The segment that ends at the deadline is the one a reader checks first.
-    if (record.evidence.kind === 'coinbase-candles') url = record.evidence.urls.at(-1);
-    else if (decisive) {
-      url = record.evidence.items.find((item) => item.side === record.outcome)?.url || null;
-      if (!url) {
-        // resolveStatement requires https; a non-https base (only a local test server) is named as https.
-        const base = new URL(ctx.config.baseUrl);
-        base.protocol = 'https:';
-        url = `${base.origin}/bets/${bets[0].id}`;
-      }
-    }
+    const { note, url } = await publicResult(tx, statementId, bets, record, ctx.config.baseUrl);
     await resolveStatement(scoped(tx), { statementId, outcome: decisive ? record.outcome : 'ambiguous',
-      note: decisive ? `NEAR AI enclave ruling: ${record.verdicts[0].parsed.reason}` : AMBIGUOUS_NOTE,
-      url, reviewer: { id: jury }, outcomeAt: outcomeAt(record, ctx.now()).toISOString() });
+      note, url, reviewer: { id: jury }, outcomeAt: outcomeAt(record, ctx.now()).toISOString() });
     return true;
   });
 }

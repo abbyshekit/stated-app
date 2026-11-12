@@ -343,6 +343,13 @@ export async function withdrawalsFor(db, userId) {
 export async function removeSave(db, user, saveId) {
   const save = await ownedSave(db, user, saveId);
   await db.tx(async (tx) => {
+    // Serialize against new Bet references as well as another removal. The FK
+    // is the backstop for deletes through any other database caller.
+    const locked = await tx.one('select id from saves where id = $1 and owner_user_id = $2 for update', [saveId, user.id]);
+    if (!locked) throw new UserError('That save is not in your collection.', 404);
+    if (await tx.one('select id from bilateral_bets where source_save_id = $1 limit 1', [saveId])) {
+      throw new UserError('This post has a bet on it, so it stays. You can make it private instead.', 409);
+    }
     await noteWithdrawal(tx, save);
     await rememberCommitment(tx, save);
     await tx.query('delete from saves where id = $1 and owner_user_id = $2', [saveId, user.id]);
@@ -605,9 +612,24 @@ export function isScored(row, { publicView = false } = {}) {
 
 export async function revisionsFor(db, statementId, saveIds = []) {
   return db.many(
-    `select id, statement_id, save_id, kind, actor, before, after, note, at from revisions
-     where statement_id = $1 and (save_id is null or save_id = any($2::bigint[]))
-     order by at, (kind = 'captured') desc, id`,
+    // Result history is shared too. This also protects old revisions and
+    // reviewer input retained separately from the sanitized statement fields.
+    `with privacy as (select exists (
+       select 1 from bilateral_bets b join saves s on s.id = b.source_save_id
+       where s.statement_id = $1 and not exists (
+         select 1 from bilateral_bet_publications p
+         where p.bet_id = b.id and p.creator_user_id = b.creator_user_id and p.withdrawn_at is null
+       )
+     ) as hide), history as (
+       select r.*, (privacy.hide and r.kind in ('resolved', 'resolution_changed', 'disputed')) as redact
+       from revisions r cross join privacy
+       where r.statement_id = $1 and (r.save_id is null or r.save_id = any($2::bigint[]))
+     )
+     select id, statement_id, save_id, kind, actor,
+       case when redact then before - 'url' - 'note' else before end as before,
+       case when redact then after - 'url' - 'note' else after end as after,
+       case when redact then 'Result recorded. Bet evidence stays on its Bet page.' else note end as note, at
+     from history order by at, (kind = 'captured') desc, id`,
     [statementId, saveIds.map(String)],
   );
 }

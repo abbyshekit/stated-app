@@ -1,0 +1,64 @@
+{
+  "hardenedAt": "2026-11-12T15:36:05.071Z",
+  "dao": "stated-court-hardentest.sputnik-v2.testnet",
+  "relay": "relay-harden.court-check-feea5b70-a.testnet",
+  "config": {
+    "dao": "stated-court-hardentest.sputnik-v2.testnet",
+    "escrow": "stated-escrow-52081551be.testnet",
+    "operator": "court-check-9c3815e0-b.testnet",
+    "window_ns": "60000000000"
+  },
+  "locked": {
+    "wasmSha256": "18545bdceedd266f5f7e98a9d84b530ed125503a9efb1bac11dc773247ac5a78",
+    "codeHash": "2dyPk8eZo38JVZ9tD7dkpJeZZSSEAdEwNNeEjfDKBuio",
+    "accessKeys": 0
+  },
+  "council": "stated-court-18ecdebd.testnet",
+  "proposalId": 0,
+  "proposalTransaction": "BPXyBSrQda3EZi17UbXknVxaSapSCmCy5Gfrnn1WZ5Go",
+  "approvalTransaction": "DDdwodrNEUXGKbyce45CH2BPSeoU1FjKvZKZZt98RLfB",
+  "proposalStatus": "Approved",
+  "verified": true,
+  "policy": {
+    "roles": [
+      {
+        "name": "jury",
+        "kind": {
+          "Group": [
+            "relay-harden.court-check-feea5b70-a.testnet"
+          ]
+        },
+        "permissions": [
+          "call:AddProposal",
+          "call:VoteApprove"
+        ],
+        "vote_policy": {}
+      },
+      {
+        "name": "council",
+        "kind": {
+          "Group": [
+            "stated-court-18ecdebd.testnet"
+          ]
+        },
+        "permissions": [
+          "call:VoteRemove",
+          "call:VoteReject"
+        ],
+        "vote_policy": {}
+      }
+    ],
+    "default_vote_policy": {
+      "weight_kind": "RoleWeight",
+      "quorum": "0",
+      "threshold": [
+        1,
+        2
+      ]
+    },
+    "proposal_bond": "0",
+    "proposal_period": "604800000000000",
+    "bounty_bond": "0",
+    "bounty_forgiveness_period": "86400000000000"
+  }
+}

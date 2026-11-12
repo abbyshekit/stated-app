@@ -8,7 +8,7 @@
 import { createHash } from 'node:crypto';
 import { evidencePrompts, parseEvidenceCommand, runEvidenceCommands } from './bet-evidence.mjs';
 import { JURY_X_ID, ruleDue, rulingSettles } from './enclave-ruling.mjs';
-import { approveRuling, courtDao, fileRuling, hasReject, isCourtBet, readProposal } from './court-dao.mjs';
+import { approveRuling, checkCourt, courtDao, fileRuling, hasReject, isCourtBet, readProposal } from './court-dao.mjs';
 import { createBet } from './bets.mjs';
 import { consentToPublicBet, publicBet, publishBet } from './bet-public.mjs';
 import { dayMonth } from './marked.mjs';
@@ -232,7 +232,7 @@ async function offer(db, config, chain, cmd, deps) {
       resolveAt: new Date(due).toISOString(),
       sourceSaveId: String(cmd.save_id),
       // New Bets name Stated Court (a Sputnik DAO) as referee when one is configured; old Bets keep theirs.
-      refereeAccount: courtDao(config) || judge.id,
+      refereeAccount: (await usableCourt(config, chain, judge)) || judge.id,
     });
     betId = bet.id;
     // The post's words now live in the Bet's own terms; the queue keeps no copy.
@@ -349,6 +349,22 @@ export async function runBetCommands(db, config, chain, { limit = 5, fetchImpl =
     }
   }
   return result;
+}
+
+// A Court that fails checkCourt (wrong network, policy, relay, window or bond) is never named for a
+// new Bet: the Bet names the server's referee account, which its page shows, and the reason is logged.
+// The answer is kept for five minutes so an offer costs no chain reads.
+const courtChecks = new Map();
+async function usableCourt(config, chain, judge) {
+  const dao = courtDao(config);
+  if (!dao) return null;
+  const key = `${dao}|${config.court?.relay || ''}|${judge.id}`;
+  const hit = courtChecks.get(key);
+  if (hit && hit.at > Date.now() - 300_000) return hit.ok ? dao : null;
+  const problems = await checkCourt({ ...config, court: { ...config.court, operator: judge.id } }, chain);
+  if (problems.length && (!hit || hit.ok)) console.error('[court] new bets name the referee account:', problems.join(' '));
+  courtChecks.set(key, { at: Date.now(), ok: !problems.length });
+  return problems.length ? null : dao;
 }
 
 /**

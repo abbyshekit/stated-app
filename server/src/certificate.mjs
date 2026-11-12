@@ -17,10 +17,10 @@ export function serial(id) {
   return `№ ${String(id).padStart(4, '0')}`;
 }
 
-// The content policy admits images from pbs.twimg.com and data: only, so any
-// other address falls back to the monogram instead of a broken image.
+// Never emit a remote profile image: opening a page must not contact X.
+// Embedded images need no network request; all remote URLs use the monogram.
 function allowedAvatar(url) {
-  return typeof url === 'string' && (url.startsWith('https://pbs.twimg.com/') || url.startsWith('data:image/'));
+  return typeof url === 'string' && url.startsWith('data:image/');
 }
 
 export function face({ url = null, name = '', size = '' } = {}) {

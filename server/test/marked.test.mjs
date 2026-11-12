@@ -64,7 +64,7 @@ test('betLead speaks to the reader: a dare to a visitor, a status to the person 
 test('betBlock: the open seat invites the viewer with their own face, greyed, and links to the join page', () => {
   const viewer = { x_username: 'oskar', x_avatar_url: 'https://pbs.twimg.com/profile_images/1/o.jpg' };
   const out = text(betBlock(bet(), { viewer, joinHref: '/bets/b?join=1#accept' }));
-  assert.match(out, /<a class="seat" href="\/bets\/b\?join=1#accept"><img class="face ghost" src="https:\/\/pbs\.twimg\.com\/profile_images\/1\/o\.jpg"[^>]*><b>You\?<\/b><span>bet yes<\/span><\/a>/);
+  assert.match(out, /<a class="seat" href="\/bets\/b\?join=1#accept"><span class="face ghost" aria-hidden="true">o<\/span><b>You\?<\/b><span>bet yes<\/span><\/a>/);
   assert.match(out, /<b>@priya<\/b><span>bet no<\/span>/);
   assert.match(out, /<b>0\.1<\/b><small>test NEAR each<\/small><\/div>/);
   // "bet yes" is always the left seat, whoever made the offer.

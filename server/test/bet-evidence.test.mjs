@@ -640,14 +640,111 @@ test('the queue selects one oldest command per sender before a sender gets a sec
   assert.equal((await s.db.one('select status from evidence_commands where event_id=$1', [ids[1]])).status, 'queued');
 });
 
-test('six page reads can run together while a seventh waits for a slot', async (t) => {
+test('twenty simultaneous submissions reserve at most two fetches and stored links', async () => {
   const fresh = await freshEvidenceBet();
+  const release = Promise.withResolvers();
+  const twoStarted = Promise.withResolvers();
+  const eighteenRefused = Promise.withResolvers();
+  let started = 0; let refused = 0;
+  const submissions = Array.from({ length: 20 }, (_, i) => submitEvidence(s.db, s.config, {
+    betId: fresh.bet.id, userId: creator.id, side: 'yes', via: 'page', url: `https://example.org/race-${i}`,
+    fetchPage: async (url) => {
+      started += 1;
+      if (started === 2) twoStarted.resolve();
+      await release.promise;
+      return page(url);
+    },
+  }).catch((error) => {
+    if (error instanceof UserError && /at most two links/.test(error.message)) {
+      refused += 1;
+      if (refused === 18) eighteenRefused.resolve();
+    }
+    throw error;
+  }));
+  const results = Promise.allSettled(submissions);
+  let timer;
+  try {
+    await Promise.race([Promise.all([twoStarted.promise, eighteenRefused.promise]), new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('Submissions did not enforce the pre-fetch cap.')), 5000);
+    })]);
+    assert.equal(started, 2);
+    assert.equal((await s.db.one('select count(*)::int as n from bet_evidence_reservations where bet_id=$1', [fresh.bet.id])).n, 2);
+    assert.equal((await s.db.one('select count(*)::int as n from bet_evidence where bet_id=$1', [fresh.bet.id])).n, 0);
+  } finally {
+    clearTimeout(timer);
+    release.resolve();
+    await results;
+  }
+  const settled = await results;
+  assert.equal(settled.filter((item) => item.status === 'fulfilled').length, 2);
+  assert.equal(settled.filter((item) => item.status === 'rejected').length, 18);
+  assert.equal(started, 2);
+  assert.equal((await s.db.one('select count(*)::int as n from bet_evidence where bet_id=$1', [fresh.bet.id])).n, 2);
+  assert.equal((await s.db.one('select count(*)::int as n from bet_evidence_reservations where bet_id=$1', [fresh.bet.id])).n, 0);
+});
+
+test('a failed fetch releases its reservation and concurrent duplicates do not fetch again', async () => {
+  const fresh = await freshEvidenceBet();
+  const args = { betId: fresh.bet.id, userId: creator.id, side: 'yes', via: 'page', url: 'https://example.org/reserved' };
+  await assert.rejects(submitEvidence(s.db, s.config, { ...args, fetchPage: async () => { throw new Error('offline'); } }), /could not be read/);
+  assert.equal((await s.db.one('select count(*)::int as n from bet_evidence_reservations where bet_id=$1', [fresh.bet.id])).n, 0);
+  const started = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  const first = submitEvidence(s.db, s.config, { ...args, fetchPage: async (url) => {
+    started.resolve(); await release.promise; return page(url);
+  } });
+  try {
+    await started.promise;
+    await assert.rejects(submitEvidence(s.db, s.config, { ...args,
+      fetchPage: () => assert.fail('A pending duplicate must not fetch.') }), /That link is being read/);
+  } finally {
+    release.resolve();
+    await first;
+  }
+  const stored = await submitEvidence(s.db, s.config, { ...args,
+    fetchPage: () => assert.fail('A stored duplicate must not fetch.') });
+  assert.equal(stored.url, args.url);
+});
+
+test('expired crash reservations are reclaimed and a stale owner cannot complete', async () => {
+  const fresh = await freshEvidenceBet();
+  const args = { betId: fresh.bet.id, userId: creator.id, side: 'yes', via: 'page' };
+  const oldId = randomUUID();
+  await s.db.query(`insert into bet_evidence_reservations (id,statement_id,bet_id,user_id,url,expires_at)
+    values ($1,$2,$3,$4,'https://example.org/crashed',clock_timestamp()-interval '1 second')`,
+  [oldId, fresh.statementId, fresh.bet.id, creator.id]);
+  const started = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  const stale = submitEvidence(s.db, s.config, { ...args, url: 'https://example.org/stale', fetchPage: async (url) => {
+    started.resolve(); await release.promise; return page(url);
+  } });
+  // Attach the rejection handler before releasing the paused reader.
+  const rejected = assert.rejects(stale, /That evidence read expired/);
+  try {
+    await started.promise;
+    assert.equal(await s.db.one('select id from bet_evidence_reservations where id=$1', [oldId]), null);
+    await s.db.query(`update bet_evidence_reservations set expires_at=clock_timestamp()-interval '1 second' where bet_id=$1`, [fresh.bet.id]);
+    for (const suffix of ['replacement-one', 'replacement-two']) {
+      await submitEvidence(s.db, s.config, { ...args, url: `https://example.org/${suffix}`, fetchPage: page });
+    }
+  } finally {
+    release.resolve();
+    await rejected;
+  }
+  assert.equal((await s.db.one('select count(*)::int as n from bet_evidence where bet_id=$1', [fresh.bet.id])).n, 2);
+  assert.equal((await s.db.one('select count(*)::int as n from bet_evidence_reservations where bet_id=$1', [fresh.bet.id])).n, 0);
+});
+
+test('six page reads can run together while a seventh waits for a slot', async (t) => {
+  // Separate posts exercise the worker's global network bound without
+  // bypassing the two-reservations-per-person-per-post bound.
+  const posts = await Promise.all(Array.from({ length: 4 }, () => freshEvidenceBet()));
   const ids = Array.from({ length: 7 }, () => `parallel-${randomUUID()}`);
   t.after(() => s.db.query('delete from evidence_commands where event_id=any($1::text[])', [ids]));
   for (const [i, id] of ids.entries()) {
     await s.db.query(`insert into evidence_commands (event_id,x_user_id,side,url,target_ref)
       values ($1,$2,'yes',$3,$4)`, [id, i % 2 ? creator.x_user_id : acceptor.x_user_id,
-      `https://example.org/parallel-${i}`, fresh.thread.id]);
+      `https://example.org/parallel-${i}`, posts[Math.floor(i / 2)].thread.id]);
   }
   const sixStarted = Promise.withResolvers();
   const release = Promise.withResolvers();

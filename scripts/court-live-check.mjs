@@ -1,169 +1,147 @@
-// INTEGRATION: Explicitly invoked, testnet only, test NEAR only. Proves the Stated Court
-// path on the real chain, outside the app:
-//   1. two fresh faucet accounts make and accept a real bet on the version 2 escrow with
-//      referee = the DAO (0.1 NEAR each);
-//   2. the council files add_proposal with the exact FunctionCall court-dao.mjs builds
-//      (referee_resolve, outcome yes), then act_proposal with the exact arguments
-//      approveRuling sends (including the extra `proposal` field);
-//   3. the proposal is Approved and get_bet shows settled by the referee;
-//   4. the winner withdraws the credit and the transfer lands;
-//   5. on a second bet, a council VoteReject moves the proposal to Rejected and the bet stays active.
-//
-//   COURT_COUNCIL_CREDENTIALS  path to the council account's near-cli credentials file
-//                              (default ~/.near-credentials/testnet/stated-court-18ecdebd.testnet.json)
-//   node scripts/court-live-check.mjs
-//
-// New keys are saved to ~/.near-credentials/testnet/<account>.json with mode 600; no key is printed.
-// Writes evidence/court-live-<date>.json with every transaction hash and explorer link.
+// INTEGRATION: Explicit testnet synthetic check. Dry-run default; --yes creates faucet
+// accounts and sends test transactions. A full run waits through the on-chain 600s window.
+// node scripts/court-live-check.mjs --relay relay.parent.testnet [--yes]
+// COURT_OPERATOR_CREDENTIALS / COURT_COUNCIL_CREDENTIALS select near-cli credential files.
+// New synthetic keys are saved with mode 600; no secret is printed or recorded as evidence.
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { KeyPair } from 'near-api-js';
-import { loadConfig } from '../server/src/config.mjs';
-import { network, transactionLink, accountLink } from '../server/src/near-network.mjs';
-import { nearChain } from '../server/src/play.mjs';
-import { proposalKind } from '../server/src/court-dao.mjs';
+import { HOSTED_COURT, assertRelayConfig, courtPolicy, flag, operatorError, requireTestnet, samePolicy, testnetAccount } from './create-court-dao.mjs';
 
-const ESCROW = 'stated-escrow-52081551be.testnet';
-const DAO = 'stated-court.sputnik-v2.testnet';
-const FAUCET = 'https://helper.testnet.near.org/account';
-const STAKE = 10n ** 23n; // 0.1 NEAR
-const STORAGE_FEE = 10n ** 22n;
-const APPROVE_GAS = 200_000_000_000_000n;
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const credentialsDir = join(homedir(), '.near-credentials', 'testnet');
+const STAKE = 10n ** 23n;
+const GAS = 300_000_000_000_000n;
+const link = (hash) => `https://testnet.nearblocks.io/txns/${hash}`;
+const resolveKind = (id, outcome, escrow = HOSTED_COURT.escrow) => ({ FunctionCall: { receiver_id: escrow, actions: [{ method_name: 'referee_resolve',
+  args: Buffer.from(JSON.stringify({ id, outcome })).toString('base64'), deposit: '0', gas: '100000000000000' }] } });
 
-loadConfig(process.env);
-if (network().id !== 'testnet') { console.error('Testnet only.'); process.exit(1); }
-const chain = nearChain();
-const config = { nearContract: ESCROW };
-const evidence = { escrow: ESCROW, dao: DAO, startedAt: new Date().toISOString(), steps: [] };
-let failed = false;
-const step = (name, pass, detail = {}) => {
-  evidence.steps.push({ name, pass, ...detail });
-  if (!pass) failed = true;
-  const link = detail.hash ? ` ${transactionLink(detail.hash)}` : '';
-  console.log(`${pass ? 'PASS' : 'FAIL'} ${name}${link}${detail.note ? ` (${detail.note})` : ''}`);
-  return pass;
-};
-const view = (contractId, method, args = {}) => chain.view({ contractId, method, args });
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const hex = () => randomBytes(32).toString('hex');
-
-async function credentials(path) {
-  const file = JSON.parse(await readFile(path, 'utf8'));
+export async function readCredentials(path, expected, read = readFile) {
+  const file = JSON.parse(await read(path, 'utf8'));
+  if (file.account_id !== expected || typeof file.private_key !== 'string' || !file.private_key.startsWith('ed25519:')) {
+    throw new Error(`Credential file must belong to ${expected}.`);
+  }
   return { id: file.account_id, secret: file.private_key };
 }
 
-async function faucetAccount(label) {
-  const id = `court-check-${randomBytes(4).toString('hex')}-${label}.testnet`;
-  const key = KeyPair.fromRandom('ed25519');
-  await mkdir(credentialsDir, { recursive: true, mode: 0o700 });
-  await writeFile(join(credentialsDir, `${id}.json`), JSON.stringify({ account_id: id, public_key: key.getPublicKey().toString(),
-    private_key: key.toString() }), { mode: 0o600 });
-  const response = await fetch(FAUCET, { method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ newAccountId: id, newAccountPublicKey: key.getPublicKey().toString() }), signal: AbortSignal.timeout(60_000) });
-  if (!response.ok) throw new Error(`faucet refused ${id}: HTTP ${response.status}`);
-  for (let i = 0; i < 30 && (await chain.balance(id)) == null; i += 1) await sleep(2000);
-  if ((await chain.balance(id)) == null) throw new Error(`${id} did not appear`);
-  return { id, secret: key.toString() };
+export async function courtLiveCheck({ argv = process.argv.slice(2), env = process.env, chain, log = console.log, evidenceRoot = root,
+  read = readFile, makeAccount, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = Date.now } = {}) {
+  requireTestnet(env);
+  const relay = flag(argv, '--relay') || env.STATED_COURT_RELAY;
+  if (!testnetAccount(relay)) throw new Error('Supply a .testnet relay with --relay or STATED_COURT_RELAY.');
+  // The hosted court by default; --dao, --operator and --window-seconds run the same check on a test court.
+  const window = flag(argv, '--window-seconds');
+  if (window !== null && !/^\d+$/.test(window)) throw new Error('--window-seconds requires a whole number of seconds.');
+  const court = Object.freeze({ ...HOSTED_COURT, ...(flag(argv, '--dao') ? { dao: flag(argv, '--dao') } : {}),
+    ...(flag(argv, '--operator') ? { operator: flag(argv, '--operator') } : {}), ...(window !== null ? { windowSeconds: Number(window) } : {}) });
+  if (!testnetAccount(court.dao) || !testnetAccount(court.operator)) throw new Error('--dao and --operator take .testnet accounts.');
+  const plan = { network: 'testnet', relay, ...court, checks: ['operator files through relay', 'council cannot propose or approve',
+    'permissionless approval rejected before window', 'permissionless approval settles after window', 'council veto keeps another bet active'] };
+  log(JSON.stringify(plan, null, 2));
+  if (!argv.includes('--yes') || argv.includes('--dry-run')) { log('Dry run: no credentials read, faucet requests or transactions sent. Pass --yes for the live check.'); return { dryRun: true, plan }; }
+  chain ||= (await import('../server/src/play.mjs')).nearChain();
+  const credentialsDir = join(homedir(), '.near-credentials', 'testnet');
+  const operator = await readCredentials(env.COURT_OPERATOR_CREDENTIALS || join(credentialsDir, `${court.operator}.json`), court.operator, read);
+  const council = await readCredentials(env.COURT_COUNCIL_CREDENTIALS || join(credentialsDir, `${court.council}.json`), court.council, read);
+  const view = (contractId, method, args = {}) => chain.view({ contractId, method, args });
+  assertRelayConfig(await view(relay, 'get_config'), court);
+  if (!samePolicy(await view(court.dao, 'get_policy'), courtPolicy({ relay, council: [council.id] }))) throw new Error('DAO must have the exact hardened relay-only policy before this check.');
+  if (String(await view(court.escrow, 'version')) !== '2') throw new Error('Hosted escrow is not version 2.');
+  const evidence = { ...plan, startedAt: new Date(now()).toISOString(), steps: [] };
+  const check = (name, pass, details = {}) => {
+    evidence.steps.push({ name, pass, ...details });
+    log(`${pass ? 'PASS' : 'FAIL'} ${name}${details.hash ? ` ${link(details.hash)}` : ''}`);
+    if (!pass) throw new Error(`Live check failed: ${name}.`);
+  };
+  const send = (actor, contractId, method, args, depositYocto = '0') => chain.call({ signerId: actor.id, secret: actor.secret,
+    contractId, method, args, depositYocto, gas: GAS });
+  const denied = (result) => !result.ok && /permission|not allowed|not authorized|unauthorized|ERR_NOT_OPERATOR|Operator only/i.test(result.failure || '');
+  const createAccount = makeAccount || (async (label) => {
+    const { KeyPair } = await import('near-api-js');
+    const key = KeyPair.fromRandom('ed25519');
+    const id = `court-check-${randomBytes(4).toString('hex')}-${label}.testnet`;
+    await mkdir(credentialsDir, { recursive: true, mode: 0o700 });
+    await writeFile(join(credentialsDir, `${id}.json`), JSON.stringify({ account_id: id, public_key: key.getPublicKey().toString(), private_key: key.toString() }), { mode: 0o600, flag: 'wx' });
+    await chain.faucet(id, key.getPublicKey().toString());
+    for (let i = 0; i < 30; i += 1) {
+      if ((await chain.balance(id)) != null) return { id, secret: key.toString() };
+      await sleep(2000);
+    }
+    throw new Error('Synthetic faucet account did not appear.');
+  });
+  const makeBet = async (a, b, label) => {
+    const id = randomUUID();
+    const created = await send(a, court.escrow, 'create_bet', { id, terms_hash: createHash('sha256').update(`court-relay-check:${id}`).digest('hex'),
+      creator_side: 'yes', stake_yocto: String(STAKE), accept_by_ns: String(BigInt(now() + 180_000) * 1_000_000n),
+      resolve_at_ns: String(BigInt(now() + 300_000) * 1_000_000n), invited_account: null, binding_hash: randomBytes(32).toString('hex'), referee: court.dao }, String(STAKE + 10n ** 22n));
+    check(`${label}: create bet`, created.ok, { hash: created.hash, betId: id });
+    const accepted = await send(b, court.escrow, 'accept_bet', { id, binding_hash: randomBytes(32).toString('hex') }, String(STAKE));
+    check(`${label}: accept bet`, accepted.ok, { hash: accepted.hash });
+    return id;
+  };
+  const file = async (id, outcome) => {
+    const result = await send(operator, relay, 'file', { id, outcome, description: `Stated synthetic relay check: ${outcome} on ${id}.` });
+    const proposalId = Number(result.value);
+    check('operator files through relay', result.ok && result.value !== null && result.value !== '' && Number.isSafeInteger(proposalId) && proposalId >= 0,
+      { hash: result.hash, betId: id, proposalId });
+    const proposal = await view(court.dao, 'get_proposal', { id: proposalId });
+    check('DAO proposal was filed by relay', proposal.proposer === relay && proposal.status === 'InProgress', { proposalId });
+    return { proposalId, proposal };
+  };
+  let failure;
+  try {
+    const a = await createAccount('a'); const b = await createAccount('b');
+    evidence.accounts = { creator: a.id, acceptor: b.id, operator: operator.id, council: council.id };
+    const bet = await makeBet(a, b, 'approved');
+    const { proposalId, proposal } = await file(bet, 'yes');
+    const forbiddenFile = await send(b, relay, 'file', { id: randomUUID(), outcome: 'yes', description: 'Unauthorized synthetic check' });
+    check('non-operator cannot file through relay', denied(forbiddenFile), { hash: forbiddenFile.hash });
+    const forbiddenProposal = await send(council, court.dao, 'add_proposal', { proposal: { description: 'Unauthorized synthetic check', kind: resolveKind(bet, 'yes', court.escrow) } });
+    check('council cannot propose calls', denied(forbiddenProposal), { hash: forbiddenProposal.hash });
+    const forbiddenApproval = await send(council, court.dao, 'act_proposal', { id: proposalId, action: 'VoteApprove', proposal: proposal.kind });
+    check('council cannot approve calls', denied(forbiddenApproval), { hash: forbiddenApproval.hash });
+    const early = await send(b, relay, 'approve', { id: proposalId });
+    check('permissionless approval blocked before window', !early.ok && /window|early|not ready|deadline|too soon|ERR_TOO_EARLY/i.test(early.failure || ''), { hash: early.hash });
+    check('early approval leaves proposal open', (await view(court.dao, 'get_proposal', { id: proposalId })).status === 'InProgress');
+    const rejectedBet = await makeBet(a, b, 'vetoed');
+    const veto = await file(rejectedBet, 'no');
+    const rejected = await send(council, court.dao, 'act_proposal', { id: veto.proposalId, action: 'VoteReject', proposal: veto.proposal.kind });
+    check('council veto succeeds', rejected.ok, { hash: rejected.hash });
+    check('vetoed DAO proposal is rejected', (await view(court.dao, 'get_proposal', { id: veto.proposalId })).status === 'Rejected');
+    const readyAt = Number(BigInt(proposal.submission_time) / 1_000_000n) + court.windowSeconds * 1000 + 2000;
+    if (!Number.isSafeInteger(readyAt)) throw new Error('Invalid proposal timestamp.');
+    while (now() < readyAt) { const remaining = readyAt - now(); log(`Waiting for on-chain window: ${Math.ceil(remaining / 1000)}s remaining.`); await sleep(Math.min(30_000, remaining)); }
+    const approved = await send(b, relay, 'approve', { id: proposalId });
+    check('permissionless approval succeeds after window', approved.ok, { hash: approved.hash });
+    check('approved DAO proposal is final', (await view(court.dao, 'get_proposal', { id: proposalId })).status === 'Approved');
+    const settled = await view(court.escrow, 'get_bet', { id: bet });
+    check('escrow settled yes through DAO', settled?.status === 'settled' && String(settled?.resolution?.method).toLowerCase() === 'referee'
+      && String(settled?.resolution?.outcome).toLowerCase() === 'yes');
+    const blocked = await send(b, relay, 'approve', { id: veto.proposalId });
+    check('permissionless approval cannot revive veto', !blocked.ok && /InProgress|Rejected|terminal/i.test(blocked.failure || ''), { hash: blocked.hash });
+    const active = await view(court.escrow, 'get_bet', { id: rejectedBet });
+    check('vetoed bet remains active', active?.status === 'accepted' && !active.resolution);
+    const credit = BigInt(await view(court.escrow, 'get_credit', { account_id: a.id }));
+    const before = BigInt(await chain.balance(a.id));
+    const withdrawn = await send(a, court.escrow, 'withdraw', {});
+    const after = BigInt(await chain.balance(a.id));
+    check('winner withdraws both stakes', withdrawn.ok && credit === 2n * STAKE && BigInt(await view(court.escrow, 'get_credit', { account_id: a.id })) === 0n
+      && after - before > 2n * STAKE - 10n ** 22n, { hash: withdrawn.hash });
+    evidence.bets = { approved: bet, vetoed: rejectedBet };
+    evidence.proposals = { approved: proposalId, vetoed: veto.proposalId };
+  } catch (error) { failure = error; }
+  evidence.finishedAt = new Date(now()).toISOString();
+  evidence.passed = !failure;
+  if (failure) evidence.failure = operatorError(failure, env);
+  const evidenceFile = resolve(evidenceRoot, `evidence/court-relay-live-${court.dao === HOSTED_COURT.dao ? 'hosted' : 'test'}-${evidence.startedAt.slice(0, 10)}.json`);
+  await mkdir(dirname(evidenceFile), { recursive: true });
+  await writeFile(evidenceFile, `${JSON.stringify(evidence, null, 2)}\n`);
+  log(`Evidence: ${evidenceFile}`);
+  if (failure) throw failure;
+  return evidence;
 }
 
-async function makeBet(creator, acceptor, label) {
-  const id = randomUUID();
-  const now = Date.now();
-  const acceptBy = BigInt(now + 3 * 60_000) * 1_000_000n;
-  const resolveAt = BigInt(now + 5 * 60_000) * 1_000_000n;
-  const termsHash = createHash('sha256').update(JSON.stringify({ check: 'court-live', id, label })).digest('hex');
-  const created = await chain.call({ signerId: creator.id, secret: creator.secret, contractId: ESCROW, method: 'create_bet',
-    args: { id, terms_hash: termsHash, creator_side: 'yes', stake_yocto: STAKE.toString(), accept_by_ns: acceptBy.toString(),
-      resolve_at_ns: resolveAt.toString(), invited_account: null, binding_hash: hex(), referee: DAO },
-    depositYocto: (STAKE + STORAGE_FEE).toString() });
-  step(`${label}: create_bet with referee ${DAO}`, created.ok, { hash: created.hash, note: created.failure || undefined });
-  const accepted = await chain.call({ signerId: acceptor.id, secret: acceptor.secret, contractId: ESCROW, method: 'accept_bet',
-    args: { id, binding_hash: hex() }, depositYocto: STAKE.toString() });
-  step(`${label}: accept_bet`, accepted.ok, { hash: accepted.hash, note: accepted.failure || undefined });
-  const bet = await view(ESCROW, 'get_bet', { id });
-  step(`${label}: get_bet shows accepted, referee = DAO`, bet?.status === 'accepted' && bet?.referee === DAO, { note: `status ${bet?.status}, referee ${bet?.referee}` });
-  return id;
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  courtLiveCheck().catch((error) => { console.error(operatorError(error)); process.exitCode = 1; });
 }
-
-async function propose(council, betId, outcome, label) {
-  const description = `Stated court live check: ${outcome} on bet ${betId}.`;
-  const policy = await view(DAO, 'get_policy');
-  const sent = await chain.call({ signerId: council.id, secret: council.secret, contractId: DAO, method: 'add_proposal',
-    args: { proposal: { description, kind: proposalKind(config, betId, outcome) } }, depositYocto: String(policy.proposal_bond || '0') });
-  const id = Number(sent.value);
-  step(`${label}: add_proposal returns the proposal id`, sent.ok && Number.isSafeInteger(id), { hash: sent.hash, proposalId: id, note: sent.failure || `id ${id}` });
-  return id;
-}
-
-try {
-  const councilPath = process.env.COURT_COUNCIL_CREDENTIALS || join(credentialsDir, 'stated-court-18ecdebd.testnet.json');
-  const council = await credentials(councilPath);
-  const version = await view(ESCROW, 'version');
-  step('escrow is version 2', String(version) === '2', { note: `version ${version}` });
-  step('DAO is Sputnik 2.0.0 with the court policy', (await view(DAO, 'version')) === '2.0.0'
-    && (await view(DAO, 'get_policy')).roles.some((r) => r.name === 'council' && r.kind.Group?.includes(council.id)));
-
-  const a = await faucetAccount('a');
-  const b = await faucetAccount('b');
-  evidence.accounts = { creator: a.id, acceptor: b.id, council: council.id };
-  step('two faucet accounts', true, { note: `${a.id}, ${b.id}` });
-
-  // Bet 1: approved by the DAO.
-  const bet1 = await makeBet(a, b, 'bet 1');
-  const p1 = await propose(council, bet1, 'yes', 'bet 1');
-  const kind = (await view(DAO, 'get_proposal', { id: p1 })).kind;
-  // Exactly what approveRuling sends: id, action and the proposal kind, with 200 Tgas and no deposit.
-  let vote = await chain.call({ signerId: council.id, secret: council.secret, contractId: DAO, method: 'act_proposal',
-    args: { id: p1, action: 'VoteApprove', proposal: kind }, gas: APPROVE_GAS });
-  evidence.actProposalForm = vote.ok ? 'id, action, proposal (accepted by 2.0.0)' : null;
-  step('bet 1: act_proposal {id, action: VoteApprove, proposal: kind} accepted by Sputnik 2.0.0', vote.ok, { hash: vote.hash, note: vote.failure || undefined });
-  if (!vote.ok) {
-    vote = await chain.call({ signerId: council.id, secret: council.secret, contractId: DAO, method: 'act_proposal',
-      args: { id: p1, action: 'VoteApprove' }, gas: APPROVE_GAS });
-    evidence.actProposalForm = vote.ok ? 'id, action (the extra proposal field is refused)' : 'neither form';
-    step('bet 1: act_proposal {id, action: VoteApprove} without the proposal field', vote.ok, { hash: vote.hash, note: vote.failure || undefined });
-  }
-  const proposal1 = await view(DAO, 'get_proposal', { id: p1 });
-  step('bet 1: proposal is Approved', proposal1.status === 'Approved', { note: `status ${proposal1.status}` });
-  const settled = await view(ESCROW, 'get_bet', { id: bet1 });
-  step('bet 1: get_bet shows settled by the referee, outcome yes',
-    settled?.status === 'settled' && String(settled?.resolution?.method).toLowerCase() === 'referee' && String(settled?.resolution?.outcome).toLowerCase() === 'yes',
-    { note: `status ${settled?.status}, resolution ${JSON.stringify(settled?.resolution)}` });
-
-  const credit = BigInt(await view(ESCROW, 'get_credit', { account_id: a.id }));
-  const before = BigInt(await chain.balance(a.id));
-  const withdrawn = await chain.call({ signerId: a.id, secret: a.secret, contractId: ESCROW, method: 'withdraw', args: {} });
-  const after = BigInt(await chain.balance(a.id));
-  const left = BigInt(await view(ESCROW, 'get_credit', { account_id: a.id }));
-  step('bet 1: the winner withdraws both stakes', withdrawn.ok && credit === 2n * STAKE && left === 0n && after - before > 2n * STAKE - 10n ** 22n,
-    { hash: withdrawn.hash, note: `credit ${credit}, balance +${after - before}` });
-
-  // Bet 2: a council VoteReject.
-  const bet2 = await makeBet(a, b, 'bet 2');
-  const p2 = await propose(council, bet2, 'no', 'bet 2');
-  const reject = await chain.call({ signerId: council.id, secret: council.secret, contractId: DAO, method: 'act_proposal',
-    args: { id: p2, action: 'VoteReject', proposal: (await view(DAO, 'get_proposal', { id: p2 })).kind }, gas: APPROVE_GAS });
-  step('bet 2: council VoteReject accepted', reject.ok, { hash: reject.hash, note: reject.failure || undefined });
-  const proposal2 = await view(DAO, 'get_proposal', { id: p2 });
-  step('bet 2: proposal is Rejected', proposal2.status === 'Rejected', { note: `status ${proposal2.status}` });
-  const open = await view(ESCROW, 'get_bet', { id: bet2 });
-  step('bet 2: the bet stays active', open?.status === 'accepted' && !open?.resolution, { note: `status ${open?.status}` });
-  evidence.bets = { approved: bet1, rejected: bet2 };
-  evidence.proposals = { approved: p1, rejected: p2 };
-} catch (error) {
-  step('run', false, { note: String(error?.message || error).slice(0, 300) });
-}
-
-evidence.finishedAt = new Date().toISOString();
-evidence.links = Object.fromEntries(evidence.steps.filter((s) => s.hash).map((s) => [s.name, transactionLink(s.hash)]));
-evidence.daoLink = accountLink(DAO);
-const file = resolve(root, `evidence/court-live-${evidence.startedAt.slice(0, 10)}.json`);
-await mkdir(dirname(file), { recursive: true });
-await writeFile(file, `${JSON.stringify(evidence, null, 2)}\n`);
-console.log(`${failed ? 'FAIL' : 'PASS'} overall. Evidence: ${file}`);
-process.exitCode = failed ? 1 : 0;

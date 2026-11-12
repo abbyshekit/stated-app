@@ -135,7 +135,7 @@ test('price ruling shows the post, three models, confidence, window, price and v
   assert.match(response.text, /<summary>Check it yourself<\/summary>\s*<p>Each verdict was signed inside an Intel TDX enclave, and every signature checked out\.<\/p>/);
   assert.doesNotMatch(response.text, /<h2>Verified<\/h2>|✓/);
   for (const line of VERIFIED) assert.ok(response.text.includes(`<div>${line}</div>`), `Missing verified check: ${line}`);
-  assert.ok(response.text.includes('<p class="quiet">Not checked: enclave measurements against a published list, TCB level and revocation, the GPU’s own attestation.</p>'));
+  assert.ok(response.text.includes('<p class="quiet">Not checked when this ruling was made: enclave measurements against a published list, TCB level and revocation, the GPU’s own attestation. The command below checks the stored reports for them now.</p>'));
   assert.ok(response.text.indexOf('<summary>Why each model decided</summary>') < response.text.indexOf('<summary>Check it yourself</summary>'));
   assert.ok(response.text.indexOf('<summary>Check it yourself</summary>') < response.text.indexOf(VERIFIED[0]));
   assert.match(response.text, /<summary>Check it yourself<\/summary>/);
@@ -179,7 +179,7 @@ test('the GPU verified line requires valid stored proof for every juror', async 
   response = await s.browser().get(path());
   assert.equal(response.status, 200);
   assert.doesNotMatch(response.text, /Each model’s NVIDIA GPU/);
-  assert.match(response.text, /Not checked:.*the GPU’s own attestation/);
+  assert.match(response.text, /Not checked when this ruling was made:.*the GPU’s own attestation/);
 });
 
 test('dstack verification lines require every gateway and signing model, including the plan', async () => {
@@ -194,9 +194,9 @@ test('dstack verification lines require every gateway and signing model, includi
   await save();
   let response = await s.browser().get(path());
   assert.equal(response.status, 200);
-  assert.ok(response.text.includes('<p>Boot measurements match the published dstack OS 0.5.12 image, production build, checked by the official dstack verifier.</p>'));
-  assert.ok(response.text.includes('<p>Intel TCB is up to date with no security advisories.</p>'));
-  assert.doesNotMatch(response.text, /Not checked: enclave measurements/);
+  assert.ok(response.text.includes('<p>When this ruling was made, the official dstack verifier reported that the boot measurements match the published dstack OS 0.5.12 image, production build.</p>'));
+  assert.ok(response.text.includes('<p>It also reported the Intel TCB up to date with no security advisories. The command below asks the verifier again.</p>'));
+  assert.doesNotMatch(response.text, /Not checked when this ruling was made: enclave measurements/);
   for (const call of calls) for (const role of ['gateway', 'model']) {
     for (const value of [undefined, { verifier: result.verifier, checkedAt: result.checkedAt, error: 'Timed out' },
       { ...result, isValid: false }, { ...result, tcbStatus: 'OutOfDate' }]) {
@@ -206,7 +206,7 @@ test('dstack verification lines require every gateway and signing model, includi
       await save();
       response = await s.browser().get(path());
       assert.equal(response.status, 200);
-      assert.doesNotMatch(response.text, /Boot measurements match|Intel TCB is up to date/);
+      assert.doesNotMatch(response.text, /boot measurements match|Intel TCB up to date/);
       call.dstack = original;
       call.dstack[role] = structuredClone(result);
     }

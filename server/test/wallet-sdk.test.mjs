@@ -1,8 +1,19 @@
 // INTEGRATION: Exercise the installed Meteor SDK converter, not a shape-only mock.
 import assert from 'node:assert/strict';
+import { createRequire, register } from 'node:module';
+import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { MeteorWallet } from '@meteorwallet/sdk';
+import { pathToFileURL } from 'node:url';
 import { KeyPair } from 'near-api-js';
+
+// As in scripts/build-wallet.mjs: query-string 9 (pinned in package.json) names stringify only in base.js.
+const base = pathToFileURL(join(dirname(createRequire(import.meta.url).resolve('query-string')), 'base.js')).href;
+register(`data:text/javascript,${encodeURIComponent(`let base;
+export function initialize(data) { base = data.base; }
+export async function resolve(specifier, context, next) {
+  return specifier === 'query-string' ? { url: base, shortCircuit: true } : next(specifier, context);
+}`)}`, { data: { base } });
+const { MeteorWallet } = await import('@meteorwallet/sdk');
 import { walletTransaction } from '../public/wallet-transaction.mjs';
 
 test('prepared wallet actions survive the real Meteor transaction converter unchanged', async () => {

@@ -1,6 +1,6 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { safeFetch } from './articles.mjs';
-import { evidenceText } from './evidence-text.mjs';
+import { extractInWorker } from './extraction-pool.mjs';
 import { betReplies, say } from './reply-bets.mjs';
 import { UserError } from './store.mjs';
 
@@ -92,13 +92,34 @@ export async function submitEvidence(db, config, { betId, userId, side, url, via
     }
     checkWindow(bet, config, arrivedAt);
     checkReadTime(bet, config, readAt);
-    const { n } = await tx.one('select count(*)::int as n from bet_evidence where statement_id = $1 and user_id = $2', [bet.statement_id, userId]);
-    if (n >= 2) throw new UserError('You can add at most two links per post.');
     return { bet, existing: null };
   }
-  const initial = await checked(db);
-  let article; let body; let finalUrl; let readAt;
-  if (!initial.existing) {
+  const candidate = await evidenceBet(db, betId);
+  checkBettor(candidate, userId);
+  const reservationId = randomUUID();
+  const initial = await db.tx(async (tx) => {
+    await tx.query('select id from statements where id = $1 for update', [candidate.statement_id]);
+    const state = await checked(tx);
+    if (state.existing) return state;
+    await tx.query('delete from bet_evidence_reservations where statement_id = $1 and expires_at <= clock_timestamp()', [state.bet.statement_id]);
+    const { n } = await tx.one(`select (
+      (select count(*) from bet_evidence where statement_id = $1 and user_id = $2) +
+      (select count(*) from bet_evidence_reservations where statement_id = $1 and user_id = $2)
+    )::int as n`, [state.bet.statement_id, userId]);
+    if (n >= 2) throw new UserError('You can add at most two links per post.');
+    if (await tx.one('select id from bet_evidence_reservations where statement_id = $1 and user_id = $2 and url = $3',
+      [state.bet.statement_id, userId, link])) throw new UserError('That link is being read. Try again shortly.', 409);
+    await tx.query(`insert into bet_evidence_reservations (id, statement_id, bet_id, user_id, url)
+      values ($1,$2,$3,$4,$5)`, [reservationId, state.bet.statement_id, betId, userId, link]);
+    return state;
+  });
+  if (initial.existing) {
+    await acknowledge(db, config, initial.existing);
+    return initial.existing;
+  }
+  let row;
+  try {
+    let article; let body; let finalUrl;
     let page;
     try {
       // safeFetch carries this one deadline through every redirect.
@@ -110,28 +131,39 @@ export async function submitEvidence(db, config, { betId, userId, side, url, via
       })))(link, { signal });
       signal.throwIfAborted();
     } catch { throw new UserError('That link could not be read.'); }
-    readAt = Date.now();
+    const readAt = Date.now();
     checkReadTime(initial.bet, config, readAt);
     try {
       finalUrl = evidenceUrl(page.url || link);
-      article = evidenceText(page.body, finalUrl, { claim: initial.bet.claim });
+      // In a worker with a three-second deadline: a hostile page cannot hold the event loop.
+      article = await extractInWorker('evidence', page.body, finalUrl, { claim: initial.bet.claim });
       body = article.text;
       if (!body) throw new Error('Empty page');
-    } catch { throw new UserError('That link could not be read.'); }
+    } catch (error) {
+      throw error instanceof UserError && /too long/.test(error.message) ? error : new UserError('That link could not be read.');
+    }
+    row = await db.tx(async (tx) => {
+      // The reservation survives network work without holding a statement lock.
+      await tx.query('select id from statements where id = $1 for update', [initial.bet.statement_id]);
+      const { bet, existing } = await checked(tx, readAt);
+      if (existing) return existing;
+      const slot = await tx.one(`select id from bet_evidence_reservations
+        where id = $1 and expires_at > clock_timestamp()`, [reservationId]);
+      if (!slot) throw new UserError('That evidence read expired. Submit the link again.', 409);
+      // A link always counts for the side its poster bet on, whichever word the reply used.
+      const own = String(bet.creator_user_id) === String(userId) ? bet.creator_side : (bet.creator_side === 'yes' ? 'no' : 'yes');
+      const stored = await tx.one(`insert into bet_evidence (statement_id, bet_id, user_id, side, url, final_url, title, body, body_hash, via, event_id)
+        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning *`,
+      [bet.statement_id, betId, userId, own, link, finalUrl, article.title?.slice(0, 1000) || null, body,
+        createHash('sha256').update(body).digest('hex'), via, eventId]);
+      await tx.query('delete from bet_evidence_reservations where id = $1', [reservationId]);
+      return stored;
+    });
+  } finally {
+    // Failed reads release their slot; a crashed process is recovered by the
+    // database-clock expiry on the next submission, never by a stale worker.
+    await db.query('delete from bet_evidence_reservations where id = $1', [reservationId]);
   }
-  const row = await db.tx(async (tx) => {
-    // Network work must not hold up the other bettor. Only the final checks and insert share this lock.
-    await tx.query('select id from statements where id = $1 for update', [initial.bet.statement_id]);
-    const { bet, existing } = await checked(tx, readAt);
-    if (existing) return existing;
-    // A link always counts for the side its poster bet on, whichever word the reply used, so the
-    // label "@handle bet no" beside it is true and the jury knows which side offered it.
-    const own = String(bet.creator_user_id) === String(userId) ? bet.creator_side : (bet.creator_side === 'yes' ? 'no' : 'yes');
-    return tx.one(`insert into bet_evidence (statement_id, bet_id, user_id, side, url, final_url, title, body, body_hash, via, event_id)
-      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning *`,
-    [bet.statement_id, betId, userId, own, link, finalUrl, article.title?.slice(0, 1000) || null, body,
-      createHash('sha256').update(body).digest('hex'), via, eventId]);
-  });
   await acknowledge(db, config, row);
   return row;
 }

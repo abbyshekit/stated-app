@@ -2,7 +2,7 @@ import { sendBetReplies } from './reply-bets.mjs';
 import { createIntake, runIntake } from './articles.mjs';
 import { kvGet, kvSet } from './db.mjs';
 import { insertSave, linkedUrls, PROCESSING_LEASE, processMention, sendPendingReplies, upsertXSource, upsertXStatement } from './intake.mjs';
-import { INTAKES_PER_HOUR, intakesInLastHour } from './limits.mjs';
+import { INTAKES_PER_HOUR } from './limits.mjs';
 import { runCompliance } from './compliance.mjs';
 import { checkSources, deliverDms, refreshEdited, scanDeadlines } from './notify.mjs';
 import { goneOnX, postFetcher, postText } from './xapi.mjs';
@@ -179,11 +179,17 @@ export async function processDm(db, config, x, event, bot) {
             : 'Already in your Stated profile.';
         }
       } else if (links.articles.length) {
-        if ((await intakesInLastHour(db, event.sender_id)) >= INTAKES_PER_HOUR) {
+        // createIntake counts the quota and reserves the intake in one locked transaction (limits.mjs).
+        let intake = null;
+        try {
+          intake = await createIntake(db, { ownerXUserId: event.sender_id, url: links.articles[0], route: 'dm' });
+        } catch (error) {
+          if (error?.status !== 429) throw error;
+        }
+        if (!intake) {
           outcome = 'rate_limited';
           reply = `You have sent ${INTAKES_PER_HOUR} links in the last hour. Try again later.`;
         } else {
-          const intake = await createIntake(db, { ownerXUserId: event.sender_id, url: links.articles[0], route: 'dm' });
           await runIntake(db, config, intake.id);
           intakeId = intake.id;
           outcome = 'article';

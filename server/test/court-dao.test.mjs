@@ -92,11 +92,11 @@ before(async () => {
   await browser.submit('/setup', { profile: 'private', defaults: 'private' });
   admin = await one(`select * from users where x_user_id = '900'`);
   judge = await referee(s.db, s.config, near.chain);
-  // The policy create-court-dao.mjs creates: the jury may add and approve; the council may do anything.
+  // Legacy direct-jury mode with the restricted council policy.
   near.addDao(DAO, {
     roles: [
       { name: 'jury', kind: { Group: [judge.id] }, permissions: ['call:AddProposal', 'call:VoteApprove'], vote_policy: {} },
-      { name: 'council', kind: { Group: [COUNCIL] }, permissions: ['*:*'], vote_policy: {} },
+      { name: 'council', kind: { Group: [COUNCIL] }, permissions: ['call:VoteReject', 'call:VoteRemove'], vote_policy: {} },
     ],
     default_vote_policy: { weight_kind: 'RoleWeight', quorum: '0', threshold: [1, 2] },
     proposal_bond: '0', proposal_period: '604800000000000', bounty_bond: '0', bounty_forgiveness_period: '86400000000000',
@@ -173,6 +173,15 @@ test('a council Reject before the window leaves the Bet open, records it, and is
     'recorded once');
   assert.equal(near.sent.filter((t) => t.signerId === judge.id && t.method === 'act_proposal' && t.args.id === filed.proposalId).length, 0,
     'the jury member never votes on a proposal the council rejected');
+  await resolveStatement(s.db, { statementId: bet.statementId, outcome: 'no', note: 'New evidence confirms the same outcome after the council veto.',
+    url: 'https://example.org/new-evidence', reviewer: admin, outcomeAt: new Date().toISOString() });
+  await settle();
+  const revised = await events(bet.betId, 'court_proposal');
+  assert.equal(revised.length, 2, 'a new Result revision may re-file the same outcome');
+  assert.notEqual(revised[0].resultRevision, revised[1].resultRevision);
+  assert.notEqual(revised[0].proposalId, revised[1].proposalId);
+  await settle();
+  assert.equal((await events(bet.betId, 'court_proposal')).length, 2, 'the same revised Result never files twice');
 });
 
 test('a reviewer Result on a DAO Bet is filed as a proposal too, and the DAO still carries the payout', async () => {

@@ -11,7 +11,8 @@
     "cli": "node --env-file-if-exists=.env server/src/cli.mjs",
     "migrate": "node --env-file-if-exists=.env server/src/cli.mjs migrate",
     "demo": "node server/dev/simulated-x.mjs",
-    "test": "node --test --test-concurrency=1 score.test.mjs domain.test.mjs xpost.test.mjs sim.test.mjs server/test/*.test.mjs",
+    "test": "node scripts/test.mjs",
+    "test:all": "node --test --test-concurrency=1 score.test.mjs domain.test.mjs xpost.test.mjs sim.test.mjs server/test/*.test.mjs",
     "test:server": "node --test --test-concurrency=1 server/test/*.test.mjs"
   },
   "dependencies": {
@@ -28,5 +29,11 @@
   },
   "devDependencies": {
     "esbuild": "0.27.2"
+  },
+  "overrides": {
+    "@meteorwallet/sdk": {
+      "query-string": "9.5.1",
+      "nanoid": "5.1.16"
+    }
   }
 }

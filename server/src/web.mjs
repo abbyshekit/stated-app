@@ -12,6 +12,8 @@ import { registerBetEvidenceRoutes } from './bet-evidence-pages.mjs';
 
 // One policy for every page. A page that must hand a form to another origin widens form-action for itself only.
 const CONTENT_SECURITY_POLICY = "default-src 'self'; style-src 'self'; img-src 'self' data: https://pbs.twimg.com; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
+// No page uses these; a third-party frame or injected script cannot ask for them either.
+const PERMISSIONS_POLICY = 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), interest-cohort=()';
 import { registerWalletRpc } from './near-wallet-rpc.mjs';
 import { registerShareRoutes } from './share-pages.mjs';
 import { betsFor } from './bets.mjs';
@@ -24,6 +26,9 @@ import { assertNetworkConfig } from './config.mjs';
 import { logoFile } from './token-logos.mjs';
 import { intentsQuotes } from './intents.mjs';
 import { pkcePair, sameString, token } from './crypto.mjs';
+import { createSession, sessionFor } from './session-tokens.mjs';
+import { collectionPage, exportPage, publicRecord } from './bounded-exports.mjs';
+import { createReadLimiter } from './public-read-limits.mjs';
 import { esc, html, pct, raw, signed, when } from './html.mjs';
 import { face, facesByUsername, facesFor } from './certificate.mjs';
 import { kvGet } from './db.mjs';
@@ -41,11 +46,8 @@ import {
   markInboxDone,
   openCorrections,
   ownerCollections,
-  ownerExport,
   ownerSave,
   personByUsername,
-  publicCollections,
-  publicExport,
   publicFollowerCount,
   publicSave,
   recentPublic,
@@ -61,7 +63,6 @@ import {
   signInFromX,
   UserError,
   userById,
-  withdrawalsFor,
 } from './store.mjs';
 import { cameTrueLate, effectiveTerms, isBackfill, outcomeFor, publishedInTime, scoringProbability } from './terms.mjs';
 import { authorizeUrl, botClient, displaySourceUrl, exchangeCode, getMe, saveBotCredentials, SIGNIN_SCOPES } from './xapi.mjs';
@@ -196,6 +197,16 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
   const chainFor = () => (playChain ||= nearChain({ fetchImpl }));
   let botName = null;
   let xClient = null;
+  const readBudget = createReadLimiter({ railway: config.hosted && Boolean(process.env.RAILWAY_ENVIRONMENT) });
+
+  function allowHeavyRead(ctx) {
+    const budget = readBudget(ctx.req);
+    if (budget.allowed) return true;
+    send(ctx.res, 429, JSON.stringify({ error: 'Too many downloads. Retry after the indicated delay.' }), {
+      kind: 'private', headers: { 'content-type': 'application/json; charset=utf-8', 'retry-after': String(budget.retryAfter) },
+    });
+    return false;
+  }
 
   // The bot's X client, when a bot is connected; null otherwise.
   async function botX() {
@@ -223,7 +234,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
   async function viewerOf(req) {
     const sid = cookies(req).stated_sid;
     if (!sid) return { user: null, session: null };
-    const session = await db.one('select * from sessions where id = $1 and expires_at > now()', [sid]);
+    const session = await sessionFor(db, sid);
     if (!session) return { user: null, session: null };
     const user = await userById(db, session.user_id);
     return { user, session };
@@ -933,7 +944,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
       <h2>Messages</h2>
       <p>The bot sends direct messages only if you turn that on and have messaged it first. Updates always reach your private inbox here.</p>
       <h2>Your data</h2>
-      <p>Download everything from your profile as JSON at <a href="/me/export.json">/me/export.json</a>. Remove any save from its page. To delete your account, contact the operator named in the bot’s X profile.</p>
+      <p>Download your profile as JSON at <a href="/me/export.json">/me/export.json</a>, following pagination.next until it is null. When historyContinues is true, the next page repeats the saves with their next batch of revisions. Records describe only the saves on each page. Remove any save from its page. To delete your account, contact the operator named in the bot’s X profile.</p>
     `));
   });
 
@@ -991,11 +1002,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
       return;
     }
     const user = await signInFromX(db, me, { ref: state.ref });
-    const sid = token(32);
-    await db.query(
-      `insert into sessions (id, user_id, csrf, expires_at) values ($1, $2, $3, now() + ($4 || ' days')::interval)`,
-      [sid, user.id, token(24), String(config.sessionDays)],
-    );
+    const sid = await createSession(db, user.id, config.sessionDays);
     const next = !user.setup_completed_at
       ? (state.return_to && state.return_to !== '/me'
         ? `/setup?return=${encodeURIComponent(returnPath(state.return_to))}` : '/setup')
@@ -1392,7 +1399,8 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
 
   route('GET', /^\/me\/export\.json$/, async (ctx) => {
     if (!ctx.user) return json(ctx.res, 401, { error: 'sign_in' }, 'private');
-    const data = { ...await ownerExport(db, ctx.user), bets: ctx.user.setup_completed_at ? await betsFor(db, ctx.user) : [] };
+    if (!allowHeavyRead(ctx)) return;
+    const data = { ...await exportPage(db, ctx.user, ctx.url, { owner: true }), bets: ctx.user.setup_completed_at ? await betsFor(db, ctx.user) : [] };
     ctx.res.writeHead(200, {
       'content-type': 'application/json; charset=utf-8',
       'content-disposition': `attachment; filename="stated-${ctx.user.x_username}.json"`,
@@ -1547,10 +1555,10 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
   });
 
   async function profilePage(ctx, owner, { base, title }) {
-    const collections = await publicCollections(db, owner);
+    const collections = await collectionPage(db, owner, ctx.url);
     if (!collections) return notFound(ctx);
     ensureVisitor(ctx);
-    const record = recordOf(collections.mine, { publicView: true, withdrawals: await withdrawalsFor(db, owner.id) });
+    const record = await publicRecord(db, owner);
     const isOwnerViewing = ctx.user && ctx.user.id === owner.id;
     const all = [...collections.mine, ...collections.following];
     const listFaces = await facesFor(db, all, ctx.user);
@@ -1565,18 +1573,19 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
           : ''}
       </div>
       ${isOwnerViewing ? html`<p class="notice">This is what others see. Private saves are not listed.</p>` : ''}
-      ${owner.kind !== 'editorial' ? html`<h2>Predictions (${collections.mine.length})</h2>
+      ${owner.kind !== 'editorial' ? html`<h2>Predictions on this page (${collections.mine.length})</h2>
       ${collections.mine.length ? list(collections.mine) : html`<p class="blank">No public predictions.</p>`}` : ''}
-      <h2>${owner.kind === 'editorial' ? 'Records' : 'Following'} (${collections.following.length})</h2>
+      <h2>${owner.kind === 'editorial' ? 'Records' : 'Following'} on this page (${collections.following.length})</h2>
       ${collections.following.length ? list(collections.following) : html`<p class="blank">Nothing public.</p>`}
+      ${collections.next ? html`<p class="gut"><a class="tl" rel="next" href="${collections.next}">Next page</a></p>` : ''}
       ${owner.kind !== 'editorial' ? html`<section class="folds"><details class="fold record"><summary>Record</summary>${recordBlock(record, { publicOnly: true })}</details></section>` : ''}
     `, {
       flush: true,
       og: {
         title,
         description: owner.kind === 'editorial'
-          ? `${collections.following.length} public records on Stated.`
-          : `${collections.mine.length} public predictions, ${collections.following.length} followed claims on Stated.`,
+          ? `${collections.following.length} public records on this page.`
+          : `${collections.mine.length} public predictions, ${collections.following.length} followed claims on this page.`,
       },
     }), { headers: refCookie(ctx) });
   }
@@ -1688,12 +1697,13 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
 
   route('GET', /^\/api\/u\/(\w{1,40})$/, async (ctx) => {
     const owner = await personByUsername(db, ctx.params[0]);
-    const collections = owner ? await publicCollections(db, owner) : null;
+    const collections = owner ? await collectionPage(db, owner, ctx.url) : null;
     if (!collections) return json(ctx.res, 404, { error: 'not_found' });
     json(ctx.res, 200, {
       username: owner.x_username,
-      record: recordOf(collections.mine, { publicView: true, withdrawals: await withdrawalsFor(db, owner.id) }),
-      recordScope: 'public entries only, counted only if public before their deadline and outcome',
+      record: await publicRecord(db, owner),
+      recordScope: 'every public prediction, counted only if public before its deadline and outcome; predictions withdrawn after the outcome stay in the counts',
+      pagination: { limit: collections.limit, next: collections.next },
       predictions: collections.mine.map(publicSaveView),
       following: collections.following.map(publicSaveView),
     });
@@ -1711,14 +1721,16 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
   });
 
   route('GET', /^\/api\/u\/(\w{1,40})\/export\.json$/, async (ctx) => {
+    if (!allowHeavyRead(ctx)) return;
     const owner = await personByUsername(db, ctx.params[0]);
-    const data = owner ? await publicExport(db, owner) : null;
+    const data = owner ? await exportPage(db, owner, ctx.url) : null;
     if (!data) return json(ctx.res, 404, { error: 'not_found' });
     json(ctx.res, 200, data);
   });
 
   route('GET', /^\/api\/desk\/export\.json$/, async (ctx) => {
-    json(ctx.res, 200, await publicExport(db, await ensureDesk(db)));
+    if (!allowHeavyRead(ctx)) return;
+    json(ctx.res, 200, await exportPage(db, await ensureDesk(db), ctx.url));
   });
 
   route('GET', /^\/api\/search$/, async (ctx) => {
@@ -1936,7 +1948,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
     redirect(ctx.res, '/desk');
   });
 
-  registerBetRoutes({ route, db, config, layout, needUser, needAdmin, isAdmin, needPost, csrfField, send, redirect, notFound, fetchImpl, walletVersion: WALLET_VERSION, payVersion: PAY_VERSION, botUsername, chain: chainFor, quotes });
+  registerBetRoutes({ route, db, config, layout, needUser, needAdmin, isAdmin, needPost, csrfField, send, redirect, notFound, fetchImpl, walletVersion: WALLET_VERSION, payVersion: PAY_VERSION, botUsername, chain: chainFor, quotes, allowHeavyRead });
   registerBetStartRoutes({ route, db, config, layout, send, redirect, botUsername, fileList, betLinesFor, publicRow, csp: CONTENT_SECURITY_POLICY });
   registerBetRulingRoutes({ route, db, config, layout, send, notFound });
   registerCourtRoutes({ route, db, config, layout, send, notFound, chain: chainFor });
@@ -1945,8 +1957,20 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
   registerWalletRpc({ route, config, needUser, json, fetchImpl });
   registerShareRoutes({ route, db, config, notFound, headersFor });
 
+  const https = config.baseUrl.startsWith('https://');
   return async function handle(req, res) {
-    const url = new URL(req.url, config.baseUrl);
+    // Optional calls: some tests drive the handler with a minimal response double.
+    res.setHeader?.('permissions-policy', PERMISSIONS_POLICY);
+    if (https) res.setHeader?.('strict-transport-security', 'max-age=31536000; includeSubDomains');
+    let url;
+    try {
+      url = new URL(req.url, config.baseUrl);
+    } catch {
+      // Node's parser accepts targets such as "http://[" that URL rejects: the client's error, not a crash.
+      res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+      res.end('Bad request.');
+      return;
+    }
     const ctx = { req, res, url, params: [], user: null, session: null };
     try {
       const viewer = await viewerOf(req);

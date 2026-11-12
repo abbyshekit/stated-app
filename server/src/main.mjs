@@ -1,8 +1,8 @@
-import http from 'node:http';
 import { assertHostedConfig, assertNetworkConfig, loadConfig, requireConfig } from './config.mjs';
 import { createDb } from './db.mjs';
 import { ensureDesk } from './store.mjs';
 import { createApp } from './web.mjs';
+import { createServer } from './http-server.mjs';
 import { startWorker } from './worker.mjs';
 import { startNearWorker } from './near-worker.mjs';
 import { startPlayWorker } from './reply-bets.mjs';
@@ -33,7 +33,9 @@ await ensureDesk(db);
 await applyTextPolicy(db, config);
 
 const handler = createApp({ db, config });
-const server = http.createServer((req, res) => handler(req, res));
+const server = createServer(handler);
+// Last resort: a stray rejection is logged rather than ending the process for every user.
+process.on('unhandledRejection', (reason) => console.error('[unhandled rejection]', reason?.stack || reason));
 server.listen(config.port, () => {
   console.log(`Stated on ${config.baseUrl} (port ${config.port})`);
 });

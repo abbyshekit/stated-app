@@ -1,0 +1,39 @@
+# The README's offline checks on every push: the whole test suite against a throwaway
+# PostgreSQL, the dependency audit, and both contracts' tests, lint and format.
+name: checks
+on:
+  push:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  app:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      - name: Put the runner's PostgreSQL initdb and pg_ctl on PATH
+        run: ls -d /usr/lib/postgresql/*/bin | sort -V | tail -1 >> "$GITHUB_PATH"
+      - name: Test suite (fails if PostgreSQL cannot start)
+        run: npm test
+        env:
+          STATED_TEST_REQUIRE_PG: '1'
+          LANG: C.UTF-8
+      - run: npm audit --omit=dev --audit-level=high
+  contracts:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        contract: [bilateral-escrow, jury-relay]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.93.1
+        with:
+          components: clippy, rustfmt
+      - run: cargo test --manifest-path contracts/${{ matrix.contract }}/Cargo.toml --locked
+      - run: cargo clippy --manifest-path contracts/${{ matrix.contract }}/Cargo.toml --locked --all-targets -- -D warnings
+      - run: cargo fmt --manifest-path contracts/${{ matrix.contract }}/Cargo.toml -- --check

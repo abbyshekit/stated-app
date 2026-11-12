@@ -1,9 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { performance } from 'node:perf_hooks';
 import { evidenceText } from '../src/evidence-text.mjs';
 
 const url = 'https://example.org/official-record';
 const read = (html, options) => evidenceText(html, url, options);
+
+function boundedRead(html) {
+  const childSource = `import { evidenceText } from './server/src/evidence-text.mjs';
+    let html = ''; for await (const chunk of process.stdin) html += chunk;
+    try { const result = evidenceText(html, 'https://example.org/official-record');
+      process.stdout.write(JSON.stringify({ textLength: result.text.length, error: null }));
+    } catch (error) { process.stdout.write(JSON.stringify({ textLength: null, error: error.message })); }`;
+  const started = performance.now();
+  const child = spawnSync(process.execPath, ['--input-type=module', '-e', childSource], {
+    input: html, encoding: 'utf8', timeout: 2_000, maxBuffer: 64_000,
+  });
+  assert.equal(child.error, undefined, `parser exceeded 2 seconds: ${child.error?.message}`);
+  assert.equal(child.status, 0, child.stderr);
+  const elapsed = performance.now() - started;
+  assert.ok(elapsed < 2_000, `parser took ${elapsed.toFixed(0)} ms`);
+  return { ...JSON.parse(child.stdout), elapsed };
+}
 
 test('quoted angle brackets stay in attributes, never in evidence', () => {
   const result = read(`<body><main>
@@ -40,6 +59,55 @@ test('unclosed paragraphs, headings, lists and table cells finish tolerantly', (
 test('deep unclosed wrapper tags remain readable without recursive traversal', () => {
   assert.equal(read(`<body><main>${'<div>'.repeat(20_000)}<p>Visible deeply nested evidence.</p>`).text,
     'Visible deeply nested evidence.');
+});
+
+test('nested blockquotes retain block semantics within the materialization budget', () => {
+  assert.deepEqual(read('<body><blockquote>Outer public words <blockquote>Inner public words</blockquote></blockquote>').blocks,
+    ['Outer public words Inner public words', 'Inner public words']);
+});
+
+test('two-megabyte unclosed nav, script, and paragraph finish within two seconds each', () => {
+  for (const tag of ['nav', 'script', 'p']) {
+    const result = boundedRead(`<body><${tag}>Public words. ${'A'.repeat(2_000_000)}`);
+    assert.equal(result.error, null, tag);
+    assert.equal(result.textLength, tag === 'p' ? 6_000 : 0, tag);
+  }
+});
+
+test('two-megabyte nested blockquote fails clearly within two seconds', () => {
+  const result = boundedRead(`<body><main>${'<blockquote>'.repeat(2_000)}${'A'.repeat(2_000_000)}`);
+  assert.equal(result.error, 'HTML block text budget exceeded');
+});
+
+test('exact two-million-byte repeated opening tag floods finish within two seconds', (t) => {
+  for (const tag of ['nav', 'script', 'p', 'blockquote']) {
+    const opening = `<${tag}>`;
+    const html = opening.repeat(Math.ceil(2_000_000 / opening.length)).slice(0, 2_000_000);
+    assert.equal(html.length, 2_000_000);
+    const result = boundedRead(html);
+    assert.equal(result.error, tag === 'script' ? null : 'HTML tag budget exceeded', tag);
+    t.diagnostic(`${tag}: ${result.elapsed.toFixed(0)} ms`);
+  }
+});
+
+test('deep nested blocks with short text visit each node once', (t) => {
+  const result = boundedRead(`${'<blockquote>'.repeat(2_000)}${'<span>'.repeat(23_000)}Public words.`);
+  assert.equal(result.error, null);
+  assert.equal(result.textLength, 'Public words.'.length);
+  t.diagnostic(`25,000-node tree: ${result.elapsed.toFixed(0)} ms`);
+});
+
+test('malformed tag floods and metadata hit resource budgets', () => {
+  assert.equal(boundedRead(`<body><p>${'<'.repeat(2_000_000)} Public words. `).error, null);
+  assert.equal(boundedRead(`<body><p data-x="${'A'.repeat(2_000_000)}`).textLength, 0);
+  assert.equal(boundedRead(`<body><p style="${'/*'.repeat(30_000)}*/">Public words.</p>`).textLength, 13);
+  assert.equal(boundedRead(`<body>${'<div>'.repeat(25_001)}`).error, 'HTML tag budget exceeded');
+  assert.throws(() => read(`<body><p title="${'A'.repeat(70_000)}">Public words.</p>`),
+    /HTML attribute budget exceeded/);
+  assert.throws(() => read(`<title>${'A'.repeat(8_193)}</title>`), /HTML title budget exceeded/);
+  assert.throws(() => read(`<meta property="og:title" content="${'A'.repeat(8_193)}">`),
+    /HTML title budget exceeded/);
+  assert.throws(() => read('A'.repeat(4_000_001)), /HTML input budget exceeded/);
 });
 
 test('all excluded element contents stay out, including forged markup inside raw text', () => {

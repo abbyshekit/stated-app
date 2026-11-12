@@ -369,7 +369,24 @@ create unique index if not exists bilateral_near_requests_final_transaction_idx
 alter table bilateral_bets add column if not exists near_verified_at timestamptz;
 alter table bilateral_bets add column if not exists near_attempted_at timestamptz;
 alter table bilateral_bets add column if not exists near_absent_after_expiry boolean not null default false;
-alter table bilateral_bets add column if not exists source_save_id bigint references saves(id) on delete set null;
+alter table bilateral_bets add column if not exists source_save_id bigint;
+-- Replace the original inline FK by its PostgreSQL-generated name. Existing
+-- NULLs remain valid; every existing non-NULL reference is validated on add.
+do $$
+begin
+  if exists (select 1 from pg_constraint
+    where conrelid = 'bilateral_bets'::regclass
+      and conname = 'bilateral_bets_source_save_id_fkey' and confdeltype <> 'r') then
+    alter table bilateral_bets drop constraint bilateral_bets_source_save_id_fkey;
+  end if;
+  if not exists (select 1 from pg_constraint
+    where conrelid = 'bilateral_bets'::regclass
+      and conname = 'bilateral_bets_source_save_id_fkey') then
+    alter table bilateral_bets add constraint bilateral_bets_source_save_id_fkey
+      foreign key (source_save_id) references saves(id) on delete restrict;
+  end if;
+end;
+$$;
 
 create table if not exists bilateral_bet_publications (
   bet_id uuid primary key references bilateral_bets(id),
@@ -588,6 +605,52 @@ create table if not exists bet_evidence (
   unique (statement_id, user_id, url)
 );
 create index if not exists bet_evidence_statement_idx on bet_evidence (statement_id, id);
+
+-- Short-lived slots bound network work before any evidence fetch starts.
+-- The statement/user scope preserves the existing two-links-per-post limit.
+create table if not exists bet_evidence_reservations (
+  id uuid primary key,
+  statement_id bigint not null references statements(id) on delete cascade,
+  bet_id uuid not null references bilateral_bets(id),
+  user_id bigint not null references users(id),
+  url text not null check (length(url) between 9 and 600),
+  expires_at timestamptz not null default (clock_timestamp() + interval '1 minute'),
+  unique (statement_id, user_id, url)
+);
+
+-- Result fields belong to the statement, so every public save can display them.
+-- Apply the privacy guard to all writers, including reviewer-recorded Results.
+create or replace function protect_private_bet_result() returns trigger
+language plpgsql as $$
+begin
+  if (new.resolution_url is not null or new.resolution_note is not null) and exists (
+    select 1 from bilateral_bets b join saves s on s.id = b.source_save_id
+    where s.statement_id = new.id and not exists (
+      select 1 from bilateral_bet_publications p
+      where p.bet_id = b.id and p.creator_user_id = b.creator_user_id and p.withdrawn_at is null
+    )
+  ) then
+    new.resolution_url := null;
+    new.resolution_note := 'Result recorded. Bet evidence stays on its Bet page.';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists statements_private_bet_result on statements;
+create trigger statements_private_bet_result
+  before insert or update of resolution_url, resolution_note on statements
+  for each row execute function protect_private_bet_result();
+
+-- Remove previously copied private evidence without requiring empty tables.
+update statements st set resolution_url = null,
+  resolution_note = 'Result recorded. Bet evidence stays on its Bet page.'
+where (st.resolution_url is not null or (st.resolution_note is not null
+    and st.resolution_note <> 'Result recorded. Bet evidence stays on its Bet page.'))
+  and exists (select 1 from bilateral_bets b join saves s on s.id = b.source_save_id
+    where s.statement_id = st.id and not exists (
+      select 1 from bilateral_bet_publications p
+      where p.bet_id = b.id and p.creator_user_id = b.creator_user_id and p.withdrawn_at is null
+    ));
 
 -- Where a post's Result will come from, decided once by the enclave when the deadline passes:
 -- a Coinbase price, or evidence the bettors offer until closes_at. prompted_at is when the

@@ -18,6 +18,9 @@ function nearaiConfig(env, list) {
   return {
     apiKey,
     dstackVerifierUrl,
+    // A model call counts only with the signing model's own NVIDIA GPU evidence, verified by NRAS.
+    // Off only for test stacks whose fake NEAR AI has no GPU (STATED_REQUIRE_GPU_EVIDENCE=0).
+    requireGpu: env.STATED_REQUIRE_GPU_EVIDENCE !== '0',
     baseUrl: String(env.NEARAI_BASE_URL || 'https://cloud-api.near.ai/v1').replace(/\/$/, ''),
     model,
     rulings: Boolean(apiKey) && env.STATED_ENCLAVE_RULINGS === '1',
@@ -33,6 +36,17 @@ export function loadConfig(env = process.env) {
   const mainnet = near.id === 'mainnet';
   const baseUrl = String(env.STATED_BASE_URL || `http://localhost:${port}`).replace(/\/$/, '');
   const list = (value) => String(value || '').split(',').map((s) => s.trim()).filter(Boolean);
+  // A typo must fail closed, rather than silently choose the direct-key path.
+  const courtAccount = (name) => {
+    const value = env[name] || '';
+    if (value && (!/^(?=.{2,64}$)[a-z0-9]+(?:[-_][a-z0-9]+)*(?:\.[a-z0-9]+(?:[-_][a-z0-9]+)*)*$/.test(value)
+      || (near.id === 'testnet' ? !value.endsWith('.testnet') : value.endsWith('.testnet')))) {
+      throw new Error(`${name} must be an account on ${near.id}.`);
+    }
+    return value;
+  };
+  const court = { dao: courtAccount('STATED_COURT_DAO'), relay: courtAccount('STATED_COURT_RELAY') };
+  if (court.relay && !court.dao) throw new Error('STATED_COURT_RELAY requires STATED_COURT_DAO.');
   return {
     port,
     baseUrl,
@@ -52,12 +66,9 @@ export function loadConfig(env = process.env) {
     // until claimed. Needs a version 2 escrow contract. The treasury creates the
     // accounts; its key comes from the environment, or on testnet only
     // (STATED_PLAY_AUTOPROVISION=1, for demos) from the faucet at first use.
-    // Stated Court: a Sputnik DAO that holds the referee seat of new reply Bets. The
-    // jury member is the play referee account (play.mjs referee()), which files each
-    // ruling as a DAO proposal and approves it after the correction window.
-    court: {
-      dao: /^[a-z0-9._-]{2,64}$/.test(env.STATED_COURT_DAO || '') ? env.STATED_COURT_DAO : '',
-    },
+    // The relay, when set, is the only jury member and enforces the correction
+    // window on chain. Its operator remains the play referee account.
+    court,
     play: {
       enabled: env.STATED_PLAY === '1' && Boolean(env.STATED_NEAR_CONTRACT),
       treasury: env.STATED_PLAY_TREASURY || '',

@@ -10,7 +10,8 @@ import { betSourceHeader, predictionSourceHeader } from './bet-source-view.mjs';
 import { consentToPublicBet, followPublicBet, followsFor, nextOpenPublicBet, publicBet, publishBet, readPublicBet, withdrawBetPublication } from './bet-public.mjs';
 import { publishPublicResultEvidence } from './bet-result-evidence.mjs';
 import { readAttestedCheck, runAttestedCheck, verificationRecipe } from './attested-check.mjs';
-import { readEnclaveRuling } from './enclave-ruling.mjs';
+import { createPublicRulingReader, etagMatches } from './public-ruling.mjs';
+import { createReadLimiter } from './public-read-limits.mjs';
 import { modelFace, modelName } from './jury-models.mjs';
 import { courtLine } from './court-pages.mjs';
 import { betBlock, betList, betShareLink, betTerms, betTime, displayBetStatus, markedClaim, nextBetTime } from './bet-view.mjs';
@@ -45,7 +46,10 @@ const refereeRuling = (bet) => (bet.status === 'settled' && (bet.settled_by || b
 const claimWords = (bet, ruling = refereeRuling(bet)) => markedClaim(bet.claim, ruling);
 const claimClass = (claim) => `prop bet-claim${claim.length > 200 ? ' long' : claim.length > 120 ? ' mid' : ''}`;
 
-export function registerBetRoutes({ route, db, config, layout, needUser, needAdmin, isAdmin, needPost, csrfField, send, redirect, notFound, fetchImpl, walletVersion, payVersion, botUsername, chain, quotes = null }) {
+export function registerBetRoutes({ route, db, config, layout, needUser, needAdmin, isAdmin, needPost, csrfField, send, redirect, notFound, fetchImpl, walletVersion, payVersion, botUsername, chain, quotes = null, allowHeavyRead = null }) {
+  const publicRuling = createPublicRulingReader({ recipe: enclaveRecipe });
+  // Standalone route registrars retain a budget; createApp supplies its shared export/ruling budget.
+  const fallbackBudget = createReadLimiter({ railway: config.hosted && Boolean(process.env.RAILWAY_ENVIRONMENT) });
   // DESIGN.md: only the proposer name is bold in the source attribution.
   const sourceHeader = async (viewer, bet) => {
     const header = String(await betSourceHeader(db, viewer, bet, config.x.simulatedOrigin));
@@ -344,14 +348,19 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
   });
 
   route('GET', new RegExp(`^/bets/${ID}/enclave-ruling\\.json$`), async (ctx) => {
-    const record = await db.tx(async tx => {
-      const bet = await readPublicBet(tx, ctx.params[0], config.play);
-      // A signed request contains the full evidence text and cannot be redacted.
-      return bet?.enclave && !bet.evidence?.privateItemCount ? readEnclaveRuling(tx, bet.id) : null;
-    });
-    if (!record) return notFound(ctx);
-    send(ctx.res, 200, JSON.stringify({ record, recipe: enclaveRecipe }), {
-      headers: { 'content-type': 'application/json; charset=utf-8' },
+    if (allowHeavyRead) {
+      if (!allowHeavyRead(ctx)) return;
+    } else {
+      const budget = fallbackBudget(ctx.req);
+      if (!budget.allowed) return send(ctx.res, 429, JSON.stringify({ error: 'Too many downloads. Retry after the indicated delay.' }), {
+        kind: 'private', headers: { 'content-type': 'application/json; charset=utf-8', 'retry-after': String(budget.retryAfter) },
+      });
+    }
+    const result = await db.tx(tx => publicRuling(tx, ctx.params[0]));
+    if (!result) return notFound(ctx);
+    send(ctx.res, etagMatches(ctx.req.headers['if-none-match'], result.etag) ? 304 : 200,
+      etagMatches(ctx.req.headers['if-none-match'], result.etag) ? '' : result.body, {
+      headers: { 'content-type': 'application/json; charset=utf-8', etag: result.etag },
     });
   });
 

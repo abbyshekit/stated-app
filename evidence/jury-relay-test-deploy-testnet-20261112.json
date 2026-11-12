@@ -1,0 +1,28 @@
+{
+  "deployedAt": "2026-11-12T15:27:53.576Z",
+  "network": "testnet",
+  "relay": "relay-test.court-check-feea5b70-a.testnet",
+  "paidBy": "court-check-feea5b70-a.testnet",
+  "transaction": "HsRUJH4Df4JTq4UTb8akNCphtH3iDqPKjgxhFbj6FLnY",
+  "transactionUrl": "https://testnet.nearblocks.io/txns/HsRUJH4Df4JTq4UTb8akNCphtH3iDqPKjgxhFbj6FLnY",
+  "wasmBytes": 155783,
+  "wasmSha256": "18545bdceedd266f5f7e98a9d84b530ed125503a9efb1bac11dc773247ac5a78",
+  "sentYocto": "1757830000000000000000000",
+  "init": {
+    "dao": "stated-court-relaytest.sputnik-v2.testnet",
+    "escrow": "stated-escrow-52081551be.testnet",
+    "operator": "court-check-9c3815e0-b.testnet",
+    "window_seconds": 60
+  },
+  "checks": {
+    "verified": true,
+    "codeMatchesTheBuild": true,
+    "accessKeys": 0,
+    "config": {
+      "dao": "stated-court-relaytest.sputnik-v2.testnet",
+      "escrow": "stated-escrow-52081551be.testnet",
+      "operator": "court-check-9c3815e0-b.testnet",
+      "window_ns": "60000000000"
+    }
+  }
+}

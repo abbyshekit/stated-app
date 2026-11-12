@@ -1,0 +1,64 @@
+{
+  "hardenedAt": "2026-11-12T15:41:23.330Z",
+  "dao": "stated-court.sputnik-v2.testnet",
+  "relay": "jury.stated-court-relay.testnet",
+  "config": {
+    "dao": "stated-court.sputnik-v2.testnet",
+    "escrow": "stated-escrow-52081551be.testnet",
+    "operator": "referee.stated-play-6cf0876dd7.testnet",
+    "window_ns": "600000000000"
+  },
+  "locked": {
+    "wasmSha256": "18545bdceedd266f5f7e98a9d84b530ed125503a9efb1bac11dc773247ac5a78",
+    "codeHash": "2dyPk8eZo38JVZ9tD7dkpJeZZSSEAdEwNNeEjfDKBuio",
+    "accessKeys": 0
+  },
+  "council": "stated-court-18ecdebd.testnet",
+  "proposalId": 2,
+  "proposalTransaction": "4RQSmwqCovH9GXK5psunLfKDmcieZqitP4R8dNWxnDaP",
+  "approvalTransaction": "7WgtDwuT8Uw5KYUrdpS9c83ozGgnCitptE28VT9vNzcv",
+  "proposalStatus": "Approved",
+  "verified": true,
+  "policy": {
+    "roles": [
+      {
+        "name": "jury",
+        "kind": {
+          "Group": [
+            "jury.stated-court-relay.testnet"
+          ]
+        },
+        "permissions": [
+          "call:AddProposal",
+          "call:VoteApprove"
+        ],
+        "vote_policy": {}
+      },
+      {
+        "name": "council",
+        "kind": {
+          "Group": [
+            "stated-court-18ecdebd.testnet"
+          ]
+        },
+        "permissions": [
+          "call:VoteRemove",
+          "call:VoteReject"
+        ],
+        "vote_policy": {}
+      }
+    ],
+    "default_vote_policy": {
+      "weight_kind": "RoleWeight",
+      "quorum": "0",
+      "threshold": [
+        1,
+        2
+      ]
+    },
+    "proposal_bond": "0",
+    "proposal_period": "604800000000000",
+    "bounty_bond": "0",
+    "bounty_forgiveness_period": "86400000000000"
+  }
+}

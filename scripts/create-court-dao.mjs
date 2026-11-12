@@ -1,96 +1,106 @@
-// INTEGRATION: Explicitly invoked, testnet only. Creates Stated Court, the Sputnik DAO that
-// holds the referee seat of new reply Bets, through the sputnik-v2.testnet factory.
-//
-//   COURT_CREATOR_ACCOUNT  the testnet account that pays (about 6 NEAR, plus gas)
-//   COURT_CREATOR_KEY      its full-access key (ed25519:...). Read from the environment only; never printed.
-//
-//   node scripts/create-court-dao.mjs --name stated-court --council alice.testnet,bob.testnet --dry-run
-//   node scripts/create-court-dao.mjs --name stated-court --council alice.testnet,bob.testnet
-//   --jury <account>   the jury member (default: the hosted referee account)
-//
-// The policy has two roles. jury: the referee account, which may only add FunctionCall
-// proposals and vote to approve them. council: may do anything, including voting a ruling down.
-// Each role votes on its own (RoleWeight, more than half), with no proposal bond.
-// The policy JSON shape matches sodalis.sputnik-v2.testnet's get_policy (version 2.0.0).
+// INTEGRATION: Testnet operator command. Dry-run by default; --yes creates a DAO.
+// COURT_CREATOR_ACCOUNT and COURT_CREATOR_KEY come from the environment only.
+// node scripts/create-court-dao.mjs --name stated-court --relay relay.parent.testnet --council council.testnet [--yes]
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadConfig } from '../server/src/config.mjs';
-import { network, transactionLink, accountLink } from '../server/src/near-network.mjs';
-import { nearChain } from '../server/src/play.mjs';
+import { isDeepStrictEqual } from 'node:util';
 
-const FACTORY = 'sputnik-v2.testnet';
-const DEPOSIT_YOCTO = (6n * 10n ** 24n).toString();
-const GAS = 300_000_000_000_000n;
-const DEFAULT_JURY = 'referee.stated-play-6cf0876dd7.testnet';
+export const HOSTED_COURT = Object.freeze({ dao: 'stated-court.sputnik-v2.testnet', escrow: 'stated-escrow-52081551be.testnet',
+  operator: 'referee.stated-play-6cf0876dd7.testnet', council: 'stated-court-18ecdebd.testnet', windowSeconds: 600 });
+export const FACTORY = 'sputnik-v2.testnet';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const argv = process.argv.slice(2);
-const flag = (name) => (argv.includes(name) ? argv[argv.indexOf(name) + 1] : null);
-const fail = (message) => { console.error(message); process.exit(1); };
-const testnetAccount = (id) => /^(?=.{2,64}$)[a-z0-9]+(?:[-_][a-z0-9]+)*(?:\.[a-z0-9]+(?:[-_][a-z0-9]+)*)*\.testnet$/.test(id);
+export const testnetAccount = (id) => typeof id === 'string' && /^(?=.{2,64}$)[a-z0-9]+(?:[-_][a-z0-9]+)*(?:\.[a-z0-9]+(?:[-_][a-z0-9]+)*)*\.testnet$/.test(id);
+export function requireTestnet(env) {
+  if (env.STATED_NEAR_NETWORK && env.STATED_NEAR_NETWORK !== 'testnet') throw new Error('Testnet only. Set STATED_NEAR_NETWORK=testnet.');
+}
+export function operatorError(error, env = process.env) {
+  let message = String(error?.message || error).replace(/ed25519:[A-Za-z0-9]+/g, '[redacted]');
+  for (const [name, value] of Object.entries(env)) {
+    if (/(?:KEY|SECRET|TOKEN|PASSWORD)/i.test(name) && typeof value === 'string' && value.length > 3) message = message.replaceAll(value, '[redacted]');
+  }
+  return message.slice(0, 1000);
+}
+export function flag(argv, name) {
+  if (!argv.includes(name)) return null;
+  const value = argv[argv.indexOf(name) + 1];
+  if (!value || value.startsWith('--')) throw new Error(`${name} requires a value.`);
+  return value;
+}
+export function assertRelayConfig(config, court = HOSTED_COURT) {
+  if (config?.dao !== court.dao || config?.escrow !== court.escrow || config?.operator !== court.operator
+    || String(config?.window_ns) !== String(BigInt(court.windowSeconds) * 1_000_000_000n)) {
+    throw new Error(`Relay configuration must match the DAO, escrow, operator and ${court.windowSeconds}-second window exactly.`);
+  }
+}
 
-loadConfig(process.env); // selects the network
-if (network().id !== 'testnet') fail('Stated Court is created on testnet only. Unset STATED_NEAR_NETWORK.');
-const name = flag('--name');
-const jury = flag('--jury') || DEFAULT_JURY;
-const council = String(flag('--council') || '').split(',').map((s) => s.trim()).filter(Boolean);
-const dryRun = argv.includes('--dry-run');
-if (!name || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name) || `${name}.${FACTORY}`.length > 64) fail('--name takes lowercase letters, digits and hyphens.');
-if (!testnetAccount(jury)) fail('--jury must be a .testnet account.');
-if (!council.length || !council.every(testnetAccount)) fail('--council takes one or more .testnet accounts, comma-separated.');
-if (council.includes(jury)) fail('The jury account cannot also sit on the council.');
+// Sputnik stores role permissions and Group members as hash sets and returns them in hash order, so
+// a policy read back from chain is compared after sorting both (ChangePolicy kinds included).
+export function normalizePolicy(policy) {
+  const copy = structuredClone(policy);
+  for (const role of copy?.roles || []) {
+    if (Array.isArray(role.permissions)) role.permissions.sort();
+    if (Array.isArray(role.kind?.Group)) role.kind.Group.sort();
+  }
+  return copy;
+}
+export const samePolicy = (a, b) => isDeepStrictEqual(normalizePolicy(a), normalizePolicy(b));
+export const sameKind = (a, b) => (a?.ChangePolicy && b?.ChangePolicy
+  ? samePolicy(a.ChangePolicy.policy, b.ChangePolicy.policy) && isDeepStrictEqual(Object.keys(a), Object.keys(b))
+  : isDeepStrictEqual(a, b));
 
-export function courtPolicy({ jury, council }) {
+export function courtPolicy({ relay, council }) {
+  if (!testnetAccount(relay)) throw new Error('A .testnet relay account is required.');
+  if (!Array.isArray(council) || !council.length || !council.every(testnetAccount) || new Set(council).size !== council.length
+    || council.includes(relay)) throw new Error('Council must contain distinct .testnet accounts, excluding the relay.');
+  // Frozen policy: there is deliberately no policy-management permission after hardening.
+  // The immutable relay alone proposes/approves calls; council can only reject or remove them.
   return {
     roles: [
-      { name: 'jury', kind: { Group: [jury] }, permissions: ['call:AddProposal', 'call:VoteApprove'], vote_policy: {} },
-      { name: 'council', kind: { Group: council }, permissions: ['*:*'], vote_policy: {} },
+      { name: 'jury', kind: { Group: [relay] }, permissions: ['call:AddProposal', 'call:VoteApprove'], vote_policy: {} },
+      { name: 'council', kind: { Group: council }, permissions: ['call:VoteReject', 'call:VoteRemove'], vote_policy: {} },
     ],
     default_vote_policy: { weight_kind: 'RoleWeight', quorum: '0', threshold: [1, 2] },
-    proposal_bond: '0',
-    proposal_period: '604800000000000',
-    bounty_bond: '0',
-    bounty_forgiveness_period: '86400000000000',
+    proposal_bond: '0', proposal_period: '604800000000000', bounty_bond: '0', bounty_forgiveness_period: '86400000000000',
   };
 }
 
-const daoArgs = {
-  config: { name, purpose: 'Holds the referee seat for Stated bets. The enclave jury files each ruling here; the council can vote one down before it pays.', metadata: '' },
-  policy: courtPolicy({ jury, council }),
-};
-const createArgs = { name, args: Buffer.from(JSON.stringify(daoArgs)).toString('base64') };
-const dao = `${name}.${FACTORY}`;
-
-console.log(`DAO: ${dao}`);
-console.log(`Factory call: ${FACTORY}.create, attached deposit 6 NEAR, gas 300 Tgas`);
-console.log('DAO arguments:');
-console.log(JSON.stringify(daoArgs, null, 2));
-if (dryRun) {
-  console.log('create arguments (as sent):');
-  console.log(JSON.stringify(createArgs));
-  console.log('Dry run: nothing was sent.');
-  process.exit(0);
+export async function createCourt({ argv = process.argv.slice(2), env = process.env, chain, log = console.log, evidenceRoot = root } = {}) {
+  requireTestnet(env);
+  const name = flag(argv, '--name');
+  const relay = flag(argv, '--relay');
+  const council = String(flag(argv, '--council') || '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (!name || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name) || `${name}.${FACTORY}`.length > 64) throw new Error('--name takes lowercase letters, digits and hyphens.');
+  const dao = `${name}.${FACTORY}`;
+  const daoArgs = { config: { name, purpose: 'Holds the referee seat for Stated bets. The immutable jury relay enforces the council correction window.', metadata: '' },
+    policy: courtPolicy({ relay, council }) };
+  const createArgs = { name, args: Buffer.from(JSON.stringify(daoArgs)).toString('base64') };
+  log(`DAO: ${dao}\nFactory: ${FACTORY}.create; deposit 6 NEAR; gas 300 Tgas\nFrozen policy: no future policy-management permissions.`);
+  log(JSON.stringify(daoArgs, null, 2));
+  if (!argv.includes('--yes') || argv.includes('--dry-run')) {
+    log('Dry run: nothing was sent. Pass --yes to create.');
+    return { dryRun: true, dao, daoArgs, createArgs };
+  }
+  const creator = env.COURT_CREATOR_ACCOUNT;
+  const secret = env.COURT_CREATOR_KEY;
+  if (!testnetAccount(creator) || !secret) throw new Error('Set COURT_CREATOR_ACCOUNT and COURT_CREATOR_KEY.');
+  chain ||= (await import('../server/src/play.mjs')).nearChain();
+  if ((await chain.balance(dao)) != null) throw new Error(`${dao} already exists.`);
+  const balance = await chain.balance(creator);
+  if (balance == null || BigInt(balance) < 65n * 10n ** 23n) throw new Error('Creator needs at least 6.5 test NEAR.');
+  const sent = await chain.call({ signerId: creator, secret, contractId: FACTORY, method: 'create', args: createArgs,
+    depositYocto: String(6n * 10n ** 24n), gas: 300_000_000_000_000n });
+  if (!sent.ok) throw new Error('Factory creation did not reach final success. Inspect the transaction before retrying.');
+  const policy = await chain.view({ contractId: dao, method: 'get_policy' });
+  if (!samePolicy(policy, daoArgs.policy)) throw new Error('Created policy does not match the requested frozen policy.');
+  const evidence = { dao, factory: FACTORY, creator, transactionHash: sent.hash, args: daoArgs, policy, createdAt: new Date().toISOString() };
+  const file = resolve(evidenceRoot, `evidence/court-dao-${name}-${evidence.createdAt.slice(0, 10)}.json`);
+  await mkdir(dirname(file), { recursive: true });
+  await writeFile(file, `${JSON.stringify(evidence, null, 2)}\n`);
+  log(`Created ${dao}; transaction ${sent.hash}; evidence ${file}`);
+  return evidence;
 }
 
-const creator = process.env.COURT_CREATOR_ACCOUNT || '';
-const key = process.env.COURT_CREATOR_KEY || '';
-if (!testnetAccount(creator) || !key) fail('Set COURT_CREATOR_ACCOUNT (a .testnet account with 6.5 NEAR or more) and COURT_CREATOR_KEY.');
-const chain = nearChain();
-if ((await chain.balance(dao)) != null) fail(`${dao} already exists. Choose another --name.`);
-const balance = await chain.balance(creator);
-if (balance == null || BigInt(balance) < BigInt(DEPOSIT_YOCTO) + 5n * 10n ** 23n) fail(`${creator} needs about 6.5 NEAR; it has ${balance ?? 'no account'}.`);
-
-const sent = await chain.call({ signerId: creator, secret: key, contractId: FACTORY, method: 'create', args: createArgs, depositYocto: DEPOSIT_YOCTO, gas: GAS });
-if (!sent.ok) fail(`The factory did not create the DAO: ${sent.failure || 'not accepted'} (transaction ${sent.hash || 'none'})`);
-const policy = await chain.view({ contractId: dao, method: 'get_policy' });
-const version = await chain.view({ contractId: dao, method: 'version' }).catch(() => null);
-console.log(`Created ${dao} in ${transactionLink(sent.hash)}`);
-console.log('get_policy:');
-console.log(JSON.stringify(policy, null, 2));
-const date = new Date().toISOString().slice(0, 10);
-const file = resolve(root, `evidence/court-dao-${name}-${date}.json`);
-await mkdir(dirname(file), { recursive: true });
-await writeFile(file, `${JSON.stringify({ dao, factory: FACTORY, version, creator, transactionHash: sent.hash,
-  transaction: transactionLink(sent.hash), account: accountLink(dao), args: daoArgs, policy, createdAt: new Date().toISOString() }, null, 2)}\n`);
-console.log(`Evidence: ${file}`);
-console.log(`Set STATED_COURT_DAO=${dao} on the server.`);
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  createCourt().catch((error) => { console.error(operatorError(error)); process.exitCode = 1; });
+}

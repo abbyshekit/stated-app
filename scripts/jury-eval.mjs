@@ -13,7 +13,7 @@ if (!casesPath || !process.env.NEARAI_API_KEY) {
   process.exit(2);
 }
 const base = String(process.env.NEARAI_BASE_URL || 'https://cloud-api.near.ai/v1').replace(/\/$/, '');
-const models = String(process.env.NEARAI_RULING_MODELS || 'Qwen/Qwen3.8-27B,Qwen/Qwen3.6-35B-A3B-FP8,deepseek-ai/DeepSeek-V4.1-Flash-1017')
+const models = String(process.env.NEARAI_RULING_MODELS || 'Qwen/Qwen3.8-27B,deepseek-ai/DeepSeek-V4.1-Flash-1017,z-ai/glm-5.3-flash')
   .split(',').map((m) => m.trim()).filter(Boolean);
 const minConfidence = Number(process.env.NEARAI_RULING_MIN_CONFIDENCE || 0.8);
 const jury = { models, minConfidence };

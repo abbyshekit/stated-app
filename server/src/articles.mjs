@@ -9,9 +9,12 @@ import net from 'node:net';
 import { articleClaimCue, interpret } from './interpret.mjs';
 import { addInbox, ensureDesk, UserError, userByXId } from './store.mjs';
 import { insertSave, isXUrl, statusIdOf, upsertStatement, upsertXSource, upsertXStatement } from './intake.mjs';
-import { INTAKES_PER_HOUR, intakesInLastHour } from './limits.mjs';
+import { INTAKES_PER_HOUR, reserveIntake } from './limits.mjs';
 import { postFetcher, postText } from './xapi.mjs';
 import { storesAllXText, xClaimText } from './xtext.mjs';
+import { elementRanges, MAX_ATTRIBUTE, MAX_METADATA, plainMarkup, scanHtml, stripElements } from './article-scan.mjs';
+import { pageFetchSlots } from './page-limits.mjs';
+import { extractInWorker } from './extraction-pool.mjs';
 
 function v4Parts(addr) {
   return addr.split('.').map(Number);
@@ -117,7 +120,8 @@ function requestOnce(url, { allowLoopback, timeoutMs, maxBytes, userAgent, signa
     }, (res) => {
       const status = res.statusCode || 0;
       if (status >= 300 && status < 400) {
-        res.resume();
+        // Do not leave an unbounded redirect body draining after releasing this hop.
+        res.destroy();
         return resolve({ status, location: res.headers.location || '', headers: res.headers, body: '' });
       }
       const type = String(res.headers['content-type'] || '');
@@ -149,6 +153,13 @@ function requestOnce(url, { allowLoopback, timeoutMs, maxBytes, userAgent, signa
 }
 
 export async function safeFetch(raw, options = {}) {
+  const release = await pageFetchSlots.acquire({ signal: options.signal, timeoutMs: options.queueTimeoutMs });
+  try {
+    return await fetchPage(raw, options);
+  } finally { release(); }
+}
+
+async function fetchPage(raw, options) {
   const opts = {
     allowLoopback: Boolean(options.allowLoopback),
     timeoutMs: options.timeoutMs || 8000,
@@ -181,33 +192,41 @@ const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', 
 
 function decode(text) {
   return String(text || '')
-    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
-    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
+    .replace(/&#(?:x([0-9a-f]+)|(\d+));/gi, (_, h, d) => {
+      const code = h ? parseInt(h, 16) : Number(d);
+      return code > 0 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff) ? String.fromCodePoint(code) : '�';
+    })
     .replace(/&([a-z]+);/gi, (m, name) => ENTITIES[name.toLowerCase()] ?? m);
 }
 
 function textOf(html) {
-  return decode(String(html || '').replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+  return decode(plainMarkup(String(html || ''))).replace(/\s+/g, ' ').trim();
 }
 
-function metaContent(html, attr, name) {
-  const re = new RegExp(`<meta[^>]+${attr}=["']${name}["'][^>]*>`, 'i');
-  const tag = html.match(re)?.[0];
-  if (!tag) return null;
-  return decode(tag.match(/content=["']([^"']*)["']/i)?.[1] || '') || null;
+function metaContent(tokens, attr, name) {
+  const tag = tokens.find((token) => token.tag === 'meta' && token.attrs?.[attr]?.toLowerCase() === name);
+  return decode(tag?.attrs.content || '') || null;
 }
 
 function jsonLd(html) {
   const out = {};
-  for (const m of html.matchAll(/<script[^>]+application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi)) {
+  let used = 0;
+  for (const token of elementRanges(html, new Set(['script']))) {
+    if (token.attrs.type?.toLowerCase() !== 'application/ld+json') continue;
+    const size = token.contentEnd - token.end;
+    // Bound both an individual JSON document and aggregate parse work.
+    if (size > MAX_METADATA || used + size > MAX_METADATA * 4) continue;
+    used += size;
     try {
-      const data = JSON.parse(m[1]);
-      const items = Array.isArray(data) ? data : (data['@graph'] || [data]);
+      const data = JSON.parse(html.slice(token.end, token.contentEnd));
+      const items = Array.isArray(data) ? data : (data?.['@graph'] || [data]);
       for (const item of items) {
+        if (!item || typeof item !== 'object') continue;
         const author = Array.isArray(item.author) ? item.author[0] : item.author;
-        if (!out.author && author) out.author = typeof author === 'string' ? author : author.name;
-        if (!out.published && item.datePublished) out.published = item.datePublished;
-        if (!out.headline && item.headline) out.headline = item.headline;
+        const name = typeof author === 'string' ? author : author?.name;
+        if (!out.author && typeof name === 'string') out.author = name.slice(0, MAX_ATTRIBUTE);
+        if (!out.published && typeof item.datePublished === 'string') out.published = item.datePublished.slice(0, MAX_ATTRIBUTE);
+        if (!out.headline && typeof item.headline === 'string') out.headline = item.headline.slice(0, MAX_ATTRIBUTE);
         if (!out.body && typeof item.articleBody === 'string' && item.articleBody.length > 200) out.body = item.articleBody;
       }
     } catch {
@@ -219,24 +238,12 @@ function jsonLd(html) {
 
 // Chrome that never holds the story: navigation, headers, footers, sidebars,
 // forms and dialogs are dropped before paragraphs are read.
-const CHROME_BLOCKS = /<(nav|header|footer|aside|form|dialog|menu)(?=[\s>/])[^>]*>[\s\S]*?<\/\1>/gi;
+const CHROME_BLOCKS = new Set('nav header footer aside form dialog menu'.split(' '));
 
 // The outermost <article> elements, found by depth so an article nested in
 // another (a related-story card) does not cut the outer one short.
 function articleBlocks(html) {
-  const blocks = [];
-  let depth = 0;
-  let start = -1;
-  for (const m of html.matchAll(/<(\/?)article\b[^>]*>/gi)) {
-    if (!m[1]) {
-      if (depth === 0) start = m.index + m[0].length;
-      depth += 1;
-    } else if (depth > 0) {
-      depth -= 1;
-      if (depth === 0 && start >= 0) blocks.push(html.slice(start, m.index));
-    }
-  }
-  return blocks;
+  return elementRanges(html, new Set(['article'])).map((token) => html.slice(token.end, token.contentEnd));
 }
 
 const tokensOf = (s) => new Set(String(s || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter((w) => w.length > 2));
@@ -246,7 +253,9 @@ const tokensOf = (s) => new Set(String(s || '').toLowerCase().replace(/[^a-z0-9 
 // at least three other long headings share its level, only that story's
 // section is read, up to the next heading of the same or a higher level.
 function storySection(html, title) {
-  const heads = [...html.matchAll(/<h([1-4])\b[^>]*>([\s\S]*?)<\/h\1>/gi)].map((m) => ({ at: m.index, end: m.index + m[0].length, level: Number(m[1]), text: textOf(m[2]) }));
+  const heads = elementRanges(html, new Set(['h1', 'h2', 'h3', 'h4'])).map((token) => ({
+    at: token.start, end: token.outerEnd, level: Number(token.tag[1]), text: textOf(html.slice(token.end, token.contentEnd)),
+  }));
   if (heads.length < 2 || !title) return html;
   const want = tokensOf(title);
   let best = null;
@@ -269,9 +278,9 @@ function storySection(html, title) {
 function paragraphsIn(html) {
   const out = [];
   // List items count when they read as sentences: body text sits in <li> on pages that bullet their points.
-  for (const m of html.matchAll(/<(p|li)\b[^>]*>([\s\S]*?)<\/\1>/gi)) {
-    const t = textOf(m[2]);
-    const keep = m[1].toLowerCase() === 'p' ? t.length > 30 : (t.length >= 100 && /[.!?”"]\s*$|\.\s+[A-Z]/.test(t));
+  for (const token of elementRanges(html, new Set(['p', 'li']))) {
+    const t = textOf(html.slice(token.end, token.contentEnd));
+    const keep = token.tag === 'p' ? t.length > 30 : (t.length >= 100 && /[.!?”"]\s*$|\.\s+[A-Z]/.test(t));
     if (keep && out[out.length - 1] !== t) out.push(t);
   }
   return out;
@@ -279,56 +288,34 @@ function paragraphsIn(html) {
 
 // Long text that is not in <p> tags (a story in one <div> or <span>).
 function blockTexts(html) {
-  const lines = decode(html.replace(/<\/(?:p|h[1-6]|li|blockquote|td|tr|div|section|article|figcaption|ul|ol|table)>|<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, ' ')).split('\n');
+  const lines = decode(plainMarkup(html, new Set('p h1 h2 h3 h4 h5 h6 li blockquote td tr div section article figcaption ul ol table br'.split(' ')))).split('\n');
   return lines.map((l) => l.replace(/\s+/g, ' ').trim()).filter((l) => l.length >= 300);
 }
 
 const lengthOf = (list) => list.reduce((n, p) => n + p.length, 0);
 
 function withoutHiddenElements(source) {
-  const chunks = [];
-  let cursor = 0; let hiddenTag = null; let depth = 0;
-  // Track nesting so a hidden wrapper's inner closing tag cannot expose its tail.
-  for (const match of source.matchAll(/<(\/?)([a-z][\w:-]*)\b(?:[^<>"']|"[^"]*"|'[^']*')*>/gi)) {
-    const [tag, closing, name] = match;
-    const lower = name.toLowerCase();
-    if (hiddenTag) {
-      if (lower === hiddenTag) depth += closing ? -1 : 1;
-      if (!depth) { hiddenTag = null; cursor = match.index + tag.length; }
-      continue;
-    }
-    if (closing) continue;
-    const attributes = [...tag.matchAll(/\s([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g)];
-    const hidden = attributes.some(([, attr, double, single, bare]) => attr.toLowerCase() === 'hidden'
-      || (attr.toLowerCase() === 'aria-hidden' && decode(double ?? single ?? bare ?? '').trim().toLowerCase() === 'true'));
-    if (!hidden) continue;
-    chunks.push(source.slice(cursor, match.index));
-    cursor = match.index + tag.length;
-    if (!/^(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)$/.test(lower)) {
-      hiddenTag = lower; depth = 1;
-    }
-  }
-  if (!hiddenTag) chunks.push(source.slice(cursor));
-  return chunks.join(' ');
+  return stripElements(source, new Set(), { hidden: true, decodeAttribute: decode });
 }
 
 export function extractArticle(html, finalUrl, { visibleOnly = false } = {}) {
   const source = String(html || '');
   const ld = visibleOnly ? {} : jsonLd(source);
-  const markup = source
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/<(script|style|noscript|template|svg)[\s\S]*?<\/\1>/gi, ' ');
+  const markup = stripElements(source, new Set(['script', 'style', 'noscript', 'template', 'svg']));
   const clean = visibleOnly ? withoutHiddenElements(markup) : markup;
-  const canonical = clean.match(/<link[^>]+rel=["']canonical["'][^>]*>/i)?.[0]?.match(/href=["']([^"']+)["']/i)?.[1];
-  const title = metaContent(clean, 'property', 'og:title') || (!visibleOnly && ld.headline) || textOf(clean.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '') || null;
-  const byline = metaContent(clean, 'name', 'author') || metaContent(clean, 'property', 'article:author') || ld.author || null;
-  const published = metaContent(clean, 'property', 'article:published_time') || ld.published
-    || clean.match(/<time[^>]+datetime=["']([^"']+)["']/i)?.[1] || null;
-  const site = metaContent(clean, 'property', 'og:site_name') || new URL(finalUrl).hostname.replace(/^www\./, '');
+  const tokens = scanHtml(clean);
+  const canonical = tokens.find((token) => token.tag === 'link' && token.attrs?.rel?.toLowerCase() === 'canonical')?.attrs.href;
+  const titleRange = elementRanges(clean, new Set(['title']))[0];
+  const title = metaContent(tokens, 'property', 'og:title') || (!visibleOnly && ld.headline)
+    || (titleRange && textOf(clean.slice(titleRange.end, Math.min(titleRange.contentEnd, titleRange.end + MAX_ATTRIBUTE)))) || null;
+  const byline = metaContent(tokens, 'name', 'author') || metaContent(tokens, 'property', 'article:author') || ld.author || null;
+  const published = metaContent(tokens, 'property', 'article:published_time') || ld.published
+    || tokens.find((token) => token.tag === 'time' && token.attrs?.datetime)?.attrs.datetime || null;
+  const site = metaContent(tokens, 'property', 'og:site_name') || new URL(finalUrl).hostname.replace(/^www\./, '');
 
   // Read the story, not the page: the article element with the most paragraph
   // text, cut to the section the title names, with page chrome removed.
-  const stripped = clean.replace(CHROME_BLOCKS, ' ');
+  const stripped = stripElements(clean, new Set([...CHROME_BLOCKS, 'head', 'title']));
   const articles = articleBlocks(stripped).map((h) => ({ h, n: lengthOf(paragraphsIn(h)) })).sort((a, b) => b.n - a.n);
   const scope = articles.length && articles[0].n >= 300 ? articles[0].h : stripped;
   let paragraphs = paragraphsIn(storySection(scope, title));
@@ -341,10 +328,20 @@ export function extractArticle(html, finalUrl, { visibleOnly = false } = {}) {
   }
   if (!visibleOnly && lengthOf(paragraphs) < 1500) {
     const have = paragraphs.join(' ');
-    const extra = blockTexts(storySection(scope, title)).filter((b) => !have.includes(b.slice(0, 80)));
+    const blocks = blockTexts(storySection(scope, title));
+    const prefixes = new Set(blocks.map((block) => block.slice(0, 80)));
+    const present = new Set();
+    for (let at = 0; at + 80 <= have.length; at += 1) {
+      const prefix = have.slice(at, at + 80);
+      if (prefixes.has(prefix)) present.add(prefix);
+    }
+    const extra = blocks.filter((block) => !present.has(block.slice(0, 80)));
     if (extra.length && lengthOf(extra) > lengthOf(paragraphs)) { paragraphs = extra; from = 'text-blocks'; }
   }
-  if (!visibleOnly && !paragraphs.length) paragraphs = [textOf(clean.match(/<body[^>]*>([\s\S]*)<\/body>/i)?.[1] || clean)];
+  if (!visibleOnly && !paragraphs.length) {
+    const body = elementRanges(stripped, new Set(['body']))[0];
+    paragraphs = [textOf(body ? stripped.slice(body.end, body.contentEnd) : stripped)];
+  }
   let canonicalUrl = finalUrl;
   try {
     if (canonical) canonicalUrl = new URL(canonical, finalUrl).toString();
@@ -568,6 +565,7 @@ export function sameSiteCanonical(canonical, fetchedUrl) {
 }
 
 export async function createIntake(db, { ownerXUserId, url, route }) {
+  if (route !== 'editorial') return reserveIntake(db, { ownerXUserId, url, route });
   return db.one(
     `insert into url_intakes (owner_x_user_id, url, route, status) values ($1, $2, $3, 'queued') returning *`,
     [ownerXUserId, url, route],
@@ -584,7 +582,7 @@ export async function runIntake(db, config, intakeId) {
       maxBytes: config.fetch.maxBytes,
       userAgent: `StatedBot/0.1 (+${config.baseUrl})`,
     });
-    const article = extractArticle(page.body, page.url);
+    const article = await extractInWorker('article', page.body, page.url);
     // The record is keyed on the page's own address (or its canonical form,
     // when that names the same page). An existing record's title, author and
     // text are never changed by a later fetch.
@@ -723,41 +721,45 @@ async function saveXLink(db, config, owner, url, x) {
   if (!x) {
     throw new UserError('Stated reads X posts through its X connection, which is not set up on this server yet. Tag the bot under the post on X instead.', 503);
   }
-  const fetched = await postFetcher(x)(id);
-  if (!fetched) throw new UserError('Unable to read that post. It may be deleted, or from a protected account.');
-  const bot = await x.identity();
-  await db.query(`insert into url_intakes (owner_x_user_id, url, route, status) values ($1, $2, 'web', 'selected')`, [owner.x_user_id, url]);
-  return db.tx(async (tx) => {
-    const keepWords = storesAllXText(config);
-    const body = postText(fetched.post);
-    const source = await upsertXSource(tx, fetched.post, fetched.author, 'mention', { text: keepWords ? body : '' });
-    const statement = await upsertXStatement(tx, source, {
-      claim: xClaimText(body, bot.username),
-      keepWords,
-      speaker: fetched.author?.username ? `@${fetched.author.username}` : 'Unknown author',
-      speakerXUserId: fetched.post.author_id,
-      publishedAt: fetched.post.created_at ? new Date(fetched.post.created_at) : new Date(),
+  // X reservations count immediately but must never enter the article worker's queue.
+  const reservation = await reserveIntake(db, { ownerXUserId: owner.x_user_id, url, route: 'web', status: 'selected' });
+  try {
+    const fetched = await postFetcher(x)(id);
+    if (!fetched) throw new UserError('Unable to read that post. It may be deleted, or from a protected account.');
+    const bot = await x.identity();
+    return await db.tx(async (tx) => {
+      const keepWords = storesAllXText(config);
+      const body = postText(fetched.post);
+      const source = await upsertXSource(tx, fetched.post, fetched.author, 'mention', { text: keepWords ? body : '' });
+      const statement = await upsertXStatement(tx, source, {
+        claim: xClaimText(body, bot.username),
+        keepWords,
+        speaker: fetched.author?.username ? `@${fetched.author.username}` : 'Unknown author',
+        speakerXUserId: fetched.post.author_id,
+        publishedAt: fetched.post.created_at ? new Date(fetched.post.created_at) : new Date(),
+      });
+      const { save, created } = await insertSave(tx, {
+        ownerXUserId: owner.x_user_id,
+        owner,
+        statement,
+        relation: fetched.post.author_id === owner.x_user_id ? 'mine' : 'following',
+        visibility: 'private',
+        intake: 'url',
+        source,
+      });
+      return { kind: 'x', save, created };
     });
-    const { save, created } = await insertSave(tx, {
-      ownerXUserId: owner.x_user_id,
-      owner,
-      statement,
-      relation: fetched.post.author_id === owner.x_user_id ? 'mine' : 'following',
-      visibility: 'private',
-      intake: 'url',
-      source,
-    });
-    return { kind: 'x', save, created };
-  });
+  } catch (error) {
+    await db.query(`update url_intakes set status = 'failed', error = $2 where id = $1`,
+      [reservation.id, error instanceof UserError ? error.message : 'Unable to read that post.']);
+    throw error;
+  }
 }
 
 export async function personIntake(db, config, user, url, route = 'web', { x = null } = {}) {
   checkUrl(url, { allowLoopback: config.fetch.allowLoopback });
   const owner = await userByXId(db, user.x_user_id);
   if (!owner) throw new UserError('Sign in first.', 401);
-  if ((await intakesInLastHour(db, owner.x_user_id)) >= INTAKES_PER_HOUR) {
-    throw new UserError(`You have tracked ${INTAKES_PER_HOUR} links in the last hour. Try again later.`, 429);
-  }
   if (statusIdOf(url)) return saveXLink(db, config, owner, url, x);
   if (isXUrl(url)) throw new UserError('Paste a link to a single post (x.com/…/status/…) or to an article.');
   const intake = await createIntake(db, { ownerXUserId: owner.x_user_id, url, route });

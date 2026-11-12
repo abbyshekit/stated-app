@@ -5,11 +5,84 @@ import { sha256 } from '../server/src/attested-signature.mjs';
 import { INTEL_SGX_ROOT_CA_PEM, parseTdxQuote } from '../server/src/tdx-quote.mjs';
 import { getGpuJwks, verifyGpuPayload } from '../server/src/gpu-attestation.mjs';
 import { verifyWithDstack, dstackPasses, validateDstackVerifierUrl } from '../server/src/dstack-verifier.mjs';
+import { fingerprint } from '../server/src/canonical.mjs';
+import { proposalKind } from '../server/src/court-dao.mjs';
 
 const DEFAULT_BASE = 'https://stated-production.up.railway.app';
 const DEFAULT_BET = 'c171de89-f223-4309-886e-180ad69af092';
 export const DEFAULT_DSTACK_VERIFIER = 'https://dstack-verifier-production.up.railway.app';
 const UUID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
+const COURT_RPC = ['https://archival-rpc.testnet.fastnear.com', 'https://archival-rpc.testnet.near.org'];
+const COURT_DAO = 'stated-court.sputnik-v2.testnet';
+const COURT_ESCROW = 'stated-escrow-52081551be.testnet';
+
+async function archivalCourtView(dao, method, args, fetchImpl) {
+  const errors = [];
+  for (const url of COURT_RPC) {
+    try {
+      const response = await fetchImpl(url, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(30_000),
+        headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 'court-ruling', method: 'query',
+          params: { request_type: 'call_function', finality: 'final', account_id: dao, method_name: method,
+            args_base64: Buffer.from(JSON.stringify(args)).toString('base64') } }) });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const chunks = []; let size = 0;
+      if (!response.body) throw new Error('RPC response has no body');
+      for await (const chunk of response.body) {
+        size += chunk.length;
+        if (size > 5_000_000) throw new Error('Court RPC response exceeds size limit');
+        chunks.push(chunk);
+      }
+      const reply = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      if (reply.error || reply.result?.error || !Array.isArray(reply.result?.result)) throw new Error('Court RPC did not return a view result');
+      return JSON.parse(Buffer.from(reply.result.result).toString('utf8'));
+    } catch (error) { errors.push(`${url}: ${error.message}`); }
+  }
+  throw new Error(errors.join('; '));
+}
+
+/** Anchors the exact fetched document.record, using canonicalJson UTF-8 with
+ * sorted object keys and no trailing newline, just as court-dao.mjs does. */
+export async function verifyCourtProposal(record, betId, add, { fetchImpl = fetch, dao = COURT_DAO, escrow = COURT_ESCROW } = {}) {
+  try {
+    let end = Number(await archivalCourtView(dao, 'get_last_proposal_id', {}, fetchImpl));
+    if (!Number.isSafeInteger(end) || end < 0) throw new Error('Invalid court proposal count');
+    let proposal;
+    while (end > 0 && !proposal) {
+      const from = Math.max(0, end - 100);
+      const rows = await archivalCourtView(dao, 'get_proposals', { from_index: from, limit: end - from }, fetchImpl);
+      if (!Array.isArray(rows)) throw new Error('Invalid court proposal list');
+      // Identify by Bet id before validating the action, so a changed outcome,
+      // receiver, deposit or method cannot be mistaken for a missing proposal.
+      proposal = rows.reverse().find(row => row?.kind?.FunctionCall?.actions?.some(action => {
+        try { return JSON.parse(Buffer.from(action.args, 'base64').toString('utf8'))?.id === betId; }
+        catch { return false; }
+      }));
+      end = from;
+    }
+    if (!proposal) {
+      // A Bet made before the Court existed names the server's referee account: no proposal applies.
+      let referee = null;
+      try { referee = (await archivalCourtView(escrow, 'get_bet', { id: betId }, fetchImpl))?.referee ?? null; } catch { /* unknown */ }
+      if (typeof referee === 'string' && referee && referee !== dao) {
+        add('N/A', 'Court proposal', `Bet ${betId} names ${referee} as its referee, not ${dao}, so no Court proposal applies.`);
+      } else add('NOT CHECKED', 'Court proposal', `Bet ${betId} has no court proposal on ${dao}.`);
+      return;
+    }
+    const expected = record.outcome === 'unclear' ? 'void' : record.outcome;
+    if (!['yes', 'no', 'void'].includes(expected)
+      || fingerprint(proposal.kind) !== fingerprint(proposalKind({ nearContract: escrow }, betId, expected))) {
+      add('FAIL', 'Court proposal', `Proposal ${proposal.id} does not resolve this Bet with the recorded outcome and exact escrow action.`);
+      return;
+    }
+    const hashes = [...String(proposal.description || '').matchAll(/\bruling sha256:([a-f0-9]{64})(?=\s|$)/g)].map(match => match[1]);
+    const digest = fingerprint(record);
+    if (hashes.length !== 1 || hashes[0] !== digest) {
+      add('FAIL', 'Court proposal', `Proposal ${proposal.id} does not carry the SHA-256 of the fetched ruling record (${digest}).`);
+      return;
+    }
+    add('PASS', 'Court proposal', `${dao} proposal ${proposal.id} resolves Bet ${betId} as ${expected} and anchors ruling sha256:${digest}.`);
+  } catch (error) { add('FAIL', 'Court proposal', `Could not read or validate the court proposal: ${error.message}`); }
+}
 
 export function parseVerifierArguments(args, env = process.env) {
   const positional = [];
@@ -30,9 +103,10 @@ export function parseVerifierArguments(args, env = process.env) {
 function finish(checks) {
   const passed = checks.filter(check => check.status === 'PASS').length;
   const failed = checks.filter(check => check.status === 'FAIL').length;
-  const notChecked = checks.length - passed - failed;
-  return { exitCode: failed ? 1 : 0, checks, passed, failed, notChecked,
-    summary: `${passed} checks passed, ${failed} failed, ${notChecked} not checked` };
+  const notApplicable = checks.filter(check => check.status === 'N/A').length;
+  const notChecked = checks.length - passed - failed - notApplicable;
+  return { exitCode: failed ? 1 : 0, checks, passed, failed, notChecked, notApplicable,
+    summary: `${passed} checks passed, ${failed} failed, ${notChecked} not checked${notApplicable ? `, ${notApplicable} not applicable` : ''}` };
 }
 
 // Decode once: a claim containing the literal "&quot;" is escaped as "&amp;quot;".
@@ -221,6 +295,7 @@ export async function verifyHostedEnclaveRuling(base = DEFAULT_BASE, betId = DEF
     return finish(checks);
   }
   add('PASS', 'Bet coverage', `Signed material lists Bet ${betId}; signed terms hash ${coveredBet.termsHash}`);
+  await verifyCourtProposal(record, betId, add, { fetchImpl });
   try { await verifyRulingAttestations(record, add, { fetchImpl, jwks, dstackVerifierUrl }); }
   catch (error) { add('FAIL', 'Quote measurements', error.message); }
 

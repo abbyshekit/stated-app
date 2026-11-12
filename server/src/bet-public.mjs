@@ -173,6 +173,8 @@ export async function readPublicBet(tx, id, { evidenceWindowSeconds = 86400 } = 
   const submitted = record?.evidence.kind === 'submitted' ? record.evidence : null;
   const visibleIds = new Set(rows.map(item => String(item.id)));
   const privateItemCount = (submitted?.items || []).filter(item => !visibleIds.has(String(item.id))).length;
+  // A juror's reason can quote evidence from a private Bet on the same post: then the page shows no reason.
+  if (bet.enclave && privateItemCount) bet.enclave.reason = null;
   if (post?.source === 'evidence' || rows.length || submitted) {
     const closesAt = timestamp(post?.closes_at || submitted?.closesAt
       || new Date(new Date(bet.resolve_at).getTime() + evidenceWindowSeconds * 1000));
@@ -322,14 +324,23 @@ export async function publishBet(db, user, id) {
   });
 }
 
+// The note a post's shared Result carries while any Bet on it is private (schema.sql uses the same words).
+const PRIVATE_RESULT_NOTE = 'Result recorded. Bet evidence stays on its Bet page.';
+
 export async function withdrawBetPublication(db, user, id) {
   const ref = reference(id);
   return db.tx(async (tx) => {
     const owner = await actor(tx, user);
+    // The post's shared Result changes below, so its statement is locked before the Bet, as finalizing does.
+    const post = await tx.one('select s.statement_id from bilateral_bets b join saves s on s.id=b.source_save_id where b.id=$1', [ref]);
+    if (post) await tx.query('select id from statements where id=$1 for update', [post.statement_id]);
     const bet = await tx.one('select creator_user_id from bilateral_bets where id=$1 for update', [ref]);
     if (!bet || String(bet.creator_user_id) !== owner) throw new UserError('Only the creator can withdraw this publication.', 404);
     await tx.query(`update bilateral_bet_publications set withdrawn_at=coalesce(withdrawn_at,clock_timestamp())
       where bet_id=$1 and creator_user_id=$2`, [ref, owner]);
+    // Every public save of this post shows its Result fields; once this Bet is private they may not carry its evidence.
+    if (post) await tx.query(`update statements set resolution_url=null, resolution_note=$2
+      where id=$1 and (resolution_url is not null or resolution_note is not null)`, [post.statement_id, PRIVATE_RESULT_NOTE]);
     return { id: ref, published: false };
   });
 }

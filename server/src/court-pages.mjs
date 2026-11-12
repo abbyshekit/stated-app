@@ -51,7 +51,9 @@ export function registerCourtRoutes({ route, db, config, layout, send, notFound,
     const body = html`
       <h1>Stated Court</h1>
       <p class="lead"><a class="tl" href="${accountLink(dao)}" rel="noopener noreferrer">${dao}</a> is a Sputnik DAO on NEAR that holds the referee seat of new reply bets.</p>
-      <p class="gut">The enclave jury files each ruling here as a proposal to settle the bet. The council can vote one down before it pays; otherwise the jury approves it after the correction window and the DAO settles the bet.</p>
+      ${config.court?.relay ? html`<p class="gut">The jury files each ruling through a contract that cannot approve it until ${config.play?.settleDelaySeconds === 600 ? 'ten minutes' : `${config.play?.settleDelaySeconds} seconds`} have passed. The council can only vote a ruling down or remove it. Nobody can change these rules.</p>
+        <p class="meta">Relay: <a class="tl" href="${accountLink(config.court.relay)}" rel="noopener noreferrer">${config.court.relay}</a></p>`
+        : html`<p class="gut">The enclave jury files each ruling here as a proposal to settle the bet. The council can vote one down before it pays; otherwise the jury approves it after the correction window and the DAO settles the bet.</p>`}
       <h2>Members</h2>
       <ul class="posts evidence-list">${(policy.roles || []).map((role) => html`<li class="prow"><div>
         <p class="pwho"><b>${role.name}</b></p>

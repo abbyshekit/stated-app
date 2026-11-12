@@ -44,8 +44,8 @@ export function dstackVerificationLines(record) {
   const versions = [...new Set(results.map(result => result.osImageVersion))];
   if (versions.length !== 1 || !versions[0]) return [];
   return [
-    `Boot measurements match the published dstack OS ${versions[0]} image, production build, checked by the official dstack verifier.`,
-    'Intel TCB is up to date with no security advisories.',
+    `When this ruling was made, the official dstack verifier reported that the boot measurements match the published dstack OS ${versions[0]} image, production build.`,
+    'It also reported the Intel TCB up to date with no security advisories. The command below asks the verifier again.',
   ];
 }
 
@@ -161,8 +161,8 @@ export function registerBetRulingRoutes({ route, db, config, layout, send, notFo
       <details class="fold"><summary>Check it yourself</summary>
         <p>Each verdict was signed inside an Intel TDX enclave, and every signature checked out.</p>
         <ul class="posts evidence-list">${verified.map(line => html`<li class="prow"><div>${line}</div></li>`)}</ul>
-        ${dstackLines.length ? dstackLines.map(line => html`<p>${line}</p>`) : html`<p class="quiet">Not checked: enclave measurements against a published list, TCB level and revocation${gpuVerified ? '' : ', the GPU’s own attestation'}.</p>`}
-        ${dstackLines.length && !gpuVerified ? html`<p class="quiet">Not checked: the GPU’s own attestation.</p>` : ''}
+        ${dstackLines.length ? dstackLines.map(line => html`<p>${line}</p>`) : html`<p class="quiet">Not checked when this ruling was made: enclave measurements against a published list, TCB level and revocation${gpuVerified ? '' : ', the GPU’s own attestation'}. The command below checks the stored reports for them now.</p>`}
+        ${dstackLines.length && !gpuVerified ? html`<p class="quiet">Not checked when this ruling was made: the GPU’s own attestation. The command below checks the stored evidence for it now.</p>` : ''}
         <p>${record.mode === 'review'
           ? `Every model has to agree at ${percent(record.minConfidence)} or more for the jury to give a verdict. A second opinion does not change the payout.`
           : `Every model has to agree at ${percent(record.minConfidence)} or more, or both stakes go back.`}</p>

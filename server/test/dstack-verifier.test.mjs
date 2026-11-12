@@ -176,27 +176,20 @@ test('completion stores gateway and signing model results and feature-off record
   assert.equal(off.seen.length, 0);
 });
 
-test('completion rejects a negative verdict and malformed replies, but retains unavailable errors', async () => {
+test('completion fails closed on a negative verdict, a malformed reply, an old TCB or an unreachable verifier', async () => {
   for (const response of [reply({}, { is_valid: false, reason: 'Quote rejected' }),
     reply({ os_image_is_dev: true }), reply({ os_image_hash_verified: false })]) {
     await assert.rejects(complete({ response }), /dstack .*verification failed/);
   }
-  // A TCB recovery is recorded, not fatal: the boot image still verified.
-  const outOfDate = await complete({ response: reply({ tcb_status: 'OutOfDate' }) });
-  assert.equal(outOfDate.record.dstack.model.tcbStatus, 'OutOfDate');
-  assert.equal(dstackPasses(outOfDate.record.dstack.model), false, 'the page does not claim an up-to-date TCB');
+  // The boot image verified, but the Intel TCB is behind: no verdict from this call.
+  await assert.rejects(complete({ response: reply({ tcb_status: 'OutOfDate' }) }), /dstack (?:gateway|model) verification failed: Intel TCB status is OutOfDate/);
   await assert.rejects(complete({ malformed: true }), /dstack/);
   await assert.rejects(complete({ response: reply({}, { is_valid: false, reason: 'Quote rejected' }), responseStatus: 500 }), /Quote rejected/);
-  const { record, seen } = await complete({ unreachable: true });
-  assert.equal(seen.length, 2);
-  for (const result of Object.values(record.dstack)) {
-    assert.equal(result.verifier, URL);
-    assert.match(result.error, /request failed/);
-  }
-  assert.doesNotThrow(() => verifyAttestedRecord(record));
+  // Unreachable is an infrastructure failure: it rejects as unavailable, and the caller retries later.
+  await assert.rejects(complete({ unreachable: true }), error => error.unavailable === true);
 });
 
-test('either report can reject the call and verifier timeouts remain optional', async (t) => {
+test('either report can reject the call, and a verifier timeout fails it', async (t) => {
   for (const failedReport of [1, 2]) {
     await assert.rejects(complete({ response: index => index === failedReport
       ? reply({}, { is_valid: false, reason: 'Rejected report' }) : reply() }), /Rejected report/);
@@ -211,7 +204,7 @@ test('either report can reject the call and verifier timeouts remain optional', 
     return controller.signal;
   });
   const ai = fakeNearAi({ respond: () => ({ agrees: true, reason: 'Evidence agrees.' }) });
-  const record = await attestedCompletion({ nearai: { baseUrl: NEARAI_BASE, model: 'near/juror-a',
+  await assert.rejects(attestedCompletion({ nearai: { baseUrl: NEARAI_BASE, model: 'near/juror-a',
     apiKey: 'synthetic-test-only', dstackVerifierUrl: URL } }, { system: 'test', input: '{}', parse: JSON.parse,
     fetchImpl: async (url, options) => {
       if (String(url).startsWith(URL)) return new Promise((resolve, reject) => {
@@ -222,11 +215,18 @@ test('either report can reject the call and verifier timeouts remain optional', 
       const evidence = await response.json();
       for (const candidate of [evidence.gateway_attestation, ...evidence.model_attestations]) candidate.info = { vm_config: '{}' };
       return Response.json(evidence);
-    } });
-  assert.ok(verifierTimeouts >= 2);
-  assert.match(record.dstack.gateway.error, /timed out/);
-  assert.match(record.dstack.model.error, /timed out/);
-  assert.doesNotThrow(() => verifyAttestedRecord(record));
+    } }), error => error.unavailable === true);
+  assert.ok(verifierTimeouts >= 1);
+});
+
+test('production configuration refuses a completion whose signing model has no GPU evidence', async () => {
+  assert.equal(loadConfig({}).nearai.requireGpu, true);
+  assert.equal(loadConfig({ STATED_REQUIRE_GPU_EVIDENCE: '0' }).nearai.requireGpu, false);
+  const ai = fakeNearAi({ respond: () => ({ agrees: true, reason: 'Evidence agrees.' }) });
+  await assert.rejects(attestedCompletion({ nearai: { baseUrl: NEARAI_BASE, model: 'near/juror-a',
+    apiKey: 'synthetic-test-only', requireGpu: true } }, { system: 'test', input: '{}', parse: JSON.parse,
+    fetchImpl: ai.fetchImpl }), /no NVIDIA GPU evidence/);
+  assert.equal(ai.seen.signature, 1, 'the call is refused after the signature names the signing model');
 });
 
 test('strict persisted records retain old exact bytes and reject malformed optional metadata', async () => {
@@ -255,8 +255,8 @@ test('ruling page claims require both reports of the plan and every verdict to p
   assert.deepEqual(dstackVerificationLines(record), []);
   for (const call of [record.plan, ...record.verdicts]) call.dstack = await saved();
   assert.deepEqual(dstackVerificationLines(record), [
-    'Boot measurements match the published dstack OS 0.5.12 image, production build, checked by the official dstack verifier.',
-    'Intel TCB is up to date with no security advisories.',
+    'When this ruling was made, the official dstack verifier reported that the boot measurements match the published dstack OS 0.5.12 image, production build.',
+    'It also reported the Intel TCB up to date with no security advisories. The command below asks the verifier again.',
   ]);
   for (const index of [0, 1, 2]) for (const role of ['gateway', 'model']) {
     for (const result of [undefined, { verifier: URL, checkedAt: new Date().toISOString(), error: 'offline' },
@@ -301,9 +301,9 @@ test('the ruling route renders both plain lines and suppresses them when the pla
     notFound() { assert.fail('The verified fixture must render'); } });
   assert.equal(typeof handler, 'function');
   await handler({ params: [row.id], res: {} });
-  assert.match(page, /<summary>Check it yourself<\/summary>[\s\S]*<p>Boot measurements match the published dstack OS 0\.5\.12 image, production build, checked by the official dstack verifier\.<\/p>/);
-  assert.ok(page.includes('<p>Intel TCB is up to date with no security advisories.</p>'));
+  assert.match(page, /<summary>Check it yourself<\/summary>[\s\S]*<p>When this ruling was made, the official dstack verifier reported that the boot measurements match the published dstack OS 0\.5\.12 image, production build\.<\/p>/);
+  assert.ok(page.includes('<p>It also reported the Intel TCB up to date with no security advisories. The command below asks the verifier again.</p>'));
   delete record.plan.dstack;
   await handler({ params: [row.id], res: {} });
-  assert.doesNotMatch(page, /Boot measurements match|Intel TCB is up to date/);
+  assert.doesNotMatch(page, /boot measurements match|Intel TCB up to date/);
 });

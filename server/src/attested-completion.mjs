@@ -6,7 +6,7 @@
 import { randomBytes } from 'node:crypto';
 import { sha256, validatePreflight, verifyAttestedRecord } from './attested-signature.mjs';
 import { verifyGpuPayload } from './gpu-attestation.mjs';
-import { dstackBootPasses, validateDstackVerifierUrl, verifyWithDstack } from './dstack-verifier.mjs';
+import { dstackBootPasses, dstackPasses, validateDstackVerifierUrl, verifyWithDstack } from './dstack-verifier.mjs';
 
 async function bytesFrom(response, maxBytes, signal) {
   if (!response.ok) throw new Error('NEAR AI request failed.');
@@ -88,26 +88,22 @@ export async function attestedCompletion(config, { model = config.nearai.model, 
     candidate.signing_algo === signature.signing_algo
     && normalized(candidate.signing_address) === normalized(signature.signing_address));
   if (gpuEvidence.has(signingCandidate)) record.gpu = gpuEvidence.get(signingCandidate);
+  else if (config.nearai.requireGpu === true) throw new Error('The signing model returned no NVIDIA GPU evidence.');
   if (config.nearai.dstackVerifierUrl) {
+    // Fails closed: an unreachable verifier, a malformed answer, a development or unpublished
+    // image, or an Intel TCB that is not up to date gives no record. The caller retries later.
     const url = validateDstackVerifierUrl(config.nearai.dstackVerifierUrl);
-    const check = async (report) => {
-      try {
-        return await verifyWithDstack(report, { url, fetchImpl,
-          signal: AbortSignal.any([signal, AbortSignal.timeout(90_000)]) });
-      } catch (error) {
-        // Only transport unavailability is optional; a malformed answer fails closed.
-        if (!error.unavailable) throw error;
-        return { verifier: url, checkedAt: new Date().toISOString(), error: error.message };
-      }
-    };
+    const check = report => verifyWithDstack(report, { url, fetchImpl,
+      signal: AbortSignal.any([signal, AbortSignal.timeout(90_000)]) });
     const [gateway, modelResult] = await Promise.all([
       check(attestation.gateway_attestation), check(signingCandidate),
     ]);
     record.dstack = { gateway, model: modelResult };
     for (const [role, result] of Object.entries(record.dstack)) {
-      if (!Object.hasOwn(result, 'error') && !dstackBootPasses(result)) {
+      if (!dstackBootPasses(result)) {
         throw new Error(`dstack ${role} verification failed: ${result.reason || 'the enclave did not boot the published production image'}`);
       }
+      if (!dstackPasses(result)) throw new Error(`dstack ${role} verification failed: Intel TCB status is ${result.tcbStatus}`);
     }
     record.completedAt = new Date().toISOString();
   }

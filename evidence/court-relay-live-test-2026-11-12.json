@@ -1,0 +1,141 @@
+{
+  "network": "testnet",
+  "relay": "relay-harden.court-check-feea5b70-a.testnet",
+  "dao": "stated-court-hardentest.sputnik-v2.testnet",
+  "escrow": "stated-escrow-52081551be.testnet",
+  "operator": "court-check-9c3815e0-b.testnet",
+  "council": "stated-court-18ecdebd.testnet",
+  "windowSeconds": 60,
+  "checks": [
+    "operator files through relay",
+    "council cannot propose or approve",
+    "permissionless approval rejected before window",
+    "permissionless approval settles after window",
+    "council veto keeps another bet active"
+  ],
+  "startedAt": "2026-11-12T15:36:14.087Z",
+  "steps": [
+    {
+      "name": "approved: create bet",
+      "pass": true,
+      "hash": "22tCq8y3q5xk5GbWRrVJSixkbiTYuEwev58MGwvRvH8a",
+      "betId": "67580df7-4b6e-4248-9034-5ad6bee06e8d"
+    },
+    {
+      "name": "approved: accept bet",
+      "pass": true,
+      "hash": "4qykSDudgpu6AQqT7zkiw6Av4umAnmdM7iTKTLo3J4nK"
+    },
+    {
+      "name": "operator files through relay",
+      "pass": true,
+      "hash": "AfFqM1NPkrtshBDmsP8hQB8Aaq8gkSQhKdfQzGPd6T6i",
+      "betId": "67580df7-4b6e-4248-9034-5ad6bee06e8d",
+      "proposalId": 1
+    },
+    {
+      "name": "DAO proposal was filed by relay",
+      "pass": true,
+      "proposalId": 1
+    },
+    {
+      "name": "non-operator cannot file through relay",
+      "pass": true,
+      "hash": "2gmA7VHjxYXDpbwDCHuGUVCKGowD7xRfWpHjVxqAFNUQ"
+    },
+    {
+      "name": "council cannot propose calls",
+      "pass": true,
+      "hash": "7Uk2FapLMqSqgcjTCvoFihQb7WSx4qsaiRScKSX62dWB"
+    },
+    {
+      "name": "council cannot approve calls",
+      "pass": true,
+      "hash": "6rwmZqPrs27hoB65aag1KDpK744ii73mCfhiUqNnLKXN"
+    },
+    {
+      "name": "permissionless approval blocked before window",
+      "pass": true,
+      "hash": "Add1acMBfzxhxAaMipncAhyxPuLMWPrmp7a7Ym4HrPCK"
+    },
+    {
+      "name": "early approval leaves proposal open",
+      "pass": true
+    },
+    {
+      "name": "vetoed: create bet",
+      "pass": true,
+      "hash": "Fv6dbomLUy5Rxw2EV5XbchrTDNeQUi3QFaxWGvi6QX7",
+      "betId": "44660633-8ea6-474b-a5c2-449c6f0cf0b6"
+    },
+    {
+      "name": "vetoed: accept bet",
+      "pass": true,
+      "hash": "3QH9MyfibnTV9gK5cgoUqn3jDcFn3ja1R4PMnx4YKKU2"
+    },
+    {
+      "name": "operator files through relay",
+      "pass": true,
+      "hash": "3WoMuaz7Ykyh8tvJQZQ9eq2HFAXtSckzxBcXcCHFR6Ah",
+      "betId": "44660633-8ea6-474b-a5c2-449c6f0cf0b6",
+      "proposalId": 2
+    },
+    {
+      "name": "DAO proposal was filed by relay",
+      "pass": true,
+      "proposalId": 2
+    },
+    {
+      "name": "council veto succeeds",
+      "pass": true,
+      "hash": "7kQAySLKixsusxdUs1J21Z9PPZR7qzXgomrSBnGPW9tB"
+    },
+    {
+      "name": "vetoed DAO proposal is rejected",
+      "pass": true
+    },
+    {
+      "name": "permissionless approval succeeds after window",
+      "pass": true,
+      "hash": "J4dZvhg5MVzR9UvUyShEi2TXDqDDxai62okjtLkjRmTz"
+    },
+    {
+      "name": "approved DAO proposal is final",
+      "pass": true
+    },
+    {
+      "name": "escrow settled yes through DAO",
+      "pass": true
+    },
+    {
+      "name": "permissionless approval cannot revive veto",
+      "pass": true,
+      "hash": "AnmC1wYWyEoRyJZ1vHHpMm9q5DVsB7SSgUryRr9Ug3vZ"
+    },
+    {
+      "name": "vetoed bet remains active",
+      "pass": true
+    },
+    {
+      "name": "winner withdraws both stakes",
+      "pass": true,
+      "hash": "35Vn6jHr4o4DTSjmMg4VBC3TG9yCDyB93nPxMZLyj4dA"
+    }
+  ],
+  "accounts": {
+    "creator": "court-check-79d3c73d-a.testnet",
+    "acceptor": "court-check-c3088d5a-b.testnet",
+    "operator": "court-check-9c3815e0-b.testnet",
+    "council": "stated-court-18ecdebd.testnet"
+  },
+  "bets": {
+    "approved": "67580df7-4b6e-4248-9034-5ad6bee06e8d",
+    "vetoed": "44660633-8ea6-474b-a5c2-449c6f0cf0b6"
+  },
+  "proposals": {
+    "approved": 1,
+    "vetoed": 2
+  },
+  "finishedAt": "2026-11-12T15:37:52.566Z",
+  "passed": true
+}

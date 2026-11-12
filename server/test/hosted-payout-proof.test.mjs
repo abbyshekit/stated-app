@@ -7,7 +7,8 @@ import proof from '../../evidence/hosted-real-x-testnet-20261111.json' with { ty
 import { useNetwork } from '../src/near-network.mjs';
 import { verifyHostedPayout } from '../../scripts/verify-hosted-payout.mjs';
 
-const endpoints = ['https://test.rpc.fastnear.com', 'https://rpc.testnet.near.org'];
+const endpoints = ['https://archival-rpc.testnet.fastnear.com', 'https://archival-rpc.testnet.near.org'];
+const CODE_HASH = 'Bqr2TsgyFRNDw2GZ6q9aT7cMAnjZNERKdzaBstRgKaAg';
 const betId = new URL(proof.betUrl).pathname.split('/').pop();
 const hash = n => baseEncode(Buffer.alloc(32, n));
 const creator = 'chainabstracted.stated-play-6cf0876dd7.testnet';
@@ -52,7 +53,7 @@ function fixture() {
       outcome(proof.payout.transferReceipt, winner, [], { SuccessValue: '' }),
       outcome(proof.payout.callbackReceipt, proof.contract, [], { SuccessValue: 'dHJ1ZQ==' }),
     ] };
-  return { bet, ruling, withdrawal };
+  return { bet, ruling, withdrawal, account: { code_hash: CODE_HASH, storage_usage: 180360 }, access: { keys: [] } };
 }
 
 function fakeRpc({ change = () => {}, fault = null } = {}) {
@@ -65,6 +66,14 @@ function fakeRpc({ change = () => {}, fault = null } = {}) {
     assert.ok(['query', 'tx_status'].includes(body.method), 'a proof must never broadcast');
     if (fault && endpoint === endpoints[1]) return fault(options);
     const data = fixture(); change(data, endpoint);
+    if (body.method === 'query' && body.params.request_type === 'view_account') {
+      assert.equal(body.params.finality, 'final'); assert.equal(body.params.account_id, proof.contract);
+      return Response.json({ result: data.account });
+    }
+    if (body.method === 'query' && body.params.request_type === 'view_access_key_list') {
+      assert.equal(body.params.finality, 'final'); assert.equal(body.params.account_id, proof.contract);
+      return Response.json({ result: data.access });
+    }
     if (body.method === 'query') {
       assert.equal(body.params.request_type, 'call_function'); assert.equal(body.params.finality, 'final');
       assert.equal(body.params.account_id, proof.contract); assert.equal(body.params.method_name, 'get_bet');
@@ -90,7 +99,7 @@ test('the hosted payout needs two attributable final RPC checks and no mutable c
   assert.equal(report.providers.length, 2);
   assert.deepEqual(report.providers.map(p => p.status), ['PASS', 'PASS']);
   for (const endpoint of endpoints) {
-    assert.equal(rpc.calls.filter(c => c.endpoint === endpoint && c.method === 'query').length, 1);
+    assert.equal(rpc.calls.filter(c => c.endpoint === endpoint && c.method === 'query').length, 3);
     assert.equal(rpc.calls.filter(c => c.endpoint === endpoint && c.method === 'tx_status').length, 2);
   }
   assert.doesNotMatch(JSON.stringify(report), /569859f6|signer_public_key|FunctionCall|input_data_ids|secret|DATABASE_URL|\/Users\//);
@@ -99,6 +108,8 @@ test('the hosted payout needs two attributable final RPC checks and no mutable c
 test('plausible but mismatched settlement or payout data cannot pass either endpoint', async t => {
   const cases = [
     ['wrong bet', d => { d.bet.id = '00000000-0000-4000-8000-000000000001'; }],
+    ['contract with an access key', d => { d.access.keys = [{ public_key: 'ed25519:11111111111111111111111111111111', access_key: { nonce: 0, permission: 'FullAccess' } }]; }],
+    ['contract without code', d => { d.account.code_hash = '11111111111111111111111111111111'; }],
     ['wrong outcome', d => { d.bet.resolution.outcome = 'yes'; }],
     ['wrong stake', d => { d.bet.stake_yocto = '100000000000000000000001'; }],
     ['wrong winner', d => { d.bet.creator_side = 'no'; }],

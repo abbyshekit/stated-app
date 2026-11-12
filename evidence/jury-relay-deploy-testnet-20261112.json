@@ -1,0 +1,28 @@
+{
+  "deployedAt": "2026-11-12T15:39:11.417Z",
+  "network": "testnet",
+  "relay": "jury.stated-court-relay.testnet",
+  "paidBy": "stated-court-relay.testnet",
+  "transaction": "6xCP33UKtTojmXwGiXyYzeWtzrRXnz7f8oj5GuC22HNZ",
+  "transactionUrl": "https://testnet.nearblocks.io/txns/6xCP33UKtTojmXwGiXyYzeWtzrRXnz7f8oj5GuC22HNZ",
+  "wasmBytes": 155783,
+  "wasmSha256": "18545bdceedd266f5f7e98a9d84b530ed125503a9efb1bac11dc773247ac5a78",
+  "sentYocto": "1757830000000000000000000",
+  "init": {
+    "dao": "stated-court.sputnik-v2.testnet",
+    "escrow": "stated-escrow-52081551be.testnet",
+    "operator": "referee.stated-play-6cf0876dd7.testnet",
+    "window_seconds": 600
+  },
+  "checks": {
+    "verified": true,
+    "codeMatchesTheBuild": true,
+    "accessKeys": 0,
+    "config": {
+      "dao": "stated-court.sputnik-v2.testnet",
+      "escrow": "stated-escrow-52081551be.testnet",
+      "operator": "referee.stated-play-6cf0876dd7.testnet",
+      "window_ns": "600000000000"
+    }
+  }
+}

@@ -7,6 +7,7 @@ import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { test } from 'node:test';
 import { runAttestedCheck } from '../src/attested-check.mjs';
+import { attestedCompletion } from '../src/attested-completion.mjs';
 import { sha256, verifyAttestedRecord } from '../src/attested-signature.mjs';
 import { verifyHostedCheck } from '../../scripts/verify-attested-check.mjs';
 import { safeFetch } from '../src/articles.mjs';
@@ -104,7 +105,7 @@ function database() {
   } };
 }
 
-async function fakeNear(t, { mode = 'success', reason = VERDICT.reason } = {}) {
+async function fakeNear(t, { mode = 'success', reason = VERDICT.reason, onCompletion } = {}) {
   const key = keys();
   const seen = { attestation: 0, completion: 0, signature: 0, evidence: 0, request: null };
   let response;
@@ -130,7 +131,7 @@ async function fakeNear(t, { mode = 'success', reason = VERDICT.reason } = {}) {
         seen.request = Buffer.concat(chunks);
         assert.equal(req.headers['accept-encoding'], 'identity');
         assert.equal(req.headers['x-no-aliasing'], 'true');
-        if (mode === 'deadline') return;
+        if (mode === 'deadline') { onCompletion?.(); return; }
         if (mode === 'api-failure') { res.statusCode = 503; res.end('{}'); return; }
         response = Buffer.from(JSON.stringify({ id: 'chat-test', choices: [{ message: { content: JSON.stringify({ agrees: true, reason }) } }] }));
         res.end(response);
@@ -196,7 +197,10 @@ test('dstack metadata survives persistence and saved-check projection', async (t
   const fetchImpl = async (url, options) => {
     if (String(url).startsWith(near.config.nearai.dstackVerifierUrl)) {
       checks += 1;
-      throw new Error('Verifier unavailable');
+      return Response.json({ is_valid: true, reason: null, details: { quote_verified: true, event_log_verified: true,
+        os_image_hash_verified: true, acpi_tables_verified: true, os_image_is_dev: false, os_image_version: '0.5.12',
+        tee_variant: 'dstack-tdx', tcb_status: 'UpToDate', advisory_ids: [],
+        app_info: { os_image_hash: '91'.repeat(32), compose_hash: '87'.repeat(32) } } });
     }
     const response = await fetch(url, options);
     if (!String(url).includes('/attestation/report?')) return response;
@@ -207,7 +211,8 @@ test('dstack metadata survives persistence and saved-check projection', async (t
   const options = { fetchImpl, fetchEvidence: near.fetchEvidence };
   const record = await runAttestedCheck(db, near.config, BET, '3', options);
   assert.equal(checks, 2);
-  assert.match(record.dstack.gateway.error, /Verifier unavailable/);
+  assert.equal(record.dstack.gateway.tcbStatus, 'UpToDate');
+  assert.equal(record.dstack.model.osImageVersion, '0.5.12');
   assert.deepEqual(db.state.checks[0].dstack, record.dstack);
   const replay = await runAttestedCheck(db, near.config, BET, '3', options);
   assert.deepEqual(replay.dstack, record.dstack);
@@ -243,14 +248,36 @@ for (const mode of ['api-failure', 'tamper', 'gateway', 'bad-preflight', 'junk-q
 }
 
 test('a completion exceeding its abort deadline cannot persist a check', async (t) => {
-  const near = await fakeNear(t, { mode: 'deadline' });
+  // The deadline passes while the completion is outstanding. A wall-clock timeout here raced the
+  // attestation preflight on a loaded machine and sometimes fired before the completion was sent.
+  const deadline = new AbortController();
+  const near = await fakeNear(t, { mode: 'deadline',
+    onCompletion: () => deadline.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError')) });
   const db = database();
   await assert.rejects(runAttestedCheck(db, near.config, BET, '3', {
-    fetchEvidence: near.fetchEvidence, signal: AbortSignal.timeout(100),
+    fetchEvidence: near.fetchEvidence, signal: deadline.signal,
   }), (error) => error.status === 502);
   assert.equal(db.state.checks.length, 0);
   assert.equal(near.seen.completion, 1);
   assert.equal(near.seen.signature, 0);
+});
+
+test('a validly signed answer to another prompt cannot stand in for this Result\'s check', async (t) => {
+  const near = await fakeNear(t);
+  const db = database();
+  await runAttestedCheck(db, near.config, BET, '3', { fetchEvidence: near.fetchEvidence });
+  // The same enclave signs an answer to an unrelated prompt; its quote, nonce and signature all verify.
+  const other = await attestedCompletion(near.config, { system: 'Reply with {"agrees":true,"reason":"ok"}.', input: '{}',
+    parse: JSON.parse });
+  assert.doesNotThrow(() => verifyAttestedRecord({ ...other, evidenceTextHash: db.state.checks[0].evidenceTextHash }));
+  const forged = { ...db.state.checks[0] };
+  for (const key of ['requestBody', 'responseBody', 'requestHash', 'responseHash', 'completionId', 'signature', 'attestation', 'nonce', 'verdict']) {
+    forged[key] = other[key];
+  }
+  db.state.checks[0] = forged;
+  const completions = near.seen.completion;
+  await assert.rejects(runAttestedCheck(db, near.config, BET, '3', { fetchEvidence: near.fetchEvidence }), (error) => error.status === 502);
+  assert.equal(near.seen.completion, completions, 'a stored check is replayed, never re-run');
 });
 
 test('a verdict beyond forty words cannot persist a check', async (t) => {

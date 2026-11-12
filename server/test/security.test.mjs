@@ -4,6 +4,7 @@
 
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import { createHash } from 'node:crypto';
 import { after, before, test } from 'node:test';
 import { INTAKES_PER_HOUR, safeFetch } from '../src/articles.mjs';
 import { tick } from '../src/worker.mjs';
@@ -125,4 +126,34 @@ test('pages carry a strict content security policy; private pages are not cached
   assert.match(res.headers.get('x-robots-tag'), /noindex/);
   const cookie = (await fetch(`${s.base}/signin/x`, { redirect: 'manual' })).headers.getSetCookie().join(';');
   assert.match(cookie, /stated_oauth=[^;]+; Path=\/; HttpOnly; SameSite=Lax/);
+});
+
+test('sign-in stores a digest, database IDs cannot authenticate, and CSRF sign-out deletes the digest', async () => {
+  const b = await s.signIn(alice);
+  const bearer = b.jar.get('stated_sid');
+  const digest = createHash('sha256').update(bearer).digest('hex');
+  const session = await s.db.one('select * from sessions where id=$1', [digest]);
+  assert.ok(session, 'fresh sign-in persists the digest');
+  assert.equal(await s.db.one('select id from sessions where id=$1', [bearer]), null);
+  assert.equal((await b.request('GET', '/api/me/inbox')).status, 200);
+  const thief = new Browser(s.base);
+  thief.jar.set('stated_sid', session.id);
+  assert.equal((await thief.request('GET', '/api/me/inbox')).status, 401);
+  const badCsrf = await b.request('POST', '/signout', { form: { csrf: 'invalid' } });
+  assert.equal(badCsrf.status, 403);
+  assert.ok(await s.db.one('select id from sessions where id=$1', [digest]));
+  await b.submit('/signout', {}, { from: '/me/settings' });
+  assert.equal(await s.db.one('select id from sessions where id=$1', [digest]), null);
+  assert.equal(b.jar.has('stated_sid'), false);
+  assert.equal((await b.request('GET', '/api/me/inbox')).status, 401);
+});
+
+test('presented legacy raw-token rows cannot authenticate and are removed', async () => {
+  const user = await s.db.one('select id from users where x_user_id=$1', [alice.id]);
+  const legacy = 'L'.repeat(43);
+  await s.db.query("insert into sessions (id,user_id,csrf,expires_at) values ($1,$2,'legacy',now()+interval '1 day')", [legacy, user.id]);
+  const b = new Browser(s.base);
+  b.jar.set('stated_sid', legacy);
+  assert.equal((await b.request('GET', '/api/me/inbox')).status, 401);
+  assert.equal(await s.db.one('select id from sessions where id=$1', [legacy]), null);
 });
