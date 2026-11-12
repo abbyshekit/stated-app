@@ -49,6 +49,21 @@ test('speech dates stay separate from forecasts, and past rules remain unchanged
   assert.equal(deadlineOf('She said the price would rise by 11 November 2026 at 18:00 UTC.', published).at?.toISOString(), '2026-11-11T18:00:00.000Z');
 });
 
+test('a clock written before its date is the deadline, so an offer cannot outlive the claim', () => {
+  for (const [phrase, iso] of [
+    ['before 18:40 UTC on 11 November 2026', '2026-11-11T18:40:00.000Z'],
+    ['by 18:40 UTC on 11 November 2026', '2026-11-11T18:40:00.000Z'],
+    ['before 11 November 2026 at 18:40 UTC', '2026-11-11T18:40:00.000Z'],
+  ]) {
+    const result = deadlineOf(`Nvidia will announce a stock split ${phrase}.`, published);
+    assert.equal(result.text, phrase);
+    assert.equal(result.at?.toISOString(), iso, phrase);
+  }
+  for (const phrase of ['before 24:00 UTC on 11 November 2026', 'by 18:60 UTC on 11 November 2026', 'before 18:40 UTC+2 on 11 November 2026']) {
+    assert.deepEqual(deadlineOf(`The price will rise ${phrase}.`, published), { text: null, at: null }, phrase);
+  }
+});
+
 test('date-only deadlines retain end of day', () => {
   assert.equal(interpret('The price will rise by 11 November 2026.', published).proposedDeadlineAt?.toISOString(), '2026-11-11T23:59:59.000Z');
 });
