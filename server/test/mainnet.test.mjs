@@ -420,7 +420,7 @@ test('the other side opens an account on the site, sends NEAR straight to it, ta
   assert.deepEqual(repliesTo(offerCmd.id).slice(1), ['It happened. @priya wins the 0.4 NEAR pot.']);
   assert.equal(held(id) - before, NEAR('0.4'), 'the pot is in the winner’s account');
   const paid = await priyaB.get(`/bets/${betId}`);
-  assert.match(paid.text, /Paid to your account\.<\/p><div class="gut link-row"><a class="tl" href="https:\/\/nearblocks\.io\/txns\/[1-9A-HJ-NP-Za-km-z]+"/, 'the payout links to the mainnet explorer');
+  assert.match(paid.text, /Paid to your account\. <a class="tl" href="https:\/\/nearblocks\.io\/txns\/[1-9A-HJ-NP-Za-km-z]+"/, 'the payout links to the mainnet explorer');
   assert.doesNotMatch(paid.text, /test NEAR|testnet/);
 });
 

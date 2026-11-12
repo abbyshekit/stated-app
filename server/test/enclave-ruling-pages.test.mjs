@@ -122,7 +122,7 @@ test('open evidence leads both pages, with one filled add action only for bettor
   await s.db.query("insert into enclave_plans (statement_id,source,closes_at,record) values ($1,'evidence',$2,'{}')", [statement.id, closes]);
   await addEvidence();
   const [publicPage, bettorPage] = await pages();
-  const line = 'When links close, a NEAR AI enclave jury reads both sides’ links and decides.';
+  const line = 'Then a NEAR AI enclave jury reads both sides’ links and decides.';
   for (const [page, lead] of [[publicPage, 'Both sides are in'], [bettorPage, 'Links are open']]) {
     assert.ok(page.includes(`<p class="lead">${lead}<span>Links close ${nextBetTime(closes)}</span></p>`));
     assert.ok(page.includes(line));
@@ -149,9 +149,9 @@ test('open evidence leads both pages, with one filled add action only for bettor
 test('evidence plans appear with no links, and close without an add link', async () => {
   const closes = new Date(Date.now() + 86400000).toISOString();
   await s.db.query("insert into enclave_plans (statement_id,source,closes_at,record) values ($1,'evidence',$2,'{}')", [statement.id, closes]);
-  assert.match((await creatorBrowser.get(path())).text, /When links close, a NEAR AI enclave jury reads both sides’ links and decides\./);
+  assert.match((await creatorBrowser.get(path())).text, /Then a NEAR AI enclave jury reads both sides’ links and decides\./);
   await s.db.query("update enclave_plans set closes_at=clock_timestamp()-interval '1 minute' where statement_id=$1", [statement.id]);
-  for (const page of await pages()) assert.doesNotMatch(page, /When links close, a NEAR AI enclave jury reads both sides’ links and decides\.|Add a link|Links, 0/);
+  for (const page of await pages()) assert.doesNotMatch(page, /Then a NEAR AI enclave jury reads both sides’ links and decides\.|Add a link|Links, 0/);
 });
 
 test('evidence before a plan uses the configured window and only public metadata', async () => {
@@ -186,7 +186,7 @@ test('pending outcomes use the recorded Result time rather than the jury decisio
         assert.match(page, /class="pill solid big"[^>]*>[\s\S]*?Post the result<\/a>/);
         assert.doesNotMatch(page, />Post on X<\/a>/);
         assert.ok(page.includes(`<span class="${outcome === 'yes' ? 'hl' : 'struck'}">${bet.claim}</span>`));
-        assert.ok(page.includes(`<div class="gut link-row"><a class="tl" href="${rulingPath()}">See the ruling</a></div>`));
+        assert.ok(page.includes(` <a class="tl" href="${rulingPath()}">See the ruling</a></p>`), 'the ruling link sits at the end of the jury sentence');
         assert.match(page, /<summary>Rules<\/summary>[\s\S]*A reviewer can correct a ruling before it pays out\.<\/dd>/);
         assert.doesNotMatch(page, /unless a reviewer corrects it|<summary>Propose a result<\/summary>/);
       }
@@ -209,7 +209,7 @@ test('settled rulings, corrections and ambiguous refunds render on both pages', 
   }
   await setChain('settled', 'void');
   await insertRuling({ source: 'evidence', outcome: 'unclear' });
-  await bothContain('The NEAR AI enclave jury could not agree, so both stakes went back.');
+  await bothContain('The NEAR AI enclave jury could not agree.');
   for (const page of await pages()) {
     assert.match(page, /<span>Stakes returned<\/span>/);
     assert.doesNotMatch(page, /Agreed void/);

@@ -11,6 +11,7 @@ import { dayMonth } from './marked.mjs';
 import { markedClaim } from './bet-view.mjs';
 import { formatTestNear } from './near-escrow.mjs';
 import { unit } from './near-network.mjs';
+import { dstackPasses } from './dstack-verifier.mjs';
 
 const ID = '([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})';
 const MODEL_LOGOS = new Map(['qwen', 'deepseek', 'zai'].map(family => [family,
@@ -48,6 +49,18 @@ const VERIFIED = [
   'The text the models read is inside the signed request',
 ];
 
+// DESIGN.md: two plain supporting lines inside the existing verification fold.
+export function dstackVerificationLines(record) {
+  const results = [record.plan, ...record.verdicts].flatMap(call => [call.dstack?.gateway, call.dstack?.model]);
+  if (!results.every(dstackPasses) || results.some(result => result.advisoryIds.length)) return [];
+  const versions = [...new Set(results.map(result => result.osImageVersion))];
+  if (versions.length !== 1 || !versions[0]) return [];
+  return [
+    `Boot measurements match the published dstack OS ${versions[0]} image, production build, checked by the official dstack verifier.`,
+    'Intel TCB is up to date with no security advisories.',
+  ];
+}
+
 // Public pages never enrich the source identity from the viewer's private save.
 async function postRow(db, bet, outcome) {
   const linked = await db.one('select source_save_id from bilateral_bets where id=$1', [bet.id]);
@@ -81,7 +94,7 @@ function evidenceLine(record, bet) {
 
 function rulingLine(record, bet) {
   if (record.mode === 'review') return record.agrees !== null
-    ? `A Stated reviewer recorded ${outcomeWord(bet.outcome)} on ${dayMonth(bet.result_recorded_at || bet.settled_at)}. The jury ${record.agrees ? 'agreed' : 'disagreed'}.` : '';
+    ? `A Stated reviewer recorded ${outcomeWord(bet.outcome)}. The jury ${record.agrees ? 'agreed' : 'disagreed'}.` : '';
   const settled = ['settled', 'refunded'].includes(bet.status);
   if (record.outcome === 'unclear') {
     const counts = new Map();
@@ -92,7 +105,7 @@ function rulingLine(record, bet) {
   const creatorWon = record.outcome === bet.creator_side;
   const winner = creatorWon ? bet.creator_username : bet.acceptor_username;
   const pot = formatTestNear((BigInt(bet.stake_yocto) * 2n).toString());
-  return `The NEAR AI enclave jury agreed, so ${winner ? `@${winner}` : `the ${record.outcome} side`} ${settled ? 'won' : 'wins'} the ${pot} ${unit()} pot.`;
+  return `The NEAR AI enclave jury agreed, so ${winner ? `@${winner}, who bet ${record.outcome},` : `the ${record.outcome} side`} ${settled ? 'won' : 'wins'} the ${pot} ${unit()} pot.`;
 }
 
 function evidenceFold(record) {
@@ -138,6 +151,7 @@ export function registerBetRulingRoutes({ route, db, config, layout, send, notFo
     const gpuVerified = record.verdicts.every(verdict => verdict.gpu?.verdict === true);
     const verified = gpuVerified
       ? [...VERIFIED, 'Each model’s NVIDIA GPU attestation was verified by NVIDIA’s attestation service'] : VERIFIED;
+    const dstackLines = dstackVerificationLines(record);
     const evidence = evidenceLine(record, bet);
     const line = rulingLine(record, bet);
     const majority = record.outcome === 'unclear' ? majorityOutcome(record) : null;
@@ -145,7 +159,7 @@ export function registerBetRulingRoutes({ route, db, config, layout, send, notFo
       <h1 class="visually-hidden">Ruling</h1>
       ${post}
       <div class="verdict ruling-verdict${record.outcome === 'yes' ? ' yes' : ''}"><b>${record.outcome === 'yes' ? html`<span class="hl">Yes</span>` : outcomeWord(record.outcome)}</b><span>${dayMonth(record.decidedAt, { year: true })}</span></div>
-      ${line ? html`<p class="gut quiet">${line}</p>` : ''}
+      ${line ? html`<p class="gut">${line}</p>` : ''}
       <ul class="jury-rail">${record.verdicts.map(verdict => html`<li class="seat${majority && verdict.parsed.outcome !== majority ? ' dissent' : ''}">
         ${modelFace(verdict.model)}<b>${modelName(verdict.model)}</b><span>${outcomeWord(verdict.parsed.outcome)}, ${percent(verdict.parsed.confidence)} sure</span>
       </li>`)}</ul>
@@ -159,7 +173,8 @@ export function registerBetRulingRoutes({ route, db, config, layout, send, notFo
       <details class="fold"><summary>Check it yourself</summary>
         <p>Each verdict was signed inside an Intel TDX enclave, and every signature checked out.</p>
         <ul class="posts evidence-list">${verified.map(line => html`<li class="prow"><div>${line}</div></li>`)}</ul>
-        <p class="quiet">Not checked: enclave measurements against a published list, TCB level and revocation${gpuVerified ? '' : ', the GPU’s own attestation'}.</p>
+        ${dstackLines.length ? dstackLines.map(line => html`<p>${line}</p>`) : html`<p class="quiet">Not checked: enclave measurements against a published list, TCB level and revocation${gpuVerified ? '' : ', the GPU’s own attestation'}.</p>`}
+        ${dstackLines.length && !gpuVerified ? html`<p class="quiet">Not checked: the GPU’s own attestation.</p>` : ''}
         <p>${record.mode === 'review'
           ? `Every model has to agree at ${percent(record.minConfidence)} or more for the jury to give a verdict. A second opinion does not change the payout.`
           : `Every model has to agree at ${percent(record.minConfidence)} or more, or both stakes go back.`}</p>

@@ -51,9 +51,12 @@ const OPEN_STATUSES = `('accepted', 'proposed', 'disputed')`;
 
 const iso = (value) => new Date(value).toISOString();
 const hashText = (text) => sha256(Buffer.from(text, 'utf8'));
-// Preserve optional GPU proof whenever projecting an attested call, including for persistence.
+// Preserve optional verification evidence whenever projecting a call for persistence.
 const pick = (value, keys) => ({ ...Object.fromEntries(keys.map((key) => [key, value[key]])),
-  ...(keys === ATTESTED && Object.hasOwn(value, 'gpu') ? { gpu: value.gpu } : {}) });
+  ...(keys === ATTESTED && Object.hasOwn(value, 'gpu') ? { gpu: value.gpu } : {}),
+  ...(keys === ATTESTED && Object.hasOwn(value, 'dstack') ? { dstack: value.dstack } : {}) });
+
+const optionalCallKeys = call => ['gpu', 'dstack'].filter(key => Object.hasOwn(call, key));
 
 function fail(message) { throw new Error(message); }
 
@@ -424,7 +427,7 @@ export function verifyRulingGpu(call, { jwks } = {}) {
 }
 
 function verifyPlan(plan, material, roots, jwks) {
-  keysExactly(plan, [...ATTESTED, 'parsed', ...(Object.hasOwn(plan, 'gpu') ? ['gpu'] : [])], 'plan');
+  keysExactly(plan, [...ATTESTED, 'parsed', ...optionalCallKeys(plan)], 'plan');
   verifyAttestedRecord(pick(plan, ATTESTED), { checkContent: planShape, roots });
   verifyRulingGpu(plan, { jwks });
   const { system, user } = signedMessages(plan);
@@ -494,7 +497,7 @@ export function verifyEnclaveRecord(record, { roots, jwks } = {}) {
     fail('there must be exactly one verdict per roster model, in roster order');
   }
   for (const verdict of record.verdicts) {
-    keysExactly(verdict, [...ATTESTED, 'parsed', ...(Object.hasOwn(verdict, 'gpu') ? ['gpu'] : [])], 'verdict');
+    keysExactly(verdict, [...ATTESTED, 'parsed', ...optionalCallKeys(verdict)], 'verdict');
     verifyAttestedRecord(pick(verdict, ATTESTED), { checkContent: verdictShape, roots });
     verifyRulingGpu(verdict, { jwks });
     if (!isDeepStrictEqual(verdict.parsed, verdict.verdict)) fail('parsed verdict does not match the signed verdict');
@@ -618,7 +621,8 @@ async function runPlan(ctx, material) {
   for (const model of ctx.models) {
     try {
       const call = await attestedCompletion(ctx.config, { model, system: PLAN_PROMPT, maxTokens: MAX_TOKENS,
-        input: planInput(material), fetchImpl: ctx.fetchImpl, signal: AbortSignal.timeout(60_000),
+        input: planInput(material), fetchImpl: ctx.fetchImpl,
+        signal: AbortSignal.timeout(ctx.config.nearai.dstackVerifierUrl ? 150_000 : 60_000),
         checkContent: planShape, parse: (content) => planShape(JSON.parse(content), 'plan') });
       return { ...pick(call, ATTESTED), parsed: checkPlan(call.verdict, material) };
     } catch (error) { ctx.report(`plan ${model}`, error); }
@@ -635,7 +639,7 @@ async function runJury(ctx, material, jury, evidenceText, now, mode) {
   // In parallel: one model takes 6 to 19 s at the median, with longer tails. Any failure fails the attempt.
   return Promise.all(jury.models.map(async (model) => {
     const call = await attestedCompletion(ctx.config, { model, system: VERDICT_PROMPT, input, maxTokens: MAX_TOKENS,
-      fetchImpl: ctx.fetchImpl, signal: AbortSignal.timeout(120_000),
+      fetchImpl: ctx.fetchImpl, signal: AbortSignal.timeout(ctx.config.nearai.dstackVerifierUrl ? 210_000 : 120_000),
       checkContent: verdictShape, parse: (content) => verdictShape(JSON.parse(content), 'verdict') });
     return { ...pick(call, ATTESTED), parsed: structuredClone(call.verdict) };
   }));

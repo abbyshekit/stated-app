@@ -3,6 +3,7 @@ import { Buffer } from 'node:buffer';
 import { createHash, createPublicKey, timingSafeEqual, verify } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { INTEL_SGX_ROOT_CA_PEM, verifyAttestationReport } from './tdx-quote.mjs';
+import { validateDstackRecord } from './dstack-verifier.mjs';
 
 // The trust roots for TDX quotes: the pinned Intel SGX root. Test support code (and
 // nothing else) may replace the process default with its own ephemeral root, because
@@ -156,6 +157,7 @@ export function validatePreflight(evidence, nonceHex, { roots, now = new Date() 
  */
 export function verifyAttestedRecord(record, { checkContent = verdict, roots } = {}) {
   object(record, 'record');
+  if (Object.hasOwn(record, 'dstack')) validateDstackRecord(record.dstack);
   const model = nonempty(record.model, 'model');
   const nonce = hex(record.nonce, 'nonce', 32, false);
   const requestBytes = body(record.requestBody, 'requestBody');

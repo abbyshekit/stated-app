@@ -140,12 +140,12 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
         line = 'A reviewer corrected the enclave’s ruling.';
       } else if (ruling.outcome === 'unclear') {
         line = ['settled', 'refunded'].includes(bet.status) && (bet.outcome === 'void' || bet.status === 'refunded')
-          ? 'The NEAR AI enclave jury could not agree, so both stakes went back.' : 'The enclave jury could not decide.';
+          ? 'The NEAR AI enclave jury could not agree.' : 'The enclave jury could not decide.';
       } else {
         line = `A NEAR AI enclave jury ruled from ${source}.`;
       }
     } else if (bet.evidence?.open) {
-      line = 'When links close, a NEAR AI enclave jury reads both sides’ links and decides.';
+      line = 'Then a NEAR AI enclave jury reads both sides’ links and decides.';
     }
     const check = !ruling && config.nearai?.apiKey ? await db.tx(tx => readAttestedCheck(tx, bet)) : null;
     const items = bet.evidence?.items || [];
@@ -161,7 +161,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
       } catch { /* Old stored links still render as text. */ }
       return html`<li><p>Bet ${item.side}: ${url ? html`<a class="tl" href="${url}" rel="noopener noreferrer">${item.title || host}</a>` : item.title || item.url}${item.by ? `, @${item.by}` : ''}${host ? html` <span class="quiet">${host}</span>` : ''}${postedHost ? html` <span class="quiet">posted as ${postedHost}</span>` : ''}</p></li>`;
     })}</ul>${privateCount ? html`<p class="quiet">and ${privateCount} ${privateCount === 1 ? 'link from a private bet' : 'links from private bets'}</p>` : ''}`) : bet.evidence ? html`<p class="gut quiet">No links yet.</p>` : '';
-    return html`${await courtLine(db, config, chain, bet)}${line ? html`<p class="gut">${line}</p>${ruling && !privateCount ? html`<div class="gut link-row"><a class="tl" href="/bets/${bet.id}/ruling">See the ruling</a></div>` : ''}`
+    return html`${await courtLine(db, config, chain, bet)}${line ? html`<p class="gut">${line}${ruling && !privateCount ? html` <a class="tl" href="/bets/${bet.id}/ruling">See the ruling</a>` : ''}</p>`
       : check ? html`<p class="gut">NEAR AI signed second opinion: ${check.model} read the links and ${check.verdict.agrees ? 'agrees' : 'disagrees'}. <a class="tl" href="/bets/${bet.id}/attested-check.json">Verify</a></p>` : ''}${evidence}`;
   }
 
@@ -635,7 +635,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
         ${played && credit && withdrawal.request?.execution_status !== 'succeeded'
           ? html`<p class="stakes left" role="status">Your payout is being sent to your Stated account.</p>` : ''}
         ${played && withdrawal.request?.execution_status === 'succeeded'
-          ? html`<p class="stakes left">Paid to your account.</p><div class="gut link-row"><a class="tl" href="${transactionLink(withdrawal.request.transaction_hash)}" rel="noopener noreferrer">See it on NEAR</a></div>`
+          ? html`<p class="stakes left">Paid to your account. <a class="tl" href="${transactionLink(withdrawal.request.transaction_hash)}" rel="noopener noreferrer">See it on NEAR</a></p>`
           : html`${withdrawal.request?.execution_message ? html`<p class="notice" role="status">${withdrawal.request.execution_message}</p>` : ''}
         ${withdrawal.request?.transaction_hash ? html`<p class="notice"><a href="${transactionLink(withdrawal.request.transaction_hash)}" rel="noopener noreferrer">View transaction</a></p>` : ''}`}
         ${withdrawal.creditYocto === null ? html`<p class="notice">Withdrawal credit could not be checked. Verify the escrow to retry.</p>`

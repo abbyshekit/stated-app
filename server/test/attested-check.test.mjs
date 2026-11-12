@@ -188,6 +188,32 @@ test('the check stores one public-only immutable event and replays without fetch
   assert.equal(db.state.checks.length, 1);
 });
 
+test('dstack metadata survives persistence and saved-check projection', async (t) => {
+  const near = await fakeNear(t);
+  const db = database();
+  near.config.nearai.dstackVerifierUrl = 'https://verifier.example';
+  let checks = 0;
+  const fetchImpl = async (url, options) => {
+    if (String(url).startsWith(near.config.nearai.dstackVerifierUrl)) {
+      checks += 1;
+      throw new Error('Verifier unavailable');
+    }
+    const response = await fetch(url, options);
+    if (!String(url).includes('/attestation/report?')) return response;
+    const evidence = await response.json();
+    for (const report of [evidence.gateway_attestation, ...evidence.model_attestations]) report.info = { vm_config: '{}' };
+    return Response.json(evidence);
+  };
+  const options = { fetchImpl, fetchEvidence: near.fetchEvidence };
+  const record = await runAttestedCheck(db, near.config, BET, '3', options);
+  assert.equal(checks, 2);
+  assert.match(record.dstack.gateway.error, /Verifier unavailable/);
+  assert.deepEqual(db.state.checks[0].dstack, record.dstack);
+  const replay = await runAttestedCheck(db, near.config, BET, '3', options);
+  assert.deepEqual(replay.dstack, record.dstack);
+  assert.equal(checks, 2, 'replay stays offline');
+});
+
 test('a missing key never calls the database or inference', async () => {
   await assert.rejects(runAttestedCheck({ tx() { throw new Error('must not read'); } },
     { nearai: { apiKey: '' } }, BET, '3'), error => error.status === 404);

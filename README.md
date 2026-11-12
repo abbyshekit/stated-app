@@ -36,7 +36,7 @@ The import-price bet is settled from links: after the release, whoever is right 
 
 ### Privacy & Private AI (`privacy`)
 
-Every production jury call runs on NEAR AI Cloud in an Intel TDX enclave: the app fetches an attestation with a fresh nonce, verifies the gateway and signing model's TDX quote chains to Intel's pinned root and their signing-key/nonce bindings, and verifies the response signature over the exact request and response hashes. Each model's NVIDIA GPU evidence goes to NVIDIA's attestation service with the request nonce; the signed verdict is stored and re-verified offline. Supplied event logs are replayed against the quote's RTMR3, authenticating the app id and compose hash. Enclave measurements are not compared with a published list; TCB level and revocation are not checked.
+Every production jury call runs on NEAR AI Cloud in an Intel TDX enclave: the app fetches an attestation with a fresh nonce, verifies the gateway and signing model's TDX quote chains to Intel's pinned root and their signing-key/nonce bindings, and verifies the response signature over the exact request and response hashes. Each model's NVIDIA GPU evidence goes to NVIDIA's attestation service with the request nonce; the signed verdict is stored and re-verified offline. Supplied event logs are replayed against the quote's RTMR3, authenticating the app id and compose hash. The official dstack verifier recomputes boot measurements from the published dstack OS image and checks Intel's TCB status, including security advisories and revocation collateral. On 12 November 2026 every stored attestation of the hosted ruling passed: eight reports, dstack 0.5.12 production images, TCB UpToDate ([verification evidence](evidence/dstack-verifier-2026-11-12.json)).
 
 ### AI Security & Defense (`security`)
 
@@ -94,9 +94,9 @@ The script reads `/bets/<id>/enclave-ruling.json` and prints a status per check:
 | --- | --- |
 | Arguments | Origin and Bet ID are valid. |
 | Signed ruling / Intel TDX quotes | Exact-byte hashes and Ed25519 signatures verify; gateway and signing-model quotes chain to Intel's root and bind signing keys and nonces. Supplied event logs replay to the quote's RTMR3, authenticating the app id and compose hash. |
-| GPU attestation | Re-verifies each stored NVIDIA signed verdict and its request nonce offline, after fetching NVIDIA's public signing keys. A call with no stored GPU evidence is NOT CHECKED. |
+| GPU attestation | Re-verifies each stored NVIDIA signed verdict and its request nonce offline, after fetching NVIDIA's public signing keys. When only raw GPU evidence is stored, checks it through NVIDIA NRAS now; a call with neither is NOT CHECKED. |
 | Bet coverage / Jury policy / Signed model verdict | The signed material names the Bet and terms hash; the roster, confidence threshold and verdicts produce the recorded outcome. |
-| Quote measurements / Attestation limits | Measurements are printed as NOT CHECKED because they are not compared with a published list; TCB level and revocation remain unchecked. |
+| Quote measurements / Intel collateral | The official dstack verifier checks every gateway and signing-model report against the published production OS image and Intel collateral. Unavailable verification remains NOT CHECKED with the reason; a rejected report fails. |
 | Coinbase source / Coinbase evidence hash | Every candle URL is fetched again and rebuilt evidence matches its signed hash; unavailable sources are NOT CHECKED. |
 | Submitted evidence / Evidence link | NOT RE-READ: prints the side, final URL, posted URL when different, and stored text hash. |
 | Public claim / Public deadline / Public terms hash / Public outcome | Compares the Bet page with the signed ruling; a missing page terms hash or pending settlement is NOT CHECKED. |

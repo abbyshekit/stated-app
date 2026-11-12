@@ -6,6 +6,7 @@
 import { randomBytes } from 'node:crypto';
 import { sha256, validatePreflight, verifyAttestedRecord } from './attested-signature.mjs';
 import { verifyGpuPayload } from './gpu-attestation.mjs';
+import { dstackBootPasses, validateDstackVerifierUrl, verifyWithDstack } from './dstack-verifier.mjs';
 
 async function bytesFrom(response, maxBytes, signal) {
   if (!response.ok) throw new Error('NEAR AI request failed.');
@@ -42,7 +43,8 @@ function baseUrl(config) {
  * signed second opinion's 2048; the enclave ruling asks for more.
  */
 export async function attestedCompletion(config, { model = config.nearai.model, system, input, parse, checkContent,
-  maxTokens = 2048, fetchImpl = fetch, signal = AbortSignal.timeout(60_000), startedAt = new Date().toISOString() }) {
+  maxTokens = 2048, fetchImpl = fetch, signal = AbortSignal.timeout(config.nearai.dstackVerifierUrl ? 150_000 : 60_000),
+  startedAt = new Date().toISOString() }) {
   const base = baseUrl(config);
   const headers = { authorization: `Bearer ${config.nearai.apiKey}`, accept: 'application/json',
     'accept-encoding': 'identity', 'x-no-aliasing': 'true' };
@@ -86,6 +88,29 @@ export async function attestedCompletion(config, { model = config.nearai.model, 
     candidate.signing_algo === signature.signing_algo
     && normalized(candidate.signing_address) === normalized(signature.signing_address));
   if (gpuEvidence.has(signingCandidate)) record.gpu = gpuEvidence.get(signingCandidate);
+  if (config.nearai.dstackVerifierUrl) {
+    const url = validateDstackVerifierUrl(config.nearai.dstackVerifierUrl);
+    const check = async (report) => {
+      try {
+        return await verifyWithDstack(report, { url, fetchImpl,
+          signal: AbortSignal.any([signal, AbortSignal.timeout(90_000)]) });
+      } catch (error) {
+        // Only transport unavailability is optional; a malformed answer fails closed.
+        if (!error.unavailable) throw error;
+        return { verifier: url, checkedAt: new Date().toISOString(), error: error.message };
+      }
+    };
+    const [gateway, modelResult] = await Promise.all([
+      check(attestation.gateway_attestation), check(signingCandidate),
+    ]);
+    record.dstack = { gateway, model: modelResult };
+    for (const [role, result] of Object.entries(record.dstack)) {
+      if (!Object.hasOwn(result, 'error') && !dstackBootPasses(result)) {
+        throw new Error(`dstack ${role} verification failed: ${result.reason || 'the enclave did not boot the published production image'}`);
+      }
+    }
+    record.completedAt = new Date().toISOString();
+  }
   signal.throwIfAborted();
   return record;
 }

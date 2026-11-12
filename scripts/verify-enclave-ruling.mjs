@@ -2,12 +2,30 @@
 import { pathToFileURL } from 'node:url';
 import * as engine from '../server/src/enclave-ruling.mjs';
 import { sha256 } from '../server/src/attested-signature.mjs';
-import { INTEL_SGX_ROOT_CA_PEM } from '../server/src/tdx-quote.mjs';
-import { getGpuJwks } from '../server/src/gpu-attestation.mjs';
+import { INTEL_SGX_ROOT_CA_PEM, parseTdxQuote } from '../server/src/tdx-quote.mjs';
+import { getGpuJwks, verifyGpuPayload } from '../server/src/gpu-attestation.mjs';
+import { verifyWithDstack, dstackPasses, validateDstackVerifierUrl } from '../server/src/dstack-verifier.mjs';
 
 const DEFAULT_BASE = 'https://stated-production.up.railway.app';
 const DEFAULT_BET = 'c171de89-f223-4309-886e-180ad69af092';
+export const DEFAULT_DSTACK_VERIFIER = 'https://dstack-verifier-production.up.railway.app';
 const UUID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
+
+export function parseVerifierArguments(args, env = process.env) {
+  const positional = [];
+  let verifier = env.DSTACK_VERIFIER_URL || DEFAULT_DSTACK_VERIFIER;
+  let seen = false;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--dstack-verifier') {
+      if (seen || !args[i + 1] || args[i + 1].startsWith('--')) throw new Error('--dstack-verifier requires one URL');
+      verifier = args[++i];
+      seen = true;
+    } else if (args[i].startsWith('-')) throw new Error(`Unknown option ${args[i]}`);
+    else positional.push(args[i]);
+  }
+  if (positional.length > 2) throw new Error('Expected at most a base URL and Bet ID');
+  return { base: positional[0], betId: positional[1], dstackVerifierUrl: validateDstackVerifierUrl(verifier) };
+}
 
 function finish(checks) {
   const passed = checks.filter(check => check.status === 'PASS').length;
@@ -80,26 +98,60 @@ function pageMaterial(page) {
   return { outcome, claim, deadline, termsHash: attributes.get('data-bet-terms-hash') };
 }
 
-function quoteMeasurements(record, add, jwks) {
-  if (typeof engine.quoteSummary !== 'function') {
-    add('NOT CHECKED', 'Quote measurements', 'This engine does not export quoteSummary');
-    return;
-  }
-  const quotes = engine.quoteSummary(record, { roots: [INTEL_SGX_ROOT_CA_PEM], jwks });
-  const measurements = ['mrtd', 'rtmr0', 'rtmr1', 'rtmr2', 'rtmr3'];
-  if (!Array.isArray(quotes) || !quotes.some(quote => quote?.role === 'gateway') || !quotes.some(quote => quote?.role === 'model')) {
-    throw new Error('Quote summary must contain gateway and model measurements');
-  }
-  for (const quote of quotes) {
-    if (!quote || !['gateway', 'model'].includes(quote.role) || typeof quote.model !== 'string' || !quote.model
-      || typeof quote.signingAddress !== 'string' || !/^[a-f0-9]{64}$/i.test(quote.signingAddress)
-      || measurements.some(name => typeof quote[name] !== 'string' || !/^[a-f0-9]{96}$/i.test(quote[name]))) {
-      throw new Error('Quote summary contains malformed measurements');
+export async function verifyRulingAttestations(record, add, { fetchImpl = fetch, dstackVerifierUrl = process.env.DSTACK_VERIFIER_URL || DEFAULT_DSTACK_VERIFIER } = {}) {
+  const failures = [];
+  const unavailable = [];
+  for (const [role, call] of [['plan', record.plan], ...record.verdicts.map(call => ['verdict', call])]) {
+    const name = `${role} ${JSON.stringify(call.model)}`;
+    const normalize = value => String(value).replace(/^0x/i, '').toLowerCase();
+    const matches = call.attestation.model_attestations.filter(candidate =>
+      candidate.signing_algo === call.signature.signing_algo &&
+      normalize(candidate.signing_address) === normalize(call.signature.signing_address));
+    if (matches.length !== 1) {
+      add('FAIL', 'Quote measurements', `${name}: signing report is not unique`);
+      failures.push(`${name}: signing report is not unique`);
+      continue;
     }
-    add('NOT CHECKED', 'Quote measurements', `Reported, not compared: ${quote.role} ${JSON.stringify(quote.model)}; signing key ${quote.signingAddress}; ${measurements.map(name => `${name} ${quote[name]}`).join('; ')}`);
+    const reports = [['gateway', call.attestation.gateway_attestation], ['model', matches[0]]];
+    for (const [kind, report] of reports) {
+      const label = `${name} ${kind}`;
+      const stored = call.dstack?.[kind];
+      if (stored) add(stored.error ? 'NOT CHECKED' : dstackPasses(stored) ? 'PASS' : 'FAIL',
+        'Stored dstack verification', `${label}; ${JSON.stringify(stored)}`);
+      try {
+        const result = await verifyWithDstack(report, { url: dstackVerifierUrl, fetchImpl, signal: AbortSignal.timeout(90_000) });
+        if (!dstackPasses(result) || !result.osImageHash || !result.osImageVersion) {
+          const reason = result.reason || `policy status: isValid=${result.isValid}, quote=${result.quoteVerified}, eventLog=${result.eventLogVerified}, image=${result.osImageHashVerified}, ACPI=${result.acpiTablesVerified}, dev=${result.osImageIsDev}, TCB=${result.tcbStatus}, imageVersion=${result.osImageVersion}, imageHash=${result.osImageHash}`;
+          add('FAIL', 'Quote measurements', `Checked now: ${label}; ${reason}`);
+          failures.push(`${label}: ${reason}`);
+        } else {
+          add('PASS', 'Quote measurements', `Checked now: ${label}; MRTD and RTMR0-2 match the published dstack ${result.osImageVersion} image named by os_image_hash ${result.osImageHash.slice(0, 12)}; production build`);
+          if (result.advisoryIds.length) failures.push(`${label}: advisories ${result.advisoryIds.join(', ')}`);
+        }
+      } catch (error) {
+        if (error.unavailable) {
+          unavailable.push(`${label}: ${error.message}`);
+          const { body } = parseTdxQuote(report.intel_quote);
+          const measurements = ['mrtd', 'rtmr0', 'rtmr1', 'rtmr2', 'rtmr3'].map(key => `${key} ${body[key]}`).join('; ');
+          add('NOT CHECKED', 'Quote measurements', `Reported, not compared: ${label}; ${measurements}; ${error.message}`);
+        } else {
+          failures.push(`${label}: ${error.message}`);
+          add('FAIL', 'Quote measurements', `Checked now: ${label}; ${error.message}`);
+        }
+      }
+    }
+    if (call.gpu) add('PASS', 'GPU attestation', `NVIDIA NRAS verdict true, signed token verified; ${name}`);
+    else if (Object.hasOwn(matches[0], 'nvidia_payload')) {
+      try {
+        await verifyGpuPayload(matches[0].nvidia_payload, call.nonce, { fetchImpl });
+        add('PASS', 'GPU attestation', `NVIDIA NRAS verifies the stored evidence (checked now); ${name}`);
+      } catch (error) { add('FAIL', 'GPU attestation', `${name}; ${error.message}`); }
+    } else add('NOT CHECKED', 'GPU attestation', `no GPU evidence stored; ${name}`);
   }
+  if (failures.length) add('FAIL', 'Intel collateral', failures.join('; '));
+  if (unavailable.length) add('NOT CHECKED', 'Attestation limits', `Intel collateral unavailable: ${unavailable.join('; ')}`);
+  if (!failures.length && !unavailable.length) add('PASS', 'Intel collateral', 'TCB UpToDate, no advisories, for every report');
 }
-
 async function readText(url, limit, fetchImpl) {
   let response;
   try { response = await fetchImpl(url, { redirect: 'error', signal: AbortSignal.timeout(30_000) }); }
@@ -121,7 +173,7 @@ async function readText(url, limit, fetchImpl) {
   return new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks));
 }
 
-export async function verifyHostedEnclaveRuling(base = DEFAULT_BASE, betId = DEFAULT_BET, { fetchImpl = fetch, jwks } = {}) {
+export async function verifyHostedEnclaveRuling(base = DEFAULT_BASE, betId = DEFAULT_BET, { fetchImpl = fetch, jwks, dstackVerifierUrl = process.env.DSTACK_VERIFIER_URL || DEFAULT_DSTACK_VERIFIER } = {}) {
   const checks = [];
   const add = (status, check, detail) => checks.push({ status, check, detail });
   let origin;
@@ -133,7 +185,9 @@ export async function verifyHostedEnclaveRuling(base = DEFAULT_BASE, betId = DEF
     if (!UUID.test(betId)) throw new Error('Bet ID must be a UUID');
     betId = betId.toLowerCase();
     origin = url.origin;
+    dstackVerifierUrl = validateDstackVerifierUrl(dstackVerifierUrl);
     add('PASS', 'Arguments', `Bet ${betId} on ${origin}`);
+    add('PASS', 'Dstack verifier', `${dstackVerifierUrl}; run your own: docker run -p 8080:8080 ghcr.io/dstack-tee/dstack-verifier:0.6.3, then pass --dstack-verifier http://localhost:8080`);
   } catch (error) {
     add('FAIL', 'Arguments', error.message);
     return finish(checks);
@@ -167,15 +221,8 @@ export async function verifyHostedEnclaveRuling(base = DEFAULT_BASE, betId = DEF
     return finish(checks);
   }
   add('PASS', 'Bet coverage', `Signed material lists Bet ${betId}; signed terms hash ${coveredBet.termsHash}`);
-  try { quoteMeasurements(record, add, jwks); }
+  try { await verifyRulingAttestations(record, add, { fetchImpl, jwks, dstackVerifierUrl }); }
   catch (error) { add('FAIL', 'Quote measurements', error.message); }
-  add('NOT CHECKED', 'Attestation limits', 'No comparison against published enclave measurements; TCB level, revocation lists and other collateral are not checked. Event logs are replayed when present; GPU evidence is reported per call.');
-
-  for (const [role, call] of [['plan', record.plan], ...record.verdicts.map(call => ['verdict', call])]) {
-    const label = `${role} ${JSON.stringify(call.model)}`;
-    if (call.gpu) add('PASS', 'GPU attestation', `NVIDIA NRAS verdict true, signed token verified; ${label}`);
-    else add('NOT CHECKED', 'GPU attestation', `no GPU evidence stored; ${label}`);
-  }
 
   add('PASS', 'Jury policy', `Models ${record.jury.models.map(model => JSON.stringify(model)).join(', ')}; minimum confidence ${record.jury.minConfidence}; every model must agree for Yes or No`);
   for (const verdict of record.verdicts) {
@@ -239,7 +286,13 @@ export async function verifyHostedEnclaveRuling(base = DEFAULT_BASE, betId = DEF
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const result = await verifyHostedEnclaveRuling(process.argv[2], process.argv[3]);
+  let result;
+  try {
+    const args = parseVerifierArguments(process.argv.slice(2));
+    result = await verifyHostedEnclaveRuling(args.base, args.betId, { dstackVerifierUrl: args.dstackVerifierUrl });
+  } catch (error) {
+    result = finish([{ status: 'FAIL', check: 'Arguments', detail: error.message }]);
+  }
   for (const check of result.checks) console.log(`${check.status} ${check.check}: ${check.detail}`.replace(/[\r\n\u2028\u2029]+/g, ' '));
   console.log(result.summary);
   process.exitCode = result.exitCode;

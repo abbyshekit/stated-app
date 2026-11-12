@@ -1,5 +1,6 @@
 import { isNamedAccount, useNetwork } from './near-network.mjs';
 import { parseReputationTiers } from './reputation.mjs';
+import { validateDstackVerifierUrl } from './dstack-verifier.mjs';
 
 // Enclave rulings decide a Result with no human step, so they run only when asked
 // for in so many words (STATED_ENCLAVE_RULINGS=1) and a key is set. A ruling is
@@ -9,8 +10,14 @@ function nearaiConfig(env, list) {
   const model = env.NEARAI_MODEL || 'Qwen/Qwen3.8-27B';
   const models = list(env.NEARAI_RULING_MODELS);
   const confidence = Number(env.NEARAI_RULING_MIN_CONFIDENCE ?? 0.8);
+  const dstackVerifierUrl = env.STATED_DSTACK_VERIFIER_URL
+    ? validateDstackVerifierUrl(env.STATED_DSTACK_VERIFIER_URL) : '';
+  if (dstackVerifierUrl.startsWith('http:') && env.STATED_FETCH_ALLOW_LOOPBACK !== '1') {
+    throw new Error('STATED_DSTACK_VERIFIER_URL requires https (loopback http is for tests only).');
+  }
   return {
     apiKey,
+    dstackVerifierUrl,
     baseUrl: String(env.NEARAI_BASE_URL || 'https://cloud-api.near.ai/v1').replace(/\/$/, ''),
     model,
     rulings: Boolean(apiKey) && env.STATED_ENCLAVE_RULINGS === '1',

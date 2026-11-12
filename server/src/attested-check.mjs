@@ -33,6 +33,7 @@ function savedRecord(detail, bet, roots) {
   if (!detail || detail.publicInputHash !== inputHash(bet)
     || detail.transactionHash !== bet.settlement_transaction_hash) throw new Error('Stored check does not match the public Result.');
   const record = Object.fromEntries(savedFields.map((key) => [key, detail[key]]));
+  if (Object.hasOwn(detail, 'dstack')) record.dstack = detail.dstack;
   verifyAttestedRecord(record, { roots });
   return record;
 }
@@ -45,7 +46,8 @@ export async function readAttestedCheck(tx, bet, { roots } = {}) {
   try { return savedRecord(row.detail, bet, roots); } catch { return null; }
 }
 
-export async function runAttestedCheck(db, config, betId, reviewerId, { fetchImpl = fetch, fetchEvidence = safeFetch, signal = AbortSignal.timeout(30_000) } = {}) {
+export async function runAttestedCheck(db, config, betId, reviewerId, { fetchImpl = fetch, fetchEvidence = safeFetch,
+  signal = AbortSignal.timeout(config.nearai?.dstackVerifierUrl ? 120_000 : 30_000) } = {}) {
   if (!config.nearai?.apiKey) throw new UserError('Enclave checks are unavailable.', 404);
   const actor = idOf(reviewerId);
   try {
@@ -80,6 +82,7 @@ export async function runAttestedCheck(db, config, betId, reviewerId, { fetchImp
       const record = { model, requestBody, responseBody, requestHash, responseHash, completionId, signature,
         attestation, nonce, verdict, evidenceTextHash: sha256(Buffer.from(evidenceText)), startedAt, fetchedAt,
         attestedAt, completedAt, publicInputHash: inputHash(bet), transactionHash: bet.settlement_transaction_hash };
+      if (Object.hasOwn(completion, 'dstack')) record.dstack = completion.dstack;
       verifyAttestedRecord(record, { roots: config.nearai.quoteRoots });
       signal.throwIfAborted();
       await tx.query(`insert into bilateral_bet_events (bet_id,actor_user_id,kind,detail)

@@ -120,7 +120,7 @@ test('price ruling shows the post, three models, confidence, window, price and v
   assert.doesNotMatch(response.text, /Private source words|private_author/);
   assert.ok(response.text.includes(`<b><span class="hl">Yes</span></b><span>${dayMonth(record.decidedAt, { year: true })}</span>`));
   assert.doesNotMatch(response.text, /<h2>NEAR AI enclave jury<\/h2>/);
-  assert.ok(response.text.includes('The NEAR AI enclave jury agreed, so @public_bettor wins the 0.2 test NEAR pot.'));
+  assert.ok(response.text.includes('The NEAR AI enclave jury agreed, so @public_bettor, who bet yes, wins the 0.2 test NEAR pot.'));
   assert.match(response.text, /<ul class="jury-rail">/);
   assert.equal((response.text.match(/<span>Yes, 95% sure<\/span>/g) || []).length, MODELS.length);
   assert.match(response.text, /<b>Qwen3\.8 27B<\/b>/);
@@ -182,6 +182,37 @@ test('the GPU verified line requires valid stored proof for every juror', async 
   assert.match(response.text, /Not checked:.*the GPU’s own attestation/);
 });
 
+test('dstack verification lines require every gateway and signing model, including the plan', async () => {
+  const record = await insertRuling();
+  const result = { verifier: 'https://verifier.example', checkedAt: new Date().toISOString(),
+    isValid: true, quoteVerified: true, eventLogVerified: true, osImageHashVerified: true,
+    acpiTablesVerified: true, osImageIsDev: false, osImageVersion: '0.5.12', teeVariant: 'dstack-tdx',
+    tcbStatus: 'UpToDate', advisoryIds: [], osImageHash: '91'.repeat(32), composeHash: '87'.repeat(32), reason: null };
+  const calls = [record.plan, ...record.verdicts];
+  for (const call of calls) call.dstack = { gateway: structuredClone(result), model: structuredClone(result) };
+  const save = () => s.db.query("update bilateral_bet_events set detail=$2 where bet_id=$1 and kind='enclave_ruling'", [bet.id, record]);
+  await save();
+  let response = await s.browser().get(path());
+  assert.equal(response.status, 200);
+  assert.ok(response.text.includes('<p>Boot measurements match the published dstack OS 0.5.12 image, production build, checked by the official dstack verifier.</p>'));
+  assert.ok(response.text.includes('<p>Intel TCB is up to date with no security advisories.</p>'));
+  assert.doesNotMatch(response.text, /Not checked: enclave measurements/);
+  for (const call of calls) for (const role of ['gateway', 'model']) {
+    for (const value of [undefined, { verifier: result.verifier, checkedAt: result.checkedAt, error: 'Timed out' },
+      { ...result, isValid: false }, { ...result, tcbStatus: 'OutOfDate' }]) {
+      const original = call.dstack;
+      if (value === undefined) delete call.dstack;
+      else call.dstack[role] = value;
+      await save();
+      response = await s.browser().get(path());
+      assert.equal(response.status, 200);
+      assert.doesNotMatch(response.text, /Boot measurements match|Intel TCB is up to date/);
+      call.dstack = original;
+      call.dstack[role] = structuredClone(result);
+    }
+  }
+});
+
 test('submitted evidence shows its link count and keeps the signed text in the JSON', async () => {
   const yes = await addEvidence({ side: 'yes', title: 'Official report', url: 'https://posted.example.org/report',
     finalUrl: 'https://news.example.org/report', text: '<script>alert("owned")</script>\n\nThe event happened.' });
@@ -212,7 +243,7 @@ test('review mode computes agreement from the settled Bet rather than the stored
   assert.equal(response.status, 200);
   assert.match(response.text, /class="verdict ruling-verdict yes"><b><span class="hl">Yes<\/span><\/b>/);
   const settled = await s.db.one('select settled_at from bilateral_bets where id=$1', [bet.id]);
-  assert.ok(response.text.includes(`<p class="gut quiet">A Stated reviewer recorded Yes on ${dayMonth(settled.settled_at)}. The jury agreed.</p>`));
+  assert.ok(response.text.includes('<p class="gut">A Stated reviewer recorded Yes. The jury agreed.</p>'));
   assert.doesNotMatch(response.text, /Ruled yes/);
   assert.ok(response.text.includes('A second opinion does not change the payout.'));
   assert.doesNotMatch(response.text, /both stakes go back/, 'a second opinion never moves money');
