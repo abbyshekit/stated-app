@@ -1,6 +1,6 @@
 # Deploying Stated
 
-One Node service and one PostgreSQL database behind a single HTTPS origin. The image is the `Dockerfile` at the repository root; `railway.json` tells Railway to build it, run `node server/src/main.mjs` and wait for `/healthz`. Nothing in this file has been run against a hosting account. The container checks at the end were run locally on 10 November 2026.
+One Node service and one PostgreSQL database behind a single HTTPS origin. The image is the `Dockerfile` at the repository root; `railway.json` tells Railway to build it, run `node server/src/main.mjs` and wait for `/healthz`. The hosted app, https://stated-production.up.railway.app, runs this way on Railway. The table gives each setting's first-deployment value; the hosted app has since turned on the X worker, replies, bets from replies, enclave rulings and Stated Court. The container checks at the end were run locally on 10 November 2026.
 
 ## What the server refuses to do
 
@@ -19,10 +19,16 @@ One Node service and one PostgreSQL database behind a single HTTPS origin. The i
 | `X_CLIENT_ID`, `X_CLIENT_SECRET` | from the Stated app on console.x.com | The same app the local server uses. |
 | `X_BOT_USER_ID` | the bot's numeric X ID | Stops any other account from being bound as the bot. |
 | `STATED_ADMIN_X_IDS` | the operator's numeric X ID | Who may record outcomes. |
-| `NEARAI_API_KEY` | leave unset to disable checks | Enables the admin-only public Result check. Set as a service secret. |
+| `NEARAI_API_KEY` | leave unset to disable rulings and checks | Needed for enclave rulings and the admin-only public Result check. Set as a service secret. |
 | `NEARAI_BASE_URL` | `https://cloud-api.near.ai/v1` | NEAR AI Cloud gateway; credentials are never sent to the evidence site. |
-| `NEARAI_MODEL` | `Qwen/Qwen3.8-27B` | TEE model from the [quickstart](https://docs.near.ai/cloud/quickstart). Use a canonical model ID; aliases are rejected. |
-| `STATED_NEAR_CONTRACT` | `stated-escrow-52081551be.testnet` | The version 2 escrow on testnet; its account has no access keys. Leave empty to host with Bets off. The earlier `stated88cdfc066d7ed705a.testnet` is version 1 and cannot name a referee. |
+| `NEARAI_MODEL` | `Qwen/Qwen3.8-27B` | TEE model from the [quickstart](https://docs.near.ai/cloud/quickstart), and the only juror when `NEARAI_RULING_MODELS` is unset. Use a canonical model ID; aliases are rejected. |
+| `STATED_ENCLAVE_RULINGS` | `1` on the host | Lets the NEAR AI jury decide Results with no human step. Needs `NEARAI_API_KEY` and `STATED_DSTACK_VERIFIER_URL`. |
+| `NEARAI_RULING_MODELS` | `Qwen/Qwen3.8-27B,deepseek-ai/DeepSeek-V4.1-Flash-1017,z-ai/glm-5.3-flash` on the host | The jury, two to ten models in order. Every model must give the same answer at `NEARAI_RULING_MIN_CONFIDENCE` (default 0.8, unset on the host). The host's roster is the one in [its signed ruling](../evidence/enclave-ruling-3668aa04.json). |
+| `STATED_DSTACK_VERIFIER_URL` | an `https` dstack verifier | Each juror's boot measurements are checked against the published dstack image through it. The host uses a Stated-hosted copy of the official verifier image. |
+| `STATED_REQUIRE_GPU_EVIDENCE` | leave unset | A model call counts only with the signing model's NVIDIA GPU evidence. `0` is refused unless NEAR AI is a loopback or `.test` fake. |
+| `STATED_EVIDENCE_WINDOW_SECONDS` | `3600` on the host | How long after a bet's deadline the bettors can post links. The code default is a day (`86400`). |
+| `STATED_COURT_DAO`, `STATED_COURT_RELAY` | `stated-court.sputnik-v2.testnet`, `jury.stated-court-relay.testnet` on the host | Stated Court. New reply bets name the DAO as referee once the server has checked its network, policy, relay, window and bond. |
+| `STATED_NEAR_CONTRACT` | `stated-escrow-52081551be.testnet` | The escrow on testnet; its `version` view returns `"2"` and its account has no access keys. Leave empty to host with Bets off. The earlier `stated88cdfc066d7ed705a.testnet` runs an older contract with no `version` method. |
 | `STATED_PLAY` | `1` to allow Bets from replies | Needs the version 2 contract, the X worker and replies on. |
 | `STATED_PLAY_TREASURY`, `STATED_PLAY_TREASURY_KEY` | a `.testnet` account and its `ed25519:` secret key | Funds new play accounts. Testnet only. Set the key through `--stdin`. `STATED_PLAY_AUTOPROVISION=1` makes one from the faucet instead, which is meant for demos. |
 | `STATED_NEAR_RPC` | leave unset | Comma-separated RPC endpoints. The default is FastNEAR's two testnet endpoints; `rpc.testnet.near.org` is deprecated and rate-limits. |
@@ -32,6 +38,8 @@ One Node service and one PostgreSQL database behind a single HTTPS origin. The i
 | `PORT` | set by Railway | Do not set it by hand. |
 
 Secrets go in as service variables through the dashboard or `railway variable set --stdin`, never in a file in the repository.
+
+Enclave rulings, which decide Results, are a separate path from the check below: each juror's call needs its Intel TDX quote, GPU evidence, dstack boot measurements and an up-to-date TCB, as the README describes.
 
 The evidence page offers **Run enclave check** only after an admin publishes evidence for a public referee Result. Each attempt has a 30-second deadline. The first successful signed check becomes an append-only Bet event; failures store nothing. A check never changes the Result or payout. The request contains public Bet terms and published evidence only.
 
@@ -107,7 +115,7 @@ Take a dump before every deploy that changes `server/src/schema.sql`. Schema cha
 
 - `/signin/x` has no rate limit of its own. Sign-in states older than an hour are purged, which bounds the table; a proxy rule is the place for a per-address limit.
 - A deploy health check gates the rollout only. Nothing watches the app afterwards; `/healthz` is there for an external monitor.
-- Phone wallet handoff, a hosted share preview on X and a delivered bot reply are unverified until they are run on the public origin.
+- Phone wallet handoff and a hosted share preview on X are unverified until they are run on the public origin. Bot replies from the public origin are recorded in the [12 November payout evidence](../evidence/hosted-court-payout-testnet-20261112.json).
 
 ## Container checks already run locally
 

@@ -1,0 +1,63 @@
+{
+  "date": "2026-11-12T22:32:30.413Z",
+  "subject": "Finding H1: event-loop time of extractArticle on 2,000,000 bytes of one unclosed opening tag repeated",
+  "input": "unit = `<${tag}>`; html = unit.repeat(Math.ceil(2_000_000 / unit.length)).slice(0, 2_000_000); extractArticle(html, 'https://example.org')",
+  "method": "Each input runs in its own Node child process, timed inside the child with performance.now() around the one call; the four inputs run in parallel; a child still running at the limit is killed and recorded with stoppedAfterMs.",
+  "machine": {
+    "node": "v26.12.1",
+    "platform": "darwin arm64",
+    "cpus": 10
+  },
+  "reviewed": {
+    "commit": "847c720 (af6d2bc in the private working repository, the same files)",
+    "limitSeconds": 420,
+    "results": [
+      {
+        "tag": "nav",
+        "ms": 233338,
+        "outcome": "read"
+      },
+      {
+        "tag": "script",
+        "ms": 99640,
+        "outcome": "read"
+      },
+      {
+        "tag": "p",
+        "ms": 409902,
+        "outcome": "read"
+      },
+      {
+        "tag": "blockquote",
+        "ms": 33,
+        "outcome": "read"
+      }
+    ]
+  },
+  "fixed": {
+    "commit": "the commit that adds this file",
+    "limitSeconds": 60,
+    "results": [
+      {
+        "tag": "nav",
+        "ms": 20,
+        "outcome": "That page has too many HTML tags to read."
+      },
+      {
+        "tag": "script",
+        "ms": 7,
+        "outcome": "read"
+      },
+      {
+        "tag": "p",
+        "ms": 7,
+        "outcome": "That page has too many HTML tags to read."
+      },
+      {
+        "tag": "blockquote",
+        "ms": 26,
+        "outcome": "That page has too many HTML tags to read."
+      }
+    ]
+  }
+}

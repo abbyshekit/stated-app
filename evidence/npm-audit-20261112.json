@@ -1,0 +1,140 @@
+{
+  "date": "2026-11-12T22:33:32.452Z",
+  "command": "npm audit --omit=dev --json",
+  "metadata": {
+    "vulnerabilities": {
+      "info": 0,
+      "low": 10,
+      "moderate": 0,
+      "high": 0,
+      "critical": 0,
+      "total": 10
+    },
+    "dependencies": {
+      "prod": 194,
+      "dev": 27,
+      "optional": 52,
+      "peer": 8,
+      "peerOptional": 0,
+      "total": 254
+    }
+  },
+  "vulnerabilities": {
+    "@meteorwallet/sdk": {
+      "severity": "low",
+      "via": [
+        "@near-js/accounts",
+        "@near-js/crypto",
+        "@near-js/keystores",
+        "@near-js/keystores-browser",
+        "@near-js/providers",
+        "@near-js/signers",
+        "@near-js/transactions",
+        "secp256k1"
+      ],
+      "fixAvailable": {
+        "name": "@meteorwallet/sdk",
+        "version": "1.0.24",
+        "isSemVerMajor": true
+      }
+    },
+    "@near-js/accounts": {
+      "severity": "low",
+      "via": [
+        "@near-js/crypto",
+        "@near-js/providers",
+        "@near-js/signers",
+        "@near-js/transactions"
+      ],
+      "fixAvailable": true
+    },
+    "@near-js/crypto": {
+      "severity": "low",
+      "via": [
+        "secp256k1"
+      ],
+      "fixAvailable": {
+        "name": "@meteorwallet/sdk",
+        "version": "1.0.24",
+        "isSemVerMajor": true
+      }
+    },
+    "@near-js/keystores": {
+      "severity": "low",
+      "via": [
+        "@near-js/crypto"
+      ],
+      "fixAvailable": {
+        "name": "@near-js/keystores",
+        "version": "0.0.12",
+        "isSemVerMajor": true
+      }
+    },
+    "@near-js/keystores-browser": {
+      "severity": "low",
+      "via": [
+        "@near-js/crypto",
+        "@near-js/keystores"
+      ],
+      "fixAvailable": true
+    },
+    "@near-js/providers": {
+      "severity": "low",
+      "via": [
+        "@near-js/crypto",
+        "@near-js/transactions"
+      ],
+      "fixAvailable": {
+        "name": "@meteorwallet/sdk",
+        "version": "1.0.24",
+        "isSemVerMajor": true
+      }
+    },
+    "@near-js/signers": {
+      "severity": "low",
+      "via": [
+        "@near-js/crypto",
+        "@near-js/keystores",
+        "@near-js/transactions"
+      ],
+      "fixAvailable": {
+        "name": "@meteorwallet/sdk",
+        "version": "1.0.24",
+        "isSemVerMajor": true
+      }
+    },
+    "@near-js/transactions": {
+      "severity": "low",
+      "via": [
+        "@near-js/crypto"
+      ],
+      "fixAvailable": {
+        "name": "@near-js/transactions",
+        "version": "1.2.2",
+        "isSemVerMajor": true
+      }
+    },
+    "elliptic": {
+      "severity": "low",
+      "via": [
+        "Elliptic Uses a Cryptographic Primitive with a Risky Implementation"
+      ],
+      "fixAvailable": {
+        "name": "@meteorwallet/sdk",
+        "version": "1.0.24",
+        "isSemVerMajor": true
+      }
+    },
+    "secp256k1": {
+      "severity": "low",
+      "via": [
+        "elliptic"
+      ],
+      "fixAvailable": {
+        "name": "@meteorwallet/sdk",
+        "version": "1.0.24",
+        "isSemVerMajor": true
+      }
+    }
+  }
+}
