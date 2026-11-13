@@ -1,7 +1,7 @@
 // INTEGRATION: Authorized Marked presentation; escrow closure never implies withdrawal.
 // Presentation helpers for the Marked look: how long until we find out, and
 // the two-seat Bet block. Pure functions; callers pass authorized projections.
-import { html } from './html.mjs';
+import { html, utcTime } from './html.mjs';
 import { face } from './certificate.mjs';
 import { formatTestNear } from './near-escrow.mjs';
 import { unit } from './near-network.mjs';
@@ -38,7 +38,7 @@ export function betState(bet, now = Date.now()) {
   return {
     funded,
     expired,
-    open: bet.status === 'offered' && funded && !expired,
+    open: bet.status === 'offered' && funded && new Date(bet.accept_by).getTime() > now,
     decided: bet.status === 'settled' && (bet.outcome === 'yes' || bet.outcome === 'no'),
   };
 }
@@ -48,19 +48,16 @@ export function betState(bet, now = Date.now()) {
 export function nextBetTime(value, now = Date.now()) {
   const date = new Date(value);
   const left = date.getTime() - now;
-  const clock = new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'UTC', hour: '2-digit', minute: '2-digit',
-  }).format(date);
-  const day = dayMonth(date);
+  const exact = utcTime(date);
   if (left > 0 && left < 2 * 86400000) {
     const minutes = left < 3600000;
     const count = Math.ceil(left / (minutes ? 60000 : 3600000));
     const unit = minutes ? 'minute' : 'hour';
-    return `in ${count} ${unit}${count === 1 ? '' : 's'}, ${clock} UTC ${day}`;
+    return `in ${count} ${unit}${count === 1 ? '' : 's'}, ${exact}`;
   }
   // Whole UTC days, so the count agrees with the date beside it ("in 2 days, … 14 Nov" on 12 Nov).
-  if (left > 0) return `in ${Math.floor(date.getTime() / DAY) - Math.floor(now / DAY)} days, ${clock} UTC ${day}`;
-  return `${clock} UTC ${day}`;
+  if (left > 0) return `in ${Math.floor(date.getTime() / DAY) - Math.floor(now / DAY)} days, ${exact}`;
+  return `${exact}`;
 }
 
 export function betLead(bet, { viewer = null } = {}) {

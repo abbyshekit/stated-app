@@ -2,7 +2,7 @@
 // it holds, the step that hands it over to them, and, with real NEAR, how they
 // pay into it from another chain.
 import Decimal from 'decimal.js';
-import { html } from './html.mjs';
+import { html, utcTime } from './html.mjs';
 import { depositFor, fundingOn, lapsed, MAX_DEPOSIT_NEAR, MIN_DEPOSIT_NEAR, recentDeposits, refreshDeposit, startDeposit } from './funding.mjs';
 import { shortAmount } from './intents.mjs';
 import { accountLink, network, transactionLink, unit } from './near-network.mjs';
@@ -17,7 +17,7 @@ export function tokenChoices(list, chosenId) {
   return [...groups].map(([name, items]) => html`<optgroup label="${name}">${items.map((t) => html`<option value="${t.assetId}"${t.assetId === chosenId ? ' selected' : ''}>${t.symbol} on ${t.chainName}</option>`)}</optgroup>`);
 }
 
-const clock = (date) => `${new Date(date).toISOString().slice(11, 16)} UTC`;
+const clock = utcTime;
 const amount = near;
 const betReference = (value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value || '') ? value.toLowerCase() : '';
 const returnToBet = (id) => `/bets/${id}?join=1#accept`;

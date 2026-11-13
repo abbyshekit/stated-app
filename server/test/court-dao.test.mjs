@@ -162,8 +162,8 @@ test('a jury Result files one proposal at once; after the window the jury approv
   clearCourtCache();
   const page = await s.browser().get(`/bets/${first.betId}`);
   assert.equal(page.status, 200);
-  assert.match(page.text, /<dt>Settlement<\/dt><dd>The recorded Result becomes a proposal in Stated Court, the Sputnik DAO <span class="mono">stated-court\.sputnik-v2\.testnet<\/span> that referees this bet\./);
-  assert.match(page.text, /<p class="gut settlement-line">All 2 models said yes\. The winner was paid\.<\/p>/);
+  assert.match(page.text, /<dt>Settlement<\/dt><dd>The recorded Result becomes a proposal in <a class="tl" href="\/court">Stated Court<\/a>, the Sputnik DAO <span class="mono">stated-court\.sputnik-v2\.testnet<\/span> that referees this bet\./);
+  assert.match(page.text, /<p class="gut settlement-line">All 2 models, each in a NEAR AI enclave, said yes\. The winner was paid\.<\/p>/);
   assert.match(page.text, /<p class="gut link-row"><a class="tl" href="\/bets\/[0-9a-f-]+\/ruling">See the ruling<\/a>/);
   assert.doesNotMatch(page.text, /Proposal 0 is approved|is the referee/, 'the page states the record, not the old Court line');
   // With the window on record (filed ten minutes before settling), the sentence names Court.
@@ -171,7 +171,12 @@ test('a jury Result files one proposal at once; after the window the jury approv
       (select to_char((settled_at - interval '11 minutes') at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') from bilateral_bets where id = $1)))
     where bet_id = $1 and kind = 'court_proposal'`, [first.betId]);
   const stood = await s.browser().get(`/bets/${first.betId}`);
-  assert.match(stood.text, />All 2 models said yes\. Stated Court let it stand for ten minutes, then it paid\.</);
+  assert.match(stood.text, />All 2 models, each in a NEAR AI enclave, said yes\. <a class="tl" href="\/court">Stated Court<\/a> let it stand for ten minutes, then it paid\.</);
+  for (const path of ['/', `/bets/${first.betId}/ruling`]) {
+    const trust = await s.browser().get(path);
+    assert.equal(trust.status, 200);
+    assert.match(trust.text, /<p class="gut settlement-line">[^]*?<a class="tl" href="\/court">Stated Court<\/a> let it stand/);
+  }
 });
 
 test('a council Reject before the window leaves the Bet open, records it, and is no error', async () => {
@@ -313,9 +318,13 @@ test('/court lists the DAO’s members, its rule and its Stated proposals', asyn
     assert.match(fold, detail);
     assert.doesNotMatch(visibleOpen, detail, 'members, thresholds and visible account ids stay inside the fold');
   }
-  assert.match(page.text, new RegExp(`<a class="tl" href="/bets/${first.betId}">(?:<span class="hl">)?[^<]+(?:</span>)?</a></p>\\s*<p class="court-action"><b>Let it stand</b></p>\\s*<p class="meta">The models said yes\\. The winner was paid\\. 1 for, 0 against</p>`));
-  assert.match(page.text, /<b>Voted it down<\/b><\/p>\s*<p class="meta">[^<]*The ruling did not pay\.[^<]*0 for, 1 against<\/p>/);
-  assert.match(page.text, /See the vote on NEAR<\/a>/);
+  const row = page.text.split('<li class="prow court-ruling').find(part => part.includes(`href="/bets/${first.betId}"`))?.split('</li>')[0];
+  assert.ok(row, 'the paid bet has a court row');
+  assert.match(row, /<p class="court-action"><b>Let it stand<\/b> \d{1,2} [A-Z][a-z]{2}<\/p>/);
+  assert.ok(row.includes(`The models said yes. @${first.taker.username} was paid 0.2 test NEAR.`));
+  assert.match(row, /<a class="tl" href="https:\/\/testnet\.nearblocks\.io\/address\/stated-court\.sputnik-v2\.testnet"[^>]*>1 for, 0 against, on NEAR<\/a>/);
+  assert.match(page.text, /<b>Voted it down<\/b> \d{1,2} [A-Z][a-z]{2}<\/p>\s*<p class="meta">[^<]*The council voted it down, so it did not pay\. <a[^>]+>0 for, 1 against, on NEAR<\/a><\/p>/);
+  assert.doesNotMatch(page.text, /See the vote on NEAR|<h2 class="lead">Rulings<\/h2>/);
   assert.doesNotMatch(page.text, /Proposal \d+ is/);
   const off = { ...s.config, court: { dao: '' } };
   assert.equal(off.court.dao, '');

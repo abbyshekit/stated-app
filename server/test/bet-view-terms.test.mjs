@@ -12,13 +12,13 @@ const base = {
 
 test('a Court-refereed bet describes the Court path, and other bets keep their wording', () => {
   const court = String(betTerms({ ...base, referee_wallet: 'stated-court.sputnik-v2.testnet' }, { juryReview: true }));
-  assert.match(court, /The recorded Result becomes a proposal in Stated Court/);
+  assert.match(court, /The recorded Result becomes a proposal in <a class="tl" href="\/court">Stated Court<\/a>/);
   assert.match(court, /Its council can vote the proposal down for ten minutes; after that the DAO settles the contract\./);
   assert.match(court, /A reviewer can ask the council to vote a ruling down within those ten minutes\./);
   assert.doesNotMatch(court, /carries it to the contract|correct a ruling before it pays out/);
 
   const mainnetCourt = String(betTerms({ ...base, referee_wallet: 'stated-court.sputnik-dao.near' }));
-  assert.match(mainnetCourt, /becomes a proposal in Stated Court/);
+  assert.match(mainnetCourt, /becomes a proposal in <a class="tl" href="\/court">Stated Court<\/a>/);
   assert.doesNotMatch(mainnetCourt, /A reviewer can/, 'no reviewer sentence without jury review');
 
   const server = String(betTerms({ ...base, referee_wallet: 'referee.stated-play-6cf0876dd7.testnet' }, { juryReview: true }));

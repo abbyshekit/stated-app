@@ -1,6 +1,6 @@
 // INTEGRATION: the Marked look for Bets; callers supply an authorized Bet projection.
 // The two-seat block itself lives in marked.mjs; these helpers wrap it.
-import { html, raw } from './html.mjs';
+import { html, raw, utcTime } from './html.mjs';
 import { betBlock as markedBetBlock, betLead, betState, dayMonth, nextBetTime } from './marked.mjs';
 
 export { nextBetTime };
@@ -13,9 +13,7 @@ export const BET_STATUS = {
   disputed: 'Result disputed', settled: 'Result agreed', cancelled: 'Offer cancelled',
   expired: 'Offer expired', refunded: 'Refund credited', unverified: 'Verification needed',
 };
-export const betTime = (value) => new Intl.DateTimeFormat('en-GB', {
-  timeZone: 'UTC', hour: '2-digit', minute: '2-digit',
-}).format(new Date(value)) + ` UTC ${dayMonth(value)}`;
+export const betTime = utcTime;
 
 
 // DESIGN.md: the Result marks the words, on both the Bet and its ruling page.
@@ -79,7 +77,7 @@ export function betTerms(bet, { extra = '', open = false, title = 'Rules', juryR
     <dt>Result after</dt><dd>${nextBetTime(bet.resolve_at)}</dd>
     <dt>Stake back from</dt><dd>${nextBetTime(new Date(new Date(bet.resolve_at).getTime() + 7 * 86400000))}</dd>
     <dt>Settlement</dt><dd>${courtReferee(bet.referee_wallet)
-      ? html`The recorded Result becomes a proposal in Stated Court, the Sputnik DAO <span class="mono">${bet.referee_wallet}</span> that referees this bet. Its council can vote the proposal down for ten minutes; after that the DAO settles the contract. The referee can only choose yes, no or void between the two sides; it cannot take the stakes. With no Result, each side takes its stake back after that date.${juryReview ? ' A reviewer can ask the council to vote a ruling down within those ten minutes.' : ''}`
+      ? html`The recorded Result becomes a proposal in <a class="tl" href="/court">Stated Court</a>, the Sputnik DAO <span class="mono">${bet.referee_wallet}</span> that referees this bet. Its council can vote the proposal down for ten minutes; after that the DAO settles the contract. The referee can only choose yes, no or void between the two sides; it cannot take the stakes. With no Result, each side takes its stake back after that date.${juryReview ? ' A reviewer can ask the council to vote a ruling down within those ten minutes.' : ''}`
       : bet.referee_wallet
       ? html`Stated’s recorded Result for the post decides, and the referee account <span class="mono">${bet.referee_wallet}</span> carries it to the contract. The referee can only choose yes, no or void between the two sides; it cannot take the stakes. With no Result, each side takes its stake back after that date.${juryReview ? ' A reviewer can correct a ruling before it pays out.' : ''}`
       : html`Both must agree on the result. A result the other side leaves unanswered for two days stands. Without agreement, each can take their stake back after that date.${juryReview ? ' A reviewer can correct a ruling before it pays out.' : ''}`}</dd>
@@ -127,7 +125,7 @@ export function betList(rows, { viewer = null, faces = null, hall = false } = {}
     if (hall) {
       const winner = bet.outcome === bet.creator_side ? bet.creator_username : bet.acceptor_username;
       const phrase = bet.status === 'settled' && ['yes', 'no'].includes(bet.outcome)
-        ? `${winner ? `@${winner}` : `The ${bet.outcome} side`} won the ${formatTestNear((BigInt(bet.stake_yocto) * 2n).toString())} ${unit()} pot`
+        ? `${winner ? `@${winner}` : `The ${bet.outcome} side`} won the ${formatTestNear((BigInt(bet.stake_yocto) * 2n).toString())} ${unit()} pot.`
         : status === 'Offer expired' ? status : bet.status === 'offered' ? `Offer closes ${nextBetTime(bet.accept_by)}`
           : ['accepted', 'proposed', 'disputed'].includes(bet.status) ? 'Both sides are in'
             : bet.status === 'settled' && bet.outcome === 'void' ? 'Called off'

@@ -41,6 +41,20 @@ export function when(value) {
   }).format(new Date(value));
 }
 
+// DESIGN.md: exact times share one UTC clock and calendar date.
+export function utcTime(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return '';
+  const clock = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'UTC', hour: '2-digit', minute: '2-digit',
+  }).format(date);
+  const day = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'UTC', day: 'numeric', month: 'short', year: 'numeric',
+  }).format(date);
+  return `${clock} UTC ${day}`;
+}
+
 export function pct(p) {
   return p == null ? '' : `${Math.round(Number(p) * 100)}%`;
 }

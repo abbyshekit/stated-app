@@ -11,7 +11,13 @@ export function jurySentence(bet) {
   const all = ruling.verdicts.every(verdict => verdict.outcome === ruling.outcome
     && verdict.confidence >= ruling.minConfidence);
   if (!all || !['yes', 'no'].includes(ruling.outcome)) return '';
-  return `${count === 3 ? 'All three' : `All ${count}`} models said ${ruling.outcome}.`;
+  return count === 1 ? `The model, in a NEAR AI enclave, said ${ruling.outcome}.`
+    : `${count === 3 ? 'All three' : `All ${count}`} models, each in a NEAR AI enclave, said ${ruling.outcome}.`;
+}
+
+// DESIGN.md: Court trust links; record-derived words remain escaped.
+export function settlementMarkup(sentence) {
+  return html`${String(sentence).split('Stated Court').map((part, index) => html`${index ? html`<a class="tl" href="/court">Stated Court</a>` : ''}${part}`)}`;
 }
 
 export async function settlementSentence(db, config, bet) {

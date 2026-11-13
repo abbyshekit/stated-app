@@ -99,7 +99,7 @@ const signinLinks = (text) => text.match(/href="\/signin[^"]*"/g) || [];
 test('an open Prediction with a Bet waiting leads with the dare, and a signed-out visitor gets exactly one way to sign in', async () => {
   const page = await anon.get(`/u/lena/${saveId}`);
   assert.equal(page.status, 200);
-  assert.match(page.text, /<p class="lead">@priya dares you<span>Offer closes in \d+ (?:minutes?|hours?|days?), \d{2}:\d{2} UTC \d{1,2} \w{3}<\/span><\/p>/);
+  assert.match(page.text, /<p class="lead">@priya dares you<span>Offer closes in \d+ (?:minutes?|hours?|days?), \d{2}:\d{2} UTC \d{1,2} \w{3} \d{4}<\/span><\/p>/);
   assert.match(page.text, /<b>You\?<\/b><span>bet yes<\/span>/);
   assert.match(page.text, /<b>@priya<\/b><span>bet no<\/span>/);
   const join = encodeURIComponent(`/bets/${openBet.id}?join=1#accept`);

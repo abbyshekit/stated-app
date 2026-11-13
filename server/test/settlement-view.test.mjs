@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { juryLogos, jurySentence, rulingOnEvidence, settlementSentence } from '../src/settlement-view.mjs';
+import { juryLogos, jurySentence, settlementMarkup, rulingOnEvidence, settlementSentence } from '../src/settlement-view.mjs';
 
 // Copy the public signed corpus; mutate projections, never its signed material.
 const record = JSON.parse(readFileSync(new URL('../../evidence/enclave-ruling-3668aa04.json', import.meta.url))).record;
@@ -19,9 +19,9 @@ const detail = { dao: payout.court.dao, outcome: record.outcome,
 const db = { one: async () => ({ detail }) };
 
 test('jury summary follows the saved verdict count, confidence and outcome', () => {
-  assert.equal(jurySentence(base), 'All three models said yes.');
+  assert.equal(jurySentence(base), 'All three models, each in a NEAR AI enclave, said yes.');
   const two = structuredClone(base); two.enclave.verdicts.pop();
-  assert.equal(jurySentence(two), 'All 2 models said yes.');
+  assert.equal(jurySentence(two), 'All 2 models, each in a NEAR AI enclave, said yes.');
   for (const mutate of [
     bet => { bet.enclave.mode = 'review'; },
     bet => { bet.enclave.verdicts[0].outcome = 'no'; },
@@ -37,19 +37,19 @@ test('jury summary follows the saved verdict count, confidence and outcome', () 
 });
 
 test('Court waiting and payment require matching filing, elapsed window and verified withdrawal', async () => {
-  assert.equal(await settlementSentence(db, config, base), 'All three models said yes. Stated Court let it stand for ten minutes, then settled it.');
-  assert.equal(await settlementSentence(db, config, { ...base, payout_completed: true }), 'All three models said yes. Stated Court let it stand for ten minutes, then it paid.');
+  assert.equal(await settlementSentence(db, config, base), 'All three models, each in a NEAR AI enclave, said yes. Stated Court let it stand for ten minutes, then settled it.');
+  assert.equal(await settlementSentence(db, config, { ...base, payout_completed: true }), 'All three models, each in a NEAR AI enclave, said yes. Stated Court let it stand for ten minutes, then it paid.');
   for (const changed of [
     { ...base, status: 'accepted' },
     { ...base, settled_by: 'agreement' },
     { ...base, settled_at: detail.filedAt },
     { ...base, referee_wallet: 'another.testnet' },
     { ...base, settlement_transaction_hash: null },
-  ]) assert.equal(await settlementSentence(db, config, changed), 'All three models said yes.');
+  ]) assert.equal(await settlementSentence(db, config, changed), 'All three models, each in a NEAR AI enclave, said yes.');
   for (const filed of [null, { ...detail, dao: 'another.testnet' }, { ...detail, outcome: 'no' }, { ...detail, filedAt: 'invalid' }]) {
-    assert.equal(await settlementSentence({ one: async () => filed && ({ detail: filed }) }, config, base), 'All three models said yes.');
+    assert.equal(await settlementSentence({ one: async () => filed && ({ detail: filed }) }, config, base), 'All three models, each in a NEAR AI enclave, said yes.');
   }
-  assert.equal(await settlementSentence(db, config, { ...base, outcome: 'no', payout_completed: true }), 'All three models said yes. A reviewer corrected the enclave’s ruling.');
+  assert.equal(await settlementSentence(db, config, { ...base, outcome: 'no', payout_completed: true }), 'All three models, each in a NEAR AI enclave, said yes. A reviewer corrected the enclave’s ruling.');
   assert.equal(record.material.claim, base.claim);
 });
 
@@ -59,4 +59,17 @@ test('home leads only with a ruling made on evidence', () => {
   assert.equal(rulingOnEvidence({ enclave: { source: 'submitted', itemCount: 0 } }), false, 'no evidence arrived');
   assert.equal(rulingOnEvidence({ enclave: null }), false);
   assert.equal(rulingOnEvidence(null), false);
+});
+
+test('settlement links the Court without treating record text as markup', async () => {
+  const sentence = await settlementSentence(db, config, base);
+  const markup = String(settlementMarkup(sentence));
+  assert.match(markup, /<a class="tl" href="\/court">Stated Court<\/a> let it stand/);
+  assert.equal(String(settlementMarkup('<script>private</script> Stated Court')), '&lt;script&gt;private&lt;/script&gt; <a class="tl" href="/court">Stated Court</a>');
+  const no = structuredClone(base);
+  no.enclave.outcome = 'no';
+  for (const verdict of no.enclave.verdicts) verdict.outcome = 'no';
+  assert.equal(jurySentence(no), 'All three models, each in a NEAR AI enclave, said no.');
+  no.enclave.verdicts = no.enclave.verdicts.slice(0, 1);
+  assert.equal(jurySentence(no), 'The model, in a NEAR AI enclave, said no.');
 });

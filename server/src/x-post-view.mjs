@@ -1,7 +1,6 @@
 // DESIGN.md: the original post owns its logo link and stored publication time.
-import { html } from './html.mjs';
+import { html, utcTime } from './html.mjs';
 import { X_MARK } from './bet-view.mjs';
-import { dayMonth } from './marked.mjs';
 
 export function xPostUrl(value, simulatedOrigin = null) {
   try {
@@ -27,6 +26,5 @@ export function postTime(url, value) {
   if (!url || !value) return '';
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return '';
-  const clock = new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit' }).format(date);
-  return html`<p class="post-time"><a href="${url}" rel="noopener noreferrer"><time datetime="${date.toISOString()}">${clock} UTC ${dayMonth(date, { year: true })}</time></a></p>`;
+  return html`<p class="post-time"><a href="${url}" rel="noopener noreferrer"><time datetime="${date.toISOString()}">${utcTime(date)}</time></a></p>`;
 }

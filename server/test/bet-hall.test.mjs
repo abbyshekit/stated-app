@@ -42,7 +42,7 @@ test('hall lists every public verified bet included in its total', async () => {
   assert.equal(hall.rows.length, 8);
   assert.equal(hall.paidYocto, '200000000000000000000000');
   const html = String(betList(hall.rows, { hall: true }));
-  assert.match(html, /@creator won the 0\.2 test NEAR pot/);
+  assert.match(html, /@creator won the 0\.2 test NEAR pot\./);
   assert.doesNotMatch(html, /private_identity|<script>/);
   assert.match(html, /&lt;script&gt;/);
   assert.equal((html.match(/class="prow note"/g) || []).length, 8);
@@ -64,7 +64,7 @@ test('an empty hall has no fabricated totals and plain statuses follow snapshots
   assert.deepEqual(await publicBetHall(database([])), { rows: [], total: 0, settled: 0, paidYocto: '0', wonYocto: '0' });
   const hall = await publicBetHall(database([storedBet(), storedBet('accepted')]));
   const html = String(betList(hall.rows, { hall: true }));
-  assert.match(html, /Offer closes in \d+ (?:minutes?|hours?|days?), \d{2}:\d{2} UTC 20 Nov/);
+  assert.match(html, /Offer closes in \d+ (?:minutes?|hours?|days?), \d{2}:\d{2} UTC 20 Nov 2026/);
   assert.match(html, /Both sides are in/);
   assert.equal(hall.paidYocto, '0');
   const expired = storedBet();

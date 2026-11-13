@@ -105,6 +105,11 @@ button, .button, .btn, .pill { font-family: var(--sans); font-size: 15px; font-w
 button.primary, .button.primary, .btn, .pill.solid { background: var(--ink); color: var(--ground); border-color: var(--ink); }
 .btn.ghost, .button.ghost { background: transparent; color: var(--ink); border-color: var(--dim); }
 .pill.big, .big { min-height: 54px; font-size: 17px; width: 100%; border-radius: 16px; }
+/* DESIGN.md: desktop groups keep row hairlines and content-sized filled actions. */
+@media (min-width: 1000px) {
+  .wrap { border-left: 0; border-right: 0; }
+  button.primary, .button.primary, .btn:not(.ghost), .pill.solid { width: fit-content; max-width: 280px; justify-self: center; white-space: normal; }
+}
 .pill svg, .btn svg, .button svg, .xmark { width: 18px; height: 18px; fill: currentColor; flex: none; }
 button.link, .tl, button.tl { font-family: var(--sans); font-size: 15px; font-weight: 400; display: inline-flex; align-items: center; min-height: 44px; padding: 0; border: 0; border-radius: 0; background: none; color: var(--ink); text-decoration: underline; text-decoration-color: var(--dim); text-underline-offset: 3px; cursor: pointer; }
 .tl.center { justify-content: center; }
@@ -174,7 +179,7 @@ label.check { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10
 
 /* One post, full size: the words are the largest thing on the page. */
 .post { padding: 10px 16px 0; }
-.post .head { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 0 12px; align-items: center; margin-bottom: 14px; }
+.post .head { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 0 12px; align-items: center; margin-bottom: 16px; }
 .post .head .face { width: 44px; height: 44px; grid-row: span 2; }
 .post .head b { font-size: 16px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .post .head span { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -185,6 +190,9 @@ label.check { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10
 .post-origin .xmark { width: 20px; height: 20px; }
 .post-time { margin: 0; padding: 0 16px 8px; color: var(--dim); font-size: 14px; font-variant-numeric: tabular-nums; }
 .post .post-time { padding: 0 0 8px; }
+/* DESIGN.md: the timestamp stays with its words above the row hairline. */
+.prop:has(+ .post-time) { border-bottom: 0; padding-bottom: 0; }
+.prop + .post-time { border-bottom: 1px solid var(--line); }
 .post-time a { display: inline-flex; align-items: center; min-height: 44px; padding: 12px 0; line-height: 20px; }
 .post .said { font-size: 28px; line-height: 1.42; letter-spacing: -0.015em; }
 .post .aside { margin: 10px 0 0; color: var(--dim); font-size: 14px; }
@@ -227,7 +235,7 @@ label.check { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10
 .court-ruling .said a::after { content: none; }
 .court-action { margin: 16px 0 0; font-size: 17px; line-height: 1.4; }
 .court-ruling .meta { display: block; color: var(--dim); }
-.court-vote { margin: 8px 0 0; }
+.court-ruling .meta .tl { display: inline; padding-block: 14px; font: inherit; }
 .model-logo.qwen { mask-image: url('/static/models/qwen.svg'); }
 .model-logo.deepseek { mask-image: url('/static/models/deepseek.svg'); }
 .model-logo.zai { mask-image: url('/static/models/zai.svg'); }
@@ -270,7 +278,7 @@ p.gut.settlement-line > .tl:not(.unread) { white-space: normal; }
 .acts .two { display: flex; flex-wrap: wrap; justify-content: center; gap: 0 28px; }
 .mini { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 0 12px; padding: 6px 16px 16px; border-bottom: 1px solid var(--line); }
 .mini .said { font-size: 17px; line-height: 1.4; }
-.prop { margin: 0; padding: 6px 16px 16px; font-size: 22px; line-height: 1.36; letter-spacing: -0.01em; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.prop { margin: 0; padding: 0 16px 16px; font-size: 22px; line-height: 1.36; letter-spacing: -0.01em; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .prop.bet-claim { font-size: 28px; }
 .prop.bet-claim.mid { font-size: 24px; }
 .prop.bet-claim.long { font-size: 20px; }
@@ -331,7 +339,7 @@ details.fold > summary::-webkit-details-marker { display: none; }
 details.fold > summary::after { content: "+"; font-size: 20px; line-height: 1; color: var(--dim); }
 details.fold[open] > summary::after { content: "−"; }
 details.fold > summary small { font-size: 14px; color: var(--dim); margin-left: auto; }
-details.fold > :not(summary) { margin-bottom: 14px; }
+details.fold > :not(summary) { margin-bottom: 16px; }
 .wallet-requests { padding: 0 16px; }
 .wallet-requests > details.fold { padding: 0; }
 .wallet-requests > details.fold > summary + * { margin-top: 8px; }
@@ -472,7 +480,7 @@ input.bad[aria-invalid="true"],
 .source-author .head b,
 .source-author .head span { white-space: normal; overflow-wrap: anywhere; overflow: visible; text-overflow: clip; }
 .source-author > p { margin: 0 0 8px; }
-.source-author .head { margin-bottom: 0; }
+.source-author .head { margin-bottom: 16px; }
 .source-author .head .offered-by { font-size: 16px; font-weight: 400; }
 
 /* A NEAR account name is one long word: it may break anywhere. */
@@ -535,7 +543,7 @@ input.bad[aria-invalid="true"],
 @media (min-width: 1080px) {
   .wrap.two { width: min(1080px, 100%); }
   .wrap.two > main { display: grid; grid-template-columns: minmax(0, 56fr) minmax(0, 44fr); grid-template-rows: repeat(30, auto) 1fr; align-content: start; }
-  .wrap.two > main > .pri { display: block; grid-column: 1; grid-row: 1 / -1; border-right: 1px solid var(--line); padding-bottom: 40px; }
+  .wrap.two > main > .pri { display: block; grid-column: 1; grid-row: 1 / -1; padding-bottom: 40px; }
   .wrap.two > main > :not(.pri) { grid-column: 2; }
   .wrap.two .pri .post { padding-top: 18px; }
   .wrap.two .pri .post .said { font-size: 36px; line-height: 1.2; letter-spacing: -0.02em; }

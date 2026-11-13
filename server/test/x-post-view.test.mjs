@@ -3,11 +3,29 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { postLogo, postTime, xPostUrl } from '../src/x-post-view.mjs';
 import { betPostTime, betSourceHeader } from '../src/bet-source-view.mjs';
+import { betTime, nextBetTime } from '../src/bet-view.mjs';
+import { runInNewContext } from 'node:vm';
 
 // The post URL comes from the public signed corpus. Vary metadata only.
 const record = JSON.parse(readFileSync(new URL('../../evidence/enclave-ruling-3668aa04.json', import.meta.url))).record;
 const url = record.material.postUrl;
 const id = record.material.bets[0].id;
+
+test('all exact Bet times include the UTC calendar date', () => {
+  const value = '2026-11-12T14:10:00-05:00';
+  assert.equal(betTime(value), '19:10 UTC 12 Nov 2026');
+  assert.equal(nextBetTime(value, Date.parse('2026-11-12T19:00:00Z')), 'in 10 minutes, 19:10 UTC 12 Nov 2026');
+});
+
+test('payment conveniences preserve the complete post timestamp', () => {
+  const value = '2026-11-12T14:10:00-05:00';
+  const time = { dateTime: value, textContent: '19:10 UTC 12 Nov 2026' };
+  runInNewContext(readFileSync(new URL('../public/pay.js', import.meta.url), 'utf8'), {
+    document: { querySelectorAll: selector => selector === 'time[datetime]' ? [time] : [], getElementById: () => null },
+    window: {}, navigator: {},
+  });
+  assert.equal(time.textContent, '19:10 UTC 12 Nov 2026');
+});
 
 test('X decoration links only to an original X post or the configured simulated X', () => {
   assert.equal(xPostUrl(url), url);

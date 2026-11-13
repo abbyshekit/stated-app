@@ -1,7 +1,7 @@
 // INTEGRATION: web.mjs registers this public, read-only page beside the Bet start routes.
 // DESIGN.md: a normal post row, hairline-separated evidence and one filled action; skin.css only.
 import Decimal from 'decimal.js';
-import { html } from './html.mjs';
+import { html, utcTime } from './html.mjs';
 import { readPublicBet } from './bet-public.mjs';
 import { face, facesByUsername, facesFor } from './certificate.mjs';
 import { readEnclaveRuling, verifiedQuoteSummary } from './enclave-ruling.mjs';
@@ -13,7 +13,7 @@ import { formatTestNear } from './near-escrow.mjs';
 import { unit } from './near-network.mjs';
 import { dstackPasses } from './dstack-verifier.mjs';
 import { MODEL_LOGOS, modelFace, modelName } from './jury-models.mjs';
-import { jurySentence, settlementSentence } from './settlement-view.mjs';
+import { jurySentence, settlementMarkup, settlementSentence } from './settlement-view.mjs';
 import { postLogo, postTime, xPostUrl } from './x-post-view.mjs';
 import { betPostTime } from './bet-source-view.mjs';
 
@@ -29,9 +29,6 @@ const price = (value) => {
   const [whole, cents] = new Decimal(value).toFixed().split('.');
   return `US$${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}${cents ? `.${cents}` : ''}`;
 };
-const clock = (value) => new Intl.DateTimeFormat('en-GB', {
-  timeZone: 'UTC', hour: '2-digit', minute: '2-digit',
-}).format(new Date(value));
 const outcomeWord = (outcome) => outcome === 'yes' ? 'Yes' : outcome === 'no' ? 'No' : 'Undecided';
 const VERIFIED = [
   'Each model ran in an Intel TDX enclave whose quote chains to Intel’s root certificate',
@@ -73,7 +70,7 @@ export async function rulingPost(db, bet, outcome, { claimHref = null } = {}) {
 
 function evidenceLine(record, bet) {
   const evidence = JSON.parse(record.evidence.text);
-  const deadline = `${clock(bet.resolve_at)} UTC ${dayMonth(bet.resolve_at)}`;
+  const deadline = utcTime(bet.resolve_at);
   if (record.evidence.kind === 'submitted') {
     const majority = majorityOutcome(record);
     const juror = record.outcome === 'unclear'
@@ -174,7 +171,7 @@ export function registerBetRulingRoutes({ route, db, config, layout, send, notFo
         ${modelFace(verdict.model)}<b>${modelName(verdict.model)}</b><span>${outcomeWord(verdict.parsed.outcome)}, ${percent(verdict.parsed.confidence)} sure</span>
       </li>`)}</ul>
       ${evidence ? html`<p class="gut">${evidence}</p>` : ''}
-      ${settlement ? html`<p class="gut settlement-line">${settlement}</p>` : ''}
+      ${settlement ? html`<p class="gut settlement-line">${settlementMarkup(settlement)}</p>` : ''}
       <div class="acts"><a class="pill solid big" href="/bets/new?from=${bet.id}">${record.mode === 'ruling' && record.outcome === 'unclear' && ['settled', 'refunded'].includes(bet.status) ? 'Make another bet' : 'Make your own bet'}</a></div>
       <div class="folds">
       ${evidenceFold(record)}

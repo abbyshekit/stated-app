@@ -474,7 +474,7 @@ test('on the site, a result the other side never answers can be let stand after 
   assert.ok((await sign(mb, 'maker-w.testnet', 'propose', { outcome: 'yes', note: 'It rained.', evidenceUrl: 'https://example.org/rain' })).ok);
 
   let page = await mb.get(`/bets/${id}`);
-  assert.match(page.text, /You can let this result stand (?:in \d+ (?:minutes?|hours?), \d{2}:\d{2} UTC \d{1,2} \w{3}|\d{1,2} \w{3}(?: \d{4})?(?:, \d{2}:\d{2} UTC)?) if the other side has not answered\./);
+  assert.match(page.text, /You can let this result stand (?:in \d+ (?:minutes?|hours?), \d{2}:\d{2} UTC \d{1,2} \w{3} \d{4}|\d{1,2} \w{3}(?: \d{4})?(?:, \d{2}:\d{2} UTC)?) if the other side has not answered\./);
   assert.doesNotMatch(page.text, /Let the result stand<\/button>/);
   // Too early: the server refuses nothing it cannot know, and the contract refuses the transaction.
   const early = await sign(mb, 'maker-w.testnet', 'finalize');

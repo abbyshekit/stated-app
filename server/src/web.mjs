@@ -23,6 +23,7 @@ import { betList, betBlock as detailBetBlock } from './bet-view.mjs';
 import { betBlock, betLead, betState, dayMonth, timeLeft } from './marked.mjs';
 import { betSourceHeader } from './bet-source-view.mjs';
 import { postLogo, postTime, xPostUrl } from './x-post-view.mjs';
+import { rulingOnEvidence, settlementMarkup, settlementSentence } from './settlement-view.mjs';
 import { formatTestNear } from './near-escrow.mjs';
 import { network, unit } from './near-network.mjs';
 import { assertNetworkConfig } from './config.mjs';
@@ -39,7 +40,6 @@ import { metrics } from './metrics.mjs';
 import { purgeOrphanXSources, resolveStatement } from './notify.mjs';
 import { canViewProfile, ownerSaveView, profileIsPublic, PUBLIC_SAVE_SQL, publicSaveView } from './privacy.mjs';
 import { privacyPage, termsPage } from './legal-pages.mjs';
-import { rulingOnEvidence } from './settlement-view.mjs';
 import {
   annotate,
   publicSaveOwner,
@@ -901,6 +901,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
     const featuredId = settled?.id || fallback?.id || dareBet?.id;
     const listed = hall.rows.filter(bet => bet.id !== featuredId);
     const offers = listed.filter(bet => betState(bet).open);
+    const hasOpenOffers = hall.rows.some(bet => betState(bet).open);
     const active = listed.filter(bet => ['accepted', 'proposed', 'disputed'].includes(bet.status));
     const finished = listed.filter(bet => !betState(bet).open && !active.includes(bet));
     const homeAction = !ctx.user ? { href: '/signin', label: 'Make a bet' }
@@ -912,10 +913,10 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
       ${settled ? html`<section class="settled-feature">
         ${await rulingPost(db, settled, settled.outcome, { claimHref: `/bets/${settled.id}/ruling` })}
         <a class="feature-result" href="/bets/${settled.id}/ruling"><div class="verdict ruling-verdict${settled.outcome === 'yes' ? ' yes' : ''}"><b>${settled.outcome === 'yes' ? html`<span class="hl">Yes</span>` : 'No'}</b><span>${dayMonth(settled.enclave.decidedAt || settled.settled_at, { year: true })}</span></div>
-        <p class="gut feature-winner">${betLead(settled).text} the ${formatTestNear((BigInt(settled.stake_yocto) * 2n).toString())} ${unit()} pot</p></a></section>`
+        <p class="gut feature-winner">${betLead(settled).text} the ${formatTestNear((BigInt(settled.stake_yocto) * 2n).toString())} ${unit()} pot.</p></a><p class="gut settlement-line">${settlementMarkup(await settlementSentence(db, config, settled))}</p></section>`
       : fallback ? html`${await betSourceHeader(db, null, fallback, config.x.simulatedOrigin)}<p class="prop">${fallback.claim}</p>${await betSourceHeader(db, null, fallback, config.x.simulatedOrigin, { timestamp: true })}${detailBetBlock(fallback, { viewer: ctx.user, faces: fallbackFaces, joinHref: `/bets/${fallback.id}?join=1#accept` })}`
         : lead ? html`${postCard(lead, { faces, sweep: true, link: publicRow(lead).link })}${dareBet ? html`<div class="dare">${dareBet.line}</div>` : ''}` : ''}
-      <p class="pitch home-intro">Reply to any post on X with <span class="mention">@${bot} bet ${config.play.defaultStakeNear} no</span>. Three AI models judge it and NEAR pays the winner.</p>
+      <p class="pitch home-intro${hasOpenOffers ? '' : ' empty'}">${hasOpenOffers ? '' : 'No open offers right now. '}Reply to any post on X with <span class="mention">@${bot} bet ${config.play.defaultStakeNear} no</span>.${hasOpenOffers ? ' Three AI models judge it and NEAR pays the winner.' : ''}</p>
       ${homeAction ? html`<div class="acts"><a class="pill solid big" href="${homeAction.href}">${homeAction.label}</a></div>` : ''}
       ${hall.total ? html`<section id="public-bets"><p class="pitch"><a class="tl" href="#public-bets">${hall.total} ${hall.total === 1 ? 'bet' : 'bets'}</a>, ${hall.settled} settled, ${formatTestNear(hall.wonYocto)} ${unit()} won</p>${offers.length ? html`<h2 class="lead">Open offers</h2>${betList(offers, { hall: true })}` : ''}${active.length ? html`<h2 class="lead">Bets in progress</h2>${betList(active, { hall: true })}` : ''}${finished.length ? html`<h2 class="lead">Finished bets</h2>${betList(finished, { hall: true })}` : ''}</section>` : ''}
       ${rest.length ? fileList(rest, publicRow, faces, betLines) : ''}

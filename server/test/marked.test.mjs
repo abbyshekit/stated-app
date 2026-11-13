@@ -36,6 +36,8 @@ test('betState: open needs funding and an unexpired offer; decided needs an agre
   assert.equal(betState(bet({ funded: false })).open, false);
   assert.equal(betState(bet({ accept_by: past() })).open, false);
   assert.equal(betState(bet({ accept_by: past() })).expired, true);
+  assert.equal(betState(bet({ accept_by: new Date(NOW).toISOString() }), NOW).open, false, 'the acceptance cutoff is exclusive');
+  assert.equal(betState(bet({ accept_by: 'invalid' }), NOW).open, false, 'a missing usable deadline cannot be taken');
   assert.equal(betState(bet({ status: 'settled', outcome: 'yes' })).decided, true);
   assert.equal(betState(bet({ status: 'settled', outcome: 'void' })).decided, false);
   // A private Bet has no `funded` flag; its chain snapshot stands in.
@@ -44,11 +46,11 @@ test('betState: open needs funding and an unexpired offer; decided needs an agre
 
 test('betLead speaks to the reader: a dare to a visitor, a status to the person who made it', () => {
   assert.equal(betLead(bet()).text, '@priya dares you');
-  assert.match(betLead(bet()).aside, /^Offer closes in \d+ days, \d{2}:\d{2} UTC \d{1,2} \w{3}$/);
-  assert.equal(nextBetTime('2026-11-10T15:10:00Z', NOW), 'in 10 minutes, 15:10 UTC 10 Nov');
-  assert.equal(nextBetTime('2026-11-11T15:00:00Z', NOW), 'in 24 hours, 15:00 UTC 11 Nov');
-  assert.equal(nextBetTime('2026-11-15T15:00:00Z', NOW), 'in 5 days, 15:00 UTC 15 Nov');
-  assert.equal(nextBetTime('2026-11-09T15:00:00Z', NOW), '15:00 UTC 9 Nov');
+  assert.match(betLead(bet()).aside, /^Offer closes in \d+ days, \d{2}:\d{2} UTC \d{1,2} \w{3} \d{4}$/);
+  assert.equal(nextBetTime('2026-11-10T15:10:00Z', NOW), 'in 10 minutes, 15:10 UTC 10 Nov 2026');
+  assert.equal(nextBetTime('2026-11-11T15:00:00Z', NOW), 'in 24 hours, 15:00 UTC 11 Nov 2026');
+  assert.equal(nextBetTime('2026-11-15T15:00:00Z', NOW), 'in 5 days, 15:00 UTC 15 Nov 2026');
+  assert.equal(nextBetTime('2026-11-09T15:00:00Z', NOW), '15:00 UTC 9 Nov 2026');
   assert.equal(betLead(bet(), { viewer: { x_username: 'Priya' } }).text, 'Your bet is open');
   assert.equal(betLead(bet({ funded: false })).text, 'Not funded yet');
   assert.equal(betLead(bet({ accept_by: past() })).text, 'Nobody took this one');

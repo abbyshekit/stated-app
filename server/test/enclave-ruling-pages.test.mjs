@@ -207,7 +207,7 @@ test('settled rulings, corrections and ambiguous refunds render on both pages', 
       await setChain('settled', outcome);
       const record = await insertRuling({ source, outcome });
       const count = record.verdicts.length;
-      await bothContain(`All ${count === 3 ? 'three' : count} models said ${outcome}.`);
+      await bothContain(`All ${count === 3 ? 'three' : count} models, each in a NEAR AI enclave, said ${outcome}.`);
       await clearRuling();
       await insertRuling({ source, outcome: outcome === 'yes' ? 'no' : 'yes' });
       await bothContain('A reviewer corrected the enclave’s ruling.');

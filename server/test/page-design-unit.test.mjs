@@ -27,12 +27,13 @@ function offer(n, hours) {
   return bet;
 }
 
-function fakeDb(rows, { profile = false } = {}) {
+function fakeDb(rows, { profile = false, publishedAt = null } = {}) {
   const calls = [];
   const db = {
     calls,
     async one(sql, params = []) {
       calls.push(sql);
+      if (sql.startsWith('select src.published_at')) return { published_at: publishedAt };
       if (sql.includes("from users where kind = 'person'")) return { id: '1', kind: 'person', x_user_id: '1', x_username: 'alice', x_name: 'Private Name', profile_visibility: 'private' };
       if (sql.includes('from bilateral_bets b\n  join bilateral_bet_publications')) return rows.find(r => r.id === params[0]) || null;
       if (sql.includes('bot_credentials')) return { x_username: 'statedforecast' };
@@ -110,6 +111,27 @@ test('home separates finished bets from open offers without duplicating rows or 
   assert.ok(listed.indexOf(id(3)) > listed.indexOf('Finished bets'));
 });
 
+test('home with no offers gives the configured reply action, including when only finished bets remain', async () => {
+  for (const rows of [[], [offer(1, -1)]]) {
+    const res = await get(fakeDb(rows), '/');
+    assert.equal(res.status, 200);
+    assert.match(res.body, /No open offers right now\. Reply to any post on X with <span class="mention">@statedforecast bet 0\.1 no<\/span>\./);
+    assert.doesNotMatch(res.body, /<h2 class="lead">Open offers<\/h2>/);
+  }
+});
+
+test('an expired offered bet leaves the open list and remains in finished bets', async () => {
+  const rows = [offer(1, 10), offer(2, 5), offer(3, 8)];
+  const before = await get(fakeDb(rows), '/');
+  assert.match(before.body.split('Open offers</h2>')[1], new RegExp(`/bets/${id(3)}`));
+  rows[2].accept_by = new Date(Date.now() - 1000);
+  rows[2].chain_state.accept_by_ns = ns(rows[2].accept_by);
+  const after = await get(fakeDb(rows), '/');
+  const open = after.body.split('Open offers</h2>')[1].split('Finished bets</h2>')[0];
+  assert.doesNotMatch(open, new RegExp(`/bets/${id(3)}`));
+  assert.match(after.body.split('Finished bets</h2>')[1], new RegExp(`/bets/${id(3)}`));
+});
+
 test('signed-out open Bet exposes its take action and share fold without private source identity', async () => {
   const db = fakeDb([offer(1, 5)]);
   const res = await get(db, `/bets/${id(1)}`);
@@ -119,7 +141,20 @@ test('signed-out open Bet exposes its take action and share fold without private
   assert.ok(res.body.includes(`data-bet-claim="${corpus.material.claim}"`));
   assert.doesNotMatch(res.body, /class="wrap two"|Sign in to bet|>Follow<\/|View test bet/);
   assert.match(res.body, /href="\/signin\?return=[^"]+">Bet no<\/a>/);
-  assert.match(res.body, /<summary>Share options<\/summary>[\s\S]*?Copy link[\s\S]*?Save image/);
+  assert.match(res.body, /<summary>Share<\/summary>[\s\S]*?Copy link[\s\S]*?Save image/);
   assert.doesNotMatch(res.body, /Private Name/);
   assert.ok(db.calls.some(sql => sql.includes('from bilateral_bets b\n  join bilateral_bet_publications')));
+});
+
+test('home and offer put the original post time immediately after its unchanged words', async () => {
+  const bet = offer(1, 5);
+  bet.evidence_source_url = corpus.material.postUrl;
+  const db = fakeDb([bet], { publishedAt: '2026-11-12T19:10:00Z' });
+  for (const path of ['/', `/bets/${bet.id}`]) {
+    const res = await get(db, path);
+    assert.equal(res.status, 200);
+    assert.ok(res.body.includes(corpus.material.claim));
+    assert.match(res.body, /<p class="prop(?: bet-claim long)?">[^]*?<\/p>\s*<p class="post-time"><a[^>]+><time datetime="2026-11-12T19:10:00\.000Z">19:10 UTC 12 Nov 2026<\/time>/);
+    assert.doesNotMatch(res.body, /19:10 UTC 12 Nov<\/time>|2:10 AM/);
+  }
 });

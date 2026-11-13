@@ -1,10 +1,6 @@
 // Small conveniences for payments and shared Bet links.
 //
-// A deadline is written by the server in UTC; here it is rewritten in the person's own time.
-for (const time of document.querySelectorAll('time[datetime]')) {
-  const at = new Date(time.dateTime);
-  if (!Number.isNaN(at.getTime())) time.textContent = at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-}
+// DESIGN.md: preserve the server's complete UTC timestamps, including post times.
 // The cost shown on the form is for the amount and token it opened with. Change either and it goes,
 // so the page never shows a price for something else.
 const cost = document.getElementById('add-cost');
