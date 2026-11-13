@@ -26,7 +26,7 @@ These are required launch values, not a record of deployed configuration. The ma
 | `STATED_PLAY_START_NEAR` | `0.25` (launch sponsorship) | retain existing value, code default `1.6` |
 | `STATED_SPONSOR_LIMIT` | `25` | unset (not used on testnet) |
 | `STATED_OUTLAYER_REGISTRATION_DAILY_LIMIT` | `5` | `5` by default |
-| `STATED_OUTLAYER_REFEREE` | deployed, checked mainnet referee account; exact account pending the contract lane | retain existing value or unset |
+| `STATED_OUTLAYER_REFEREE` | `referee.statedforecast.near` | retain existing value or unset |
 | `STATED_WORKER` | `1` | `0` |
 | `STATED_REPLIES` | `1` | `0` |
 | `STATED_PLAY` | `1` | `0` |
@@ -48,7 +48,7 @@ Sponsorship is off at `STATED_PLAY_START_NEAR=0.05`. To sponsor a starting balan
 
 On `/me/wallet`, the recipient copies their NEAR account and sends NEAR from an exchange or wallet. The page refreshes the balance in place every ten seconds while visible and offers a manual refresh. A bet's funding screen shows its stake, storage when applicable, and the additional funds needed including reserved gas. An external NEAR wallet remains available. The mainnet home lists real published offers, active bets and completed bets with counters; an empty database shows honest zeroes. `/court` shows the OutLayer account, the access-key count read from NEAR, its jury roster and public rulings with confirmed settlement links.
 
-The contract lane must supply the exact `STATED_OUTLAYER_REFEREE` before launch. Check its zero access keys, code hash, pinned jury artifact and escrow configuration, fund registration/keeper gas and its compute pool, and complete the funded execution-to-payout proof described in [OUTLAYER.md](OUTLAYER.md). Local tests with stand-in transports do not verify deployed OutLayer execution, model access, callbacks or payment. No deployment, variable mutation or paid call is part of this code change.
+The [mainnet Court](https://stated-mainnet-production.up.railway.app/court) uses the [verified referee](../evidence/judge-outlayer-mainnet.json). The table describes launch settings. The hosted mainnet service currently keeps the real-funds allowlist empty and the betting and X workers off. Check its zero access keys, code hash, pinned jury artifact and escrow configuration, fund registration/keeper gas and its compute pool, and complete the funded execution-to-payout proof described in [OUTLAYER.md](OUTLAYER.md). Local tests with stand-in transports do not verify deployed OutLayer execution, model access, callbacks or payment. No deployment, variable mutation or paid call is part of this code change.
 
 Keep the server's existing `NEARAI_API_KEY`, planner model roster and attestation-verifier settings: creation still calls the server evidence planner to commit the policy before funding, even with `STATED_ENCLAVE_RULINGS=0`. The OutLayer jury uses its separately provisioned encrypted secret. `0` disables the server's local ruling loop, not this creation-time planner.
 

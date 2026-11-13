@@ -2,15 +2,20 @@
 
 ## Check it yourself
 
-**Mainnet OutLayer check: pending deployment. Saved PASS: pending at `evidence/judge-outlayer-mainnet.json`.**
+**Mainnet OutLayer deployment: 9 of 9 checks passed.** [Saved verification](evidence/judge-outlayer-mainnet.json)
 
-After `npm ci`, set the public deployment values under [OutLayer options](#outlayer-options), then run:
+After `npm ci`, run the read-only deployment check:
 
 ```sh
-npm run judge -- --outlayer --network mainnet --bet-id "$JUDGE_BET_ID" --save evidence/judge-outlayer-mainnet.json
+npm run judge -- --outlayer --network mainnet \
+  --referee referee.statedforecast.near \
+  --referee-sha256 1f6b35b9fce99165af5090ff04d4ff6493933ec90ab3c0a37a532255bf46ed83 \
+  --jury-sha256 85198c7afbfca6ad6cb42c76fe064abdf480d18f4db4955b90ce205d768d9791 \
+  --wasm-url https://stated-production.up.railway.app/static/outlayer/stated-jury-85198c7afbfca6ad6cb42c76fe064abdf480d18f4db4955b90ce205d768d9791.wasm \
+  --secrets-owner statedforecast.near
 ```
 
-These checks remain pending until the referee is deployed and a settled bet is published:
+The deployment check covers the first three items below. A settled mainnet OutLayer bet is still needed for the fourth.
 
 - Referee: no access keys; code hash matches the approved referee build.
 - Config: expected escrow, OutLayer contract, jury URL/hash, secrets owner and profile.
@@ -54,14 +59,14 @@ At both historical boundaries, the referee must have the approved code and no ke
 
 Other credit activity in that block can prevent the comparison from passing. A selected bet that has not settled fails; a run without `--bet-id` checks deployment only and labels that limit in its JSON. Neither mode verifies model attestations or a later withdrawal to a wallet.
 
-[Judge CI](.github/workflows/judge.yml) runs `npm ci`, `npm run verify:offline`, `npm run test:judge` and both OutLayer Rust test suites on pushes and pull requests. The daily mainnet job skips until repository variables for the referee, both hashes, jury URL and secrets owner are set. Set `JUDGE_BET_ID` to include settlement checks. Its `judge-outlayer-mainnet` artifact contains the JSON result even on a check failure. A saved mainnet PASS remains pending until this runs against the deployed referee.
+[Judge CI](.github/workflows/judge.yml) runs `npm ci`, `npm run verify:offline`, `npm run test:judge` and both OutLayer Rust test suites on pushes and pull requests. The daily mainnet job skips until repository variables for the referee, both hashes, jury URL and secrets owner are set. Set `JUDGE_BET_ID` to include settlement checks. Its `judge-outlayer-mainnet` artifact contains the JSON result even on a check failure. The saved deployment result covers the referee and its jury artifact.
 
 Five minutes, nine steps. Each is a command or a link, then exactly what you should see. Steps 1 to 3 and 5 need only a browser or Node 22.9 or later; none needs an X account, wallet or API key, and every command is read-only (no transaction is sent, no key is read). Every number below comes from a file in [evidence/](evidence/) or from a command you can run.
 
 ## Current testnet path
 
 - Stated lets two people bet on a post on X. Three models from three makers, each in its own NEAR AI enclave, must all agree on the outcome (80% confidence or more) or both stakes go back. A NEAR escrow contract pays the winner.
-- It runs on NEAR **testnet, with test NEAR**. One bet has been paid on a jury ruling, `3668aa04`, and **both of its sides belong to the operator**. On 13 November the testnet home page counts three bets taken by people outside the team; who runs those X accounts is not established here ([README, status](README.md)). The mainnet escrow is deployed with no access keys and has settled one pilot round by mutual agreement between two pilot accounts; the OutLayer referee is not yet on mainnet ([OUTLAYER.md](docs/OUTLAYER.md)).
+- It runs on NEAR **testnet, with test NEAR**. One bet has been paid on a jury ruling, `3668aa04`, and **both of its sides belong to the operator**. On 13 November the testnet home page counts three bets taken by people outside the team; who runs those X accounts is not established here ([README, status](README.md)). The mainnet escrow is deployed with no access keys and has settled one pilot round by mutual agreement between two pilot accounts; the OutLayer referee is deployed on mainnet ([saved verification](evidence/judge-outlayer-mainnet.json)).
 - The home page shows "N bets taken by people outside the team" only when N is at least 1, counting public bets whose taker is not an operator account.
 
 ## 1. See the ruling (30 seconds, browser)
@@ -106,7 +111,7 @@ You see five `PASS` lines and `judge-chain: PASS (5 of 5 checks)`. The command a
 | Court DAO `stated-court.sputnik-v2.testnet` | the relay is the only jury member; the council holds only `call:VoteReject` and `call:VoteRemove`; two roles, no role-specific voting rule | [court-harden-testnet-20261112.json](evidence/court-harden-testnet-20261112.json); the rule is the one the server enforces in [court-dao.mjs](server/src/court-dao.mjs) |
 | Bet `3668aa04-7009-4b85-b19d-debfabebbf96` on the testnet escrow | `status` `settled`, `resolution.outcome` `yes` | [hosted-court-payout-testnet-20261112.json](evidence/hosted-court-payout-testnet-20261112.json) |
 
-The mainnet line proves what is deployed there (no keys, version 2, a recorded hash). It does not show a mainnet bet, because none has been made.
+The mainnet line checks the escrow deployment. The pilot round settled by agreement and is outside the scope of this command.
 
 ## 5. Look at the chain without our code (optional, 1 minute)
 

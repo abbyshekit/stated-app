@@ -1,0 +1,57 @@
+{
+  "schema": 1,
+  "checkedAt": "2026-11-13T22:02:49.415Z",
+  "mode": "outlayer",
+  "network": "mainnet",
+  "referee": "referee.statedforecast.near",
+  "betId": null,
+  "scope": "deployment only; no bet checked",
+  "overall": "PASS",
+  "results": [
+    {
+      "name": "referee referee.statedforecast.near: no access keys",
+      "ok": true,
+      "detail": "0 access keys"
+    },
+    {
+      "name": "referee referee.statedforecast.near: reproducible code hash",
+      "ok": true,
+      "detail": "code hash 37eTRabVTkLTgwKc5kDBx2HTrjBy1LLsbqpnsDry678n; SHA-256 1f6b35b9fce99165af5090ff04d4ff6493933ec90ab3c0a37a532255bf46ed83"
+    },
+    {
+      "name": "referee get_config.escrow",
+      "ok": true,
+      "detail": "\"escrow.statedforecast.near\""
+    },
+    {
+      "name": "referee get_config.outlayer",
+      "ok": true,
+      "detail": "\"outlayer.near\""
+    },
+    {
+      "name": "referee get_config.wasm_url",
+      "ok": true,
+      "detail": "\"https://stated-production.up.railway.app/static/outlayer/stated-jury-85198c7afbfca6ad6cb42c76fe064abdf480d18f4db4955b90ce205d768d9791.wasm\""
+    },
+    {
+      "name": "referee get_config.wasm_hash",
+      "ok": true,
+      "detail": "\"85198c7afbfca6ad6cb42c76fe064abdf480d18f4db4955b90ce205d768d9791\""
+    },
+    {
+      "name": "referee get_config.secrets_owner",
+      "ok": true,
+      "detail": "\"statedforecast.near\""
+    },
+    {
+      "name": "referee get_config.secrets_profile",
+      "ok": true,
+      "detail": "\"jury\""
+    },
+    {
+      "name": "jury download: pinned SHA-256",
+      "ok": true,
+      "detail": "https://stated-production.up.railway.app/static/outlayer/stated-jury-85198c7afbfca6ad6cb42c76fe064abdf480d18f4db4955b90ce205d768d9791.wasm; SHA-256 85198c7afbfca6ad6cb42c76fe064abdf480d18f4db4955b90ce205d768d9791"
+    }
+  ]
+}

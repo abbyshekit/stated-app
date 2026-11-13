@@ -2,15 +2,11 @@
 
 ## Check it yourself
 
-**Mainnet OutLayer check: pending deployment. Saved PASS: pending at `evidence/judge-outlayer-mainnet.json`.**
+**Mainnet OutLayer deployment: 9 of 9 checks passed.** The [mainnet Court](https://stated-mainnet-production.up.railway.app/court) shows the referee and its zero access keys. [Saved verification](evidence/judge-outlayer-mainnet.json)
 
-After `npm ci`, set the public deployment values in [JUDGE.md](JUDGE.md#outlayer-options), then run:
+Run the [mainnet verification command](JUDGE.md#check-it-yourself) to reproduce the result from public NEAR data. To verify the recorded testnet Court ruling and payout, run `npm ci && npm run verify`.
 
-```sh
-npm run judge -- --outlayer --network mainnet --bet-id "$JUDGE_BET_ID" --save evidence/judge-outlayer-mainnet.json
-```
-
-These checks remain pending until the referee is deployed and a settled bet is published:
+The deployment check covers the first three items below. A settled mainnet OutLayer bet is still needed for the fourth.
 
 - Referee: no access keys; code hash matches the approved referee build.
 - Config: expected escrow, OutLayer contract, jury URL/hash, secrets owner and profile.
@@ -27,7 +23,7 @@ Status on 13 November 2026: the hosted app runs on NEAR testnet with test NEAR. 
 
 Others have since bet on testnet. The [home page](https://stated-production.up.railway.app/) counter reads "18 bets, 6 settled, 0.84 test NEAR won, 3 bets taken by people outside the team" (read at 17:10 UTC on 13 November). Two of those are [`0bf4f3a7`](https://stated-production.up.railway.app/bets/0bf4f3a7-8dfc-44e2-a139-1e33ce844178) and [`009ce5b5`](https://stated-production.up.railway.app/bets/009ce5b5-8b52-4f38-9117-96ae0e1a1b43): each was offered by @ChainAbstracted and its bet page shows @General_Illia on the other side, 0.1 test NEAR each. The first settled at its deadline, 16:00 UTC on 13 November: Coinbase NEAR-USD traded at US$3.5052, all three models said yes (98%, 99% and 95%), Stated Court let the ruling stand for ten minutes and the escrow paid @ChainAbstracted the 0.2 test NEAR pot ([ruling](https://stated-production.up.railway.app/bets/0bf4f3a7-8dfc-44e2-a139-1e33ce844178/ruling)). The second is due at 16:00 UTC on 14 November. The count is the app's own; this README does not say who runs any X account.
 
-Mainnet, 13 November 2026: `escrow.statedforecast.near` is live with zero access keys (mainnet RPC `view_access_key_list`). It has settled one pilot round by mutual agreement: `pilot-a.statedforecast.near` created bet `15212c45-047a-4552-ba83-8adea874fd3f` and `pilot-b.statedforecast.near` accepted it, 0.01 NEAR each; `pilot-a` proposed yes, `pilot-b` confirmed it, and `pilot-a` withdrew its 0.02 NEAR credit, all between 03:12 and 03:15 UTC (`get_bet` returns `status: settled`, `resolution.method: agreement`, `referee: null`). No referee or jury took part. The OutLayer referee is built, and on testnet its jury and the full call chain ran up to the missing NEAR AI key ([docs/OUTLAYER.md](docs/OUTLAYER.md), [evidence/outlayer-testnet-referee-20261113.json](evidence/outlayer-testnet-referee-20261113.json), [evidence/outlayer-testnet-probe-20261113.json](evidence/outlayer-testnet-probe-20261113.json)). It is not yet deployed on mainnet.
+Mainnet, 13 November 2026: `escrow.statedforecast.near` is live with zero access keys (mainnet RPC `view_access_key_list`). It has settled one pilot round by mutual agreement: `pilot-a.statedforecast.near` created bet `15212c45-047a-4552-ba83-8adea874fd3f` and `pilot-b.statedforecast.near` accepted it, 0.01 NEAR each; `pilot-a` proposed yes, `pilot-b` confirmed it, and `pilot-a` withdrew its 0.02 NEAR credit, all between 03:12 and 03:15 UTC (`get_bet` returns `status: settled`, `resolution.method: agreement`, `referee: null`). No referee or jury took part. The OutLayer referee is built, and on testnet its jury and the full call chain ran up to the missing NEAR AI key ([docs/OUTLAYER.md](docs/OUTLAYER.md), [evidence/outlayer-testnet-referee-20261113.json](evidence/outlayer-testnet-referee-20261113.json), [evidence/outlayer-testnet-probe-20261113.json](evidence/outlayer-testnet-probe-20261113.json)). The [mainnet referee](https://nearblocks.io/address/referee.statedforecast.near) is deployed and the Court page reads its configuration. New real-NEAR bets are paused pending a controlled OutLayer payout test.
 
 | | |
 | --- | --- |
@@ -266,7 +262,7 @@ All code was written during the hackathon. Work began on 5 November 2026 in a wo
 
 ## Limits
 
-The hosted payout records demonstrate functionality with operator-controlled participants and test NEAR, which has no monetary value; the home page counts three bets taken by people outside the team (two of them still open on 13 November), and who runs those accounts is not established here. One bet has been settled through the relay by the hosted app, `3668aa04`, and both of its sides belong to the operator. The council is one operator account. The server holds unclaimed managed-account keys; claiming an account replaces the server's key with the owner's. Testnet cross-chain quotes are NEAR Intents dry runs and move no funds. On mainnet one pilot round settled by mutual agreement, with no referee, and the OutLayer referee is not deployed there; a mainnet referee ruling, live cross-chain funding and mobile wallet handoff remain unverified.
+The hosted payout records demonstrate functionality with operator-controlled participants and test NEAR, which has no monetary value; the home page counts three bets taken by people outside the team (two of them still open on 13 November), and who runs those accounts is not established here. One bet has been settled through the relay by the hosted app, `3668aa04`, and both of its sides belong to the operator. The council is one operator account. The server holds unclaimed managed-account keys; claiming an account replaces the server's key with the owner's. Testnet cross-chain quotes are NEAR Intents dry runs and move no funds. On mainnet one pilot round settled by mutual agreement, with no referee, and the OutLayer referee is deployed there. A mainnet referee ruling, live cross-chain funding and mobile wallet handoff remain unverified.
 
 ## AI assistance
 
