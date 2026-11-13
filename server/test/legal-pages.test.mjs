@@ -45,6 +45,24 @@ test('on mainnet the Terms state the real-NEAR pilot instead of the test-NEAR se
   assert.match(words, /limited to CAD 100/, 'the rest of the Terms still applies');
 });
 
+test('open mainnet Terms disclose the configured stake limit and limited sponsored balances', () => {
+  const words = text(termsPage({ bot: 'statedforecast', real: true, pilotXIds: ['*'], startNear: '1', sponsorLimit: 25, maxStakeNear: '0.5' }));
+  assert.match(words, /Anyone with an X account can bet at their own risk, up to 0\.5 NEAR per bet/);
+  assert.doesNotMatch(words, /pilot is limited|invite-only|Every stake is your own NEAR|every stake is your own NEAR|we do not lend or give you stakes|only enough NEAR/);
+  assert.match(words, /Stated puts 1 NEAR into each new sponsored account, up to a lifetime limit of 25 recipients and one grant per X account/);
+  assert.match(words, /That NEAR is yours to bet or withdraw/);
+  assert.match(words, /Other new accounts receive 0\.05 NEAR for network fees/);
+  assert.match(words, /The referee settles the escrow automatically through OutLayer/);
+  assert.doesNotMatch(words, /A ruling then goes to Stated Court|each running in its own NEAR AI Cloud enclave/);
+});
+
+test('listed mainnet Terms keep access restrictions while disabled sponsorship promises no stake grant', () => {
+  const words = text(termsPage({ bot: 'statedforecast', real: true, pilotXIds: ['123'], startNear: '1', sponsorLimit: 0, maxStakeNear: '1' }));
+  assert.match(words, /The pilot is limited to people we allow/);
+  assert.match(words, /Every stake is your own NEAR/);
+  assert.doesNotMatch(words, /Anyone with an X account|yours to bet or withdraw|first 0 sponsored/);
+});
+
 test('the Privacy Policy names what is public, each cookie, each recipient and the choices', () => {
   const page = String(privacyPage({ bot: 'statedforecast', sessionDays: 30, textPolicy: 'public' }));
   const words = text(page);

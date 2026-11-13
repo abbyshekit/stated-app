@@ -5,8 +5,16 @@ import { isIP } from 'node:net';
 import { idOf, ownerSave, publicSave, publicPredictionOwner, UserError } from './store.mjs';
 import { parseTestNear } from './near-escrow.mjs';
 import { isAccount, network, unit } from './near-network.mjs';
+import { makeOutlayerMaterial, outlayerTermsHash } from './outlayer.mjs';
+import { nearChain } from './play.mjs';
+import { checkPlan, planForOutlayerCreation } from './enclave-ruling.mjs';
+import { assertMainnetStakeCap } from './reputation.mjs';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+// Separate from the bettor's 1000-character input: leave room in the referee's
+// 16384-byte material for dates, identifiers and the complete evidence policy.
+const COMMITTED_CLAIM_CHARS = 3100;
+const COMMITTED_CLAIM_JSON_BYTES = 12000;
 const SELECT_BET = `select b.*, creator.x_username as creator_username,
   taker.x_username as acceptor_username, invited.x_username as invited_username,
   (b.status = 'offered' and b.accept_by <= clock_timestamp()) as expired
@@ -174,12 +182,40 @@ async function event(tx, betId, actor, kind, value = {}) {
   );
 }
 
-export async function createBet(db, user, input) {
+export function requireCreationReferee(config) {
+  if ((config?.near?.real ?? network().real) && !config?.outlayer?.referee) {
+    throw new UserError('Mainnet bets require an OutLayer referee. Ask the operator to configure STATED_OUTLAYER_REFEREE before making a bet.', 503);
+  }
+}
+
+function priceTimingError(kind) {
+  const error = new UserError(kind === 'moment'
+    ? 'That price moment leaves less than 10 minutes to accept. Choose a moment at least one hour and 10 minutes away.'
+    : 'That price range needs at least one hour after acceptance closes. Choose a later window end.', 409);
+  error.reason = kind === 'moment' ? 'price_moment' : 'price_range';
+  return error;
+}
+
+export async function createBet(db, user, input, { config, chain, fetchImpl = fetch } = {}) {
   const actor = person(user);
+  requireCreationReferee(config);
+  if (config?.outlayer?.referee) input = { ...input, refereeAccount: config.outlayer.referee };
   const { requestId, terms, opponent, sourceSaveId } = creationInput(input);
-  if (sourceSaveId) await sourceForBet(db, user, sourceSaveId);
+  if (config) assertMainnetStakeCap(config, input.stakeNear);
+  const source = sourceSaveId ? await sourceForBet(db, user, sourceSaveId) : null;
   const requestFingerprint = digest({ version: 1, ...terms, opponent, sourceSaveId });
-  return db.tx(async (tx) => {
+  let refereeConfig;
+  let refereeChain;
+  if (config?.outlayer?.referee) {
+    try {
+      refereeChain = (typeof chain === 'function' ? chain() : chain) || nearChain({ fetchImpl });
+      refereeConfig = await refereeChain.view({ contractId: config.outlayer.referee, method: 'get_config' });
+    } catch {
+      throw new UserError('The OutLayer referee configuration could not be checked. Retry before making a bet.', 503);
+    }
+    if (refereeConfig?.escrow !== config.nearContract) throw new UserError('The OutLayer referee names another escrow. Ask the operator to check its configuration.', 503);
+  }
+  async function preflight(tx, priceKind = null) {
     const owner = await tx.one('select id, kind, setup_completed_at from users where id = $1 for update', [actor]);
     if (!owner || owner.kind !== 'person' || !owner.setup_completed_at) throw new UserError('Complete account setup before making a bet.', 403);
     const existing = await tx.one('select * from bilateral_bets where creator_user_id = $1 and request_id = $2', [actor, requestId]);
@@ -190,9 +226,13 @@ export async function createBet(db, user, input) {
       if (created?.detail?.requestFingerprint !== requestFingerprint) {
         throw new UserError('That request ID already belongs to different terms. Start a new bet.', 409);
       }
-      return detail(tx, actor, existing.id);
+      return { existing: await detail(tx, actor, existing.id) };
     }
     const { at } = await tx.one('select clock_timestamp() as at');
+    if (priceKind && (Date.parse(terms.acceptBy) <= new Date(at).getTime()
+      || (priceKind === 'moment' && Date.parse(terms.acceptBy) < new Date(at).getTime() + 10 * 60000))) {
+      throw priceTimingError(priceKind);
+    }
     if (new Date(terms.acceptBy) <= new Date(at)) throw new UserError('Set an acceptance deadline in the future.');
     if (new Date(terms.resolveAt).getTime() > new Date(at).getTime() + 366 * 86400000) {
       throw new UserError('Set resolution within 366 days, matching the escrow contract.');
@@ -213,9 +253,57 @@ export async function createBet(db, user, input) {
       invitedId = String(invited.id);
       if (invitedId === actor) throw new UserError('Choose another person as the opponent.');
     }
-    const termsSalt = randomBytes(32).toString('hex');
-    const termsHash = digest({ version: 2, salt: termsSalt, creatorUserId: actor, invitedUserId: invitedId, ...terms });
-    const id = randomUUID();
+    return { at, invitedId };
+  }
+  const prepared = await db.tx(preflight);
+  if (prepared.existing) return prepared.existing;
+  const { at, invitedId } = prepared;
+  const termsSalt = randomBytes(32).toString('hex');
+  const id = randomUUID();
+  // Fingerprint the original fields, then plan exactly what the jury will read.
+  if (refereeConfig) {
+    const combined = `${terms.claim}\n\nCounts as yes:\n${terms.criteria}`;
+    if (combined.length > COMMITTED_CLAIM_CHARS || Buffer.byteLength(JSON.stringify(combined)) > COMMITTED_CLAIM_JSON_BYTES) {
+      throw new UserError('The claim and criteria together are too long for the jury. Shorten the claim or criteria.');
+    }
+    terms.claim = combined;
+  }
+  const planInput = { claim: terms.claim, madeAt: new Date(Math.max(new Date(source?.published_at || at).getTime(), new Date(at).getTime())).toISOString(),
+    deadline: terms.resolveAt, postUrl: terms.evidenceSourceUrl };
+  const evidencePlan = refereeConfig ? await planForOutlayerCreation(db, config, planInput, { sourceSaveId, fetchImpl }) : null;
+  const checkedPlan = evidencePlan ? checkPlan(evidencePlan.verdict, planInput) : null;
+  const priceKind = checkedPlan?.source === 'coinbase-candles' ? checkedPlan.kind : null;
+  if (priceKind) {
+    const end = priceKind === 'moment' ? Date.parse(evidencePlan.verdict.at) : Date.parse(checkedPlan.end);
+    const acceptAt = Math.min(new Date(at).getTime() + 24 * 3600000, end - 3600000);
+    if (priceKind === 'moment' ? acceptAt < new Date(at).getTime() + 10 * 60000
+      : acceptAt <= new Date(at).getTime() || end - Math.ceil(acceptAt / 60000) * 60000 < 3600000) {
+      throw priceTimingError(priceKind);
+    }
+    terms.acceptBy = new Date(acceptAt).toISOString();
+  }
+  // X posts supply context whether an offer came from a save or the web form.
+  const sourcePost = /(?:^|\.)(?:x|twitter)\.com$/i.test(new URL(terms.evidenceSourceUrl).hostname.replace(/\.+$/, ''));
+  const material = refereeConfig ? makeOutlayerMaterial({ id, ...planInput, createdAt: at, plan: evidencePlan.verdict,
+    acceptBy: terms.acceptBy, evidenceSourceUrl: sourcePost ? null : terms.evidenceSourceUrl,
+    creatorSide: terms.creatorSide }, config, refereeConfig) : null;
+  const termsHash = material ? outlayerTermsHash(material, termsSalt)
+    : digest({ version: 2, salt: termsSalt, creatorUserId: actor, invitedUserId: invitedId, ...terms });
+  if (material) {
+    let contractHash;
+    try {
+      contractHash = await refereeChain.view({ contractId: config.outlayer.referee, method: 'terms_hash',
+        args: { material, salt: termsSalt } });
+    } catch {
+      throw new UserError('The OutLayer referee commitment could not be checked. Retry before making a bet.', 503);
+    }
+    if (contractHash !== termsHash) throw new UserError('The referee commitment differs from these terms. Ask the operator to check its version before funding.', 503);
+  }
+  return db.tx(async tx => {
+    // Recheck time, account state, rate limit and idempotency after slow external work.
+    const current = await preflight(tx, priceKind);
+    if (current.existing) return current.existing;
+    if (current.invitedId !== invitedId) throw new UserError('The invited account changed. Start a new bet.', 409);
     await tx.query(
       `insert into bilateral_bets (id, creator_user_id, invited_user_id, request_id, claim, criteria,
        evidence_source_url, creator_side, stake_yocto, accept_by, resolve_at, terms_hash, status, created_at,
@@ -225,7 +313,8 @@ export async function createBet(db, user, input) {
         terms.creatorSide, terms.stakeYocto, terms.acceptBy, terms.resolveAt, termsHash, at, terms.invitedWallet, termsSalt, sourceSaveId,
         terms.refereeWallet || null],
     );
-    await event(tx, id, actor, 'created', { requestFingerprint, termsHash });
+    if (material) await tx.query('update bilateral_bets set outlayer_material=$2 where id=$1', [id, material]);
+    await event(tx, id, actor, 'created', { requestFingerprint, termsHash, ...(evidencePlan ? { evidencePlan } : {}) });
     return detail(tx, actor, id);
   });
 }

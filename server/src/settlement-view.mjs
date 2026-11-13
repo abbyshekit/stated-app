@@ -5,6 +5,7 @@ import { modelFace } from './jury-models.mjs';
 export const juryLogos = (models = []) => html`<div class="jury-logos" aria-label="The NEAR AI enclave jury">${models.map(modelFace)}</div>`;
 
 export function jurySentence(bet) {
+  if (bet.outlayer?.result) return `The jury in an OutLayer enclave said ${bet.outlayer.result.outcome}.`;
   const ruling = bet.enclave;
   if (!ruling || ruling.mode !== 'ruling' || !ruling.verdicts?.length) return '';
   const count = ruling.verdicts.length;
@@ -22,6 +23,7 @@ export function settlementMarkup(sentence) {
 
 export async function settlementSentence(db, config, bet) {
   let sentence = jurySentence(bet);
+  if (bet.outlayer) return sentence && bet.payout_completed ? `${sentence} The winner was paid.` : sentence;
   if (!sentence) return '';
   if (bet.status !== 'settled' || bet.settled_by !== 'referee') return sentence;
   if (bet.outcome !== bet.enclave.outcome) return `${sentence} A reviewer corrected the enclave’s ruling.`;
@@ -45,6 +47,13 @@ export async function settlementSentence(db, config, bet) {
 // A ruling made on evidence: a price, or at least one posted link. A ruling that only records that no
 // evidence arrived is a true record, but it does not show what the jury does, so home never leads with it.
 export function rulingOnEvidence(bet) {
+  if (bet?.outlayer?.result) {
+    const material = bet.outlayer.material;
+    const summary = bet.outlayer.result.evidence_summary;
+    return material.evidence.kind === 'coinbase' || summary?.kind === 'coinbase-candles'
+      || summary?.priceAtMoment != null || (summary?.firstOpen != null && summary?.highestHigh != null)
+      || Number(summary?.item_count ?? summary?.itemCount ?? summary?.items?.length ?? 0) > 0;
+  }
   const ruling = bet?.enclave;
   return Boolean(ruling) && (ruling.source !== 'submitted' || Number(ruling.itemCount) > 0);
 }

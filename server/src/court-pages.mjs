@@ -3,13 +3,67 @@
 // Stated proposals. Everything here is read from chain views, cached for 30 s.
 // DESIGN.md: existing classes only; account names and votes are plain text.
 import { html } from './html.mjs';
-import { accountLink, unit } from './near-network.mjs';
+import { accountLink, transactionLink, unit } from './near-network.mjs';
 import { formatTestNear } from './near-escrow.mjs';
 import { dayMonth } from './marked.mjs';
 import { cachedView, courtDao, proposalTarget } from './court-dao.mjs';
-import { publicBet } from './bet-public.mjs';
+import { publicBet, publicBetHall } from './bet-public.mjs';
 import { markedClaim } from './bet-view.mjs';
 import { juryLogos } from './settlement-view.mjs';
+import { outlayerModels } from './outlayer.mjs';
+import { baseDecode } from 'near-api-js';
+
+// DESIGN.md: the mainnet referee uses ordinary public rows and a collapsed configuration fold.
+async function outlayerCourt({ ctx, db, config, layout, send, chain }) {
+  const referee = config.outlayer?.referee;
+  if (!referee) return send(ctx.res, 503, await layout(ctx, 'OutLayer referee', html`<h1 class="court-title">OutLayer referee</h1><p class="gut">The referee is not configured. New bets are paused.</p>`, { flush: true }));
+  let view; let keys;
+  try {
+    [view, keys] = await Promise.all([
+      chain().view({ contractId: referee, method: 'get_config' }), chain().readAccessKeys(referee),
+    ]);
+    if (view?.escrow !== config.nearContract || !Array.isArray(keys)) throw new Error('Invalid referee');
+  } catch {
+    return send(ctx.res, 503, await layout(ctx, 'OutLayer referee', html`<h1 class="court-title">OutLayer referee</h1><p class="gut">The referee could not be checked on NEAR. Retry in a minute.</p><p class="gut"><a class="tl" href="${accountLink(referee)}" rel="noopener noreferrer">${referee}</a></p>`, { flush: true }));
+  }
+  const hall = await publicBetHall(db);
+  const rulings = [];
+  for (const row of hall.rows.filter(bet => bet.referee_wallet === referee)) {
+    const bet = await publicBet(db, row.id, config.play);
+    if (bet?.outcome === 'void' && bet.settled_by === 'referee' && !bet.settlement_transaction_hash) {
+      const proof = await db.one(`select detail->>'transactionHash' as hash, detail->>'transactionAttribution' as attribution from bilateral_bet_events
+        where bet_id=$1 and actor_user_id=(select creator_user_id from bilateral_bets where id=$1) and kind='referee_resolved'
+          and detail->>'outcome'='void' and detail->>'referee'=$2 order by id desc limit 1`, [bet.id, referee]);
+      try {
+        if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(proof?.hash || '') && baseDecode(proof.hash).length === 32) {
+          bet.settlement_transaction_hash = proof.hash;
+          bet.settlement_transaction_attribution = proof.attribution || null;
+        }
+      } catch { /* An invalid stored hash is not a transaction link. */ }
+    }
+    if (bet?.outlayer?.result || bet?.outlayer?.ruling?.outcome) rulings.push(bet);
+  }
+  const outcome = (value) => ({ yes: 'Yes', no: 'No', void: 'Void', unclear: 'Undecided' })[value] || 'Pending';
+  send(ctx.res, 200, await layout(ctx, 'OutLayer referee', html`
+    <h1 class="court-title">OutLayer referee</h1>
+    <p class="gut"><a class="tl" href="${accountLink(referee)}" rel="noopener noreferrer">${referee}</a></p>
+    <p class="gut">${keys.length} access keys${keys.length === 0 ? '. No account key can change this referee’s code.' : '. This account has access keys; its code can be changed.'}</p>
+    <p class="gut"><a class="tl" href="${accountLink(referee)}#contract" rel="noopener noreferrer">View referee code</a></p>
+    <p class="gut">The pinned jury rules through OutLayer. The escrow credits the winner, then Stated sends the payout to an account it manages. A claimed account withdraws through its wallet.</p>
+    <h2 class="lead">Jury roster</h2>${juryLogos(outlayerModels())}
+    <ul class="posts">${outlayerModels().map(model => html`<li class="prow">${model}</li>`)}</ul>
+    <h2 class="lead">Rulings</h2>
+    ${rulings.length ? html`<ul class="posts evidence-list">${rulings.map(bet => html`<li class="prow"><div>
+      <p><a class="tl" href="/bets/${bet.id}/ruling">${bet.claim}</a></p>
+      <p>${outcome(bet.outlayer.ruling.outcome || bet.outlayer.result?.outcome)}${bet.settled_at ? `, ${dayMonth(bet.settled_at, { year: true })}` : ''}.</p>
+      <p>${bet.settlement_transaction_hash ? html`<a class="tl" href="${transactionLink(bet.settlement_transaction_hash)}" rel="noopener noreferrer">${bet.settlement_transaction_attribution === 'latest_verified_request' ? 'Ruling request' : 'Settlement transaction'}</a>` : 'Settlement transaction not confirmed.'}</p>
+    </div></li>`)}</ul>` : html`<p class="empty quiet">No public rulings yet.</p>`}
+    <div class="folds"><details class="fold"><summary>Referee configuration</summary>
+      <p>Escrow: <a class="tl" href="${accountLink(view.escrow)}">${view.escrow}</a></p>
+      <p class="acct">Jury WASM SHA256: ${view.wasm_hash}</p>
+      <p>The claim and evidence policy are committed before funding. OutLayer supplies the jury result; Stated has no manual ruling step for these bets.</p>
+    </details></div>`, { flush: true }));
+}
 
 const STATUS = { InProgress: 'open for council votes', Approved: 'approved', Rejected: 'voted down', Removed: 'removed',
   Expired: 'expired', Failed: 'failed', Moved: 'moved' };
@@ -88,6 +142,7 @@ const councilAction = (status) => ({ Approved: 'Let it stand', Rejected: 'Voted 
 
 export function registerCourtRoutes({ route, db, config, layout, send, notFound, chain }) {
   route('GET', /^\/court$/, async (ctx) => {
+    if (config.near?.real) return outlayerCourt({ ctx, db, config, layout, send, chain });
     const dao = courtDao(config);
     if (!dao) return notFound(ctx);
     let policy; let proposals;

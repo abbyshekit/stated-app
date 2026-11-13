@@ -2,13 +2,15 @@
 // X sessions own private nonce-bound requests; wallet redirects never establish success.
 import { randomBytes, randomUUID } from 'node:crypto';
 import { fingerprint } from './canonical.mjs';
-import { betFor } from './bets.mjs';
+import { betFor, requireCreationReferee } from './bets.mjs';
 import { notifyBetChange } from './bet-notify.mjs';
 import { reserveNearRequest } from './near-request.mjs';
 import { contractVersion, formatTestNear, rpc, STORAGE_FEE_YOCTO, viewCredit, viewEscrowSnapshot, walletPayload } from './near-escrow.mjs';
 import { inPilot, isAccount, isNamedAccount, networkName } from './near-network.mjs';
 import { assertStakeLimit } from './reputation.mjs';
 import { UserError } from './store.mjs';
+import { ensureOutlayerRegistration } from './outlayer.mjs';
+import { nearChain } from './play.mjs';
 
 const ns = (date) => (BigInt(new Date(date).getTime()) * 1000000n).toString();
 const same = (a, b) => String(a) === String(b);
@@ -157,6 +159,11 @@ export async function syncNearBet(db, config, user, id, options = {}) {
     }
   });
   const synced = await betFor(db, user, id);
+  if (!options.skipOutlayerRegistration && synced.outlayer_material && ['accepted','proposed','disputed'].includes(synced.status)) {
+    // Acceptance is final. A failed registration remains recoverable by the keeper.
+    try { await ensureOutlayerRegistration(db, config, options.chain || nearChain(options), synced, options); }
+    catch { /* The durable material and registration intent are retried independently. */ }
+  }
   return { ...synced, acceptor_unbound: Boolean(synced.acceptor_wallet && !synced.acceptor_user_id) };
 }
 
@@ -248,6 +255,16 @@ export async function prepareNearAction(db, config, user, id, input, options = {
   }
   if (action === 'fund' || action === 'accept') {
     await assertStakeLimit(db, config, user.id, formatTestNear(bet.stake_yocto));
+  }
+  if (action === 'fund' && config.near?.real) {
+    requireCreationReferee(config);
+    if (bet.referee_wallet !== config.outlayer.referee || !bet.outlayer_material) {
+      throw new UserError('This draft has no committed OutLayer referee. Make a new bet before funding.', 409);
+    }
+    let view;
+    try { view = await (options.chain || nearChain(options)).view({ contractId: config.outlayer.referee, method: 'get_config' }); }
+    catch { throw new UserError('The OutLayer referee configuration could not be checked. Retry before funding.', 503); }
+    if (view?.escrow !== config.nearContract) throw new UserError('The OutLayer referee names another escrow. Funding is paused.', 503);
   }
   const { request, reused } = await reserveNearRequest(db, { bet, user, account, method, args, metadata, depositYocto: deposit, contract });
   const payload = walletPayload({ contract: request.metadata.contract, accountId: request.wallet_account,

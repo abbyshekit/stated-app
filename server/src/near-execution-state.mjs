@@ -36,7 +36,9 @@ export async function verifyBetTransaction(db, config, user, betId, input, optio
   if (!user || !UUID.test(input.requestId || '')) throw new UserError('Choose a wallet request from your account.', 404);
   const request = await db.one(`select * from bilateral_near_requests
     where id=$1 and bet_id=$2 and user_id=$3`, [input.requestId, betId, user.id]);
-  if (!request || request.metadata.contract !== config.nearContract) throw new UserError('This wallet request is unavailable to your account.', 404);
+  const bet = request?.method === 'submit_evidence' ? await db.one('select referee_wallet, outlayer_material from bilateral_bets where id=$1', [betId]) : null;
+  if (!request || (request.metadata.contract !== config.nearContract
+    && !(bet?.outlayer_material && request.method === 'submit_evidence' && request.metadata.contract === bet.referee_wallet))) throw new UserError('This wallet request is unavailable to your account.', 404);
   return reconcile(db, request, input.transactionHash, options);
 }
 
@@ -47,7 +49,10 @@ export async function syncPendingBetTransactions(db, config, betId, options = {}
   // At most five independent lookups. A slow RPC cannot serialize this batch;
   // wait for every lookup before returning so subsequent batches stay bounded.
   const results = await Promise.allSettled(requests.map(async (request) => {
-    if (request.metadata.contract !== config.nearContract) return 0;
+    if (request.metadata.contract !== config.nearContract) {
+      const bet = await db.one('select referee_wallet,outlayer_material from bilateral_bets where id=$1', [betId]);
+      if (!bet?.outlayer_material || request.method !== 'submit_evidence' || request.metadata.contract !== bet.referee_wallet) return 0;
+    }
     try {
       const result = await reconcile(db, request, request.transaction_hash, options);
       return result.status !== 'pending' ? 1 : 0;

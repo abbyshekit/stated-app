@@ -1,0 +1,28 @@
+[package]
+name = "stated-outlayer-referee"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk = { version = "=5.29.0", features = ["legacy"] }
+near-sdk-env = "=0.1.5"
+near-sys = "=0.2.13"
+near-global-contracts = "=0.2.5"
+stated-jury = { path = "../../outlayer/stated-jury", default-features = false }
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+near-sdk = { version = "=5.29.0", features = ["legacy", "unit-testing"] }
+stated-jury = { path = "../../outlayer/stated-jury" }
+
+[profile.release]
+codegen-units = 1
+opt-level = "z"
+lto = true
+strip = true
+panic = "abort"
+overflow-checks = true

@@ -1,0 +1,42 @@
+[package]
+name = "stated-jury"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[features]
+default = ["runner"]
+runner = ["dep:rust_decimal", "dep:url", "dep:html5ever", "dep:wasi"]
+
+[[bin]]
+name = "stated-jury"
+path = "src/main.rs"
+required-features = ["runner"]
+
+[[example]]
+name = "parity"
+required-features = ["runner"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["arbitrary_precision"] }
+sha2 = "0.10"
+hex = "0.4"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+rust_decimal = { version = "1", default-features = false, features = ["std"], optional = true }
+url = { version = "=2.5.8", optional = true }
+html5ever = { version = "=0.29.1", optional = true }
+
+[target.'cfg(all(target_arch = "wasm32", target_os = "wasi"))'.dependencies]
+wasi = { version = "=0.13.3", optional = true }
+
+[profile.release]
+codegen-units = 1
+opt-level = "z"
+lto = true
+strip = true
+panic = "abort"
+overflow-checks = true
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(near)'] }

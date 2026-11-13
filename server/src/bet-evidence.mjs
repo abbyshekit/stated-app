@@ -3,6 +3,8 @@ import { safeFetch } from './articles.mjs';
 import { extractInWorker } from './extraction-pool.mjs';
 import { betReplies, say } from './reply-bets.mjs';
 import { UserError } from './store.mjs';
+import { nearChain } from './play.mjs';
+import { outlayerEvidenceUrl, submitOutlayerEvidence } from './outlayer.mjs';
 
 function evidenceUrl(raw) {
   const text = String(raw || '').trim();
@@ -24,9 +26,12 @@ function evidenceUrl(raw) {
 }
 
 /** Handles are separate tokens: an @ inside a link is never stripped. */
-export function parseEvidenceCommand(text) {
+export function parseEvidenceCommand(text, { outlayer = false } = {}) {
   const words = String(text || '').trim().split(/\s+/).filter((word) => !/^@\w{1,15}$/.test(word));
   if (words.length !== 2 || !/^(yes|no)$/i.test(words[0])) return null;
+  // Queue the caller's spelling on OutLayer, including invalid links, so the
+  // authenticated evidence worker can give a refusal instead of ignoring it.
+  if (outlayer && /^https?:/i.test(words[1])) return { kind: 'evidence', side: words[0].toLowerCase(), url: words[1] };
   try { return { kind: 'evidence', side: words[0].toLowerCase(), url: evidenceUrl(words[1]) }; } catch { return null; }
 }
 
@@ -74,7 +79,13 @@ async function acknowledge(db, config, row) {
 }
 
 /** Stores the exact, bounded text the jury will read; duplicate submissions reuse it. */
-export async function submitEvidence(db, config, { betId, userId, side, url, via, eventId = null, fetchPage, receivedAt = Date.now() }) {
+export async function submitEvidence(db, config, { betId, userId, side, url, via, eventId = null, fetchPage, receivedAt = Date.now(), chain, fetchImpl = fetch }) {
+  if (!config.nearai?.rulings && !config.outlayer?.referee) throw new UserError('Evidence is unavailable.', 404);
+  const candidate = await evidenceBet(db, betId);
+  if (candidate?.outlayer_material) {
+    const user = await db.one('select * from users where id=$1', [userId]);
+    return submitOutlayerEvidence(db, config, (typeof chain === 'function' ? chain() : chain) || nearChain({ fetchImpl }), candidate, user, { url: outlayerEvidenceUrl(url), fetchImpl });
+  }
   if (!config.nearai?.rulings) throw new UserError('Evidence is unavailable.', 404);
   if (!['yes', 'no'].includes(side)) throw new UserError('Choose bet yes or bet no.');
   if (!['reply', 'page'].includes(via)) throw new UserError('Choose how to add this evidence.');
@@ -94,7 +105,6 @@ export async function submitEvidence(db, config, { betId, userId, side, url, via
     checkReadTime(bet, config, readAt);
     return { bet, existing: null };
   }
-  const candidate = await evidenceBet(db, betId);
   checkBettor(candidate, userId);
   const reservationId = randomUUID();
   const initial = await db.tx(async (tx) => {
@@ -192,16 +202,34 @@ export async function evidenceSettled(tx, statementId, now) {
 
 /** A prompt is an outbox insert, so its dedupe key and prompted_at commit together. */
 export async function evidencePrompts(db, config, { say: post }) {
-  if (!config.nearai?.rulings) return { prompted: 0 };
+  if (!config.nearai?.rulings && !config.outlayer?.referee) return { prompted: 0 };
   return db.tx(async (tx) => {
+    let prompted = 0;
+    if (config.outlayer?.referee) {
+      const bets = await tx.many(`select b.id,b.resolve_at,b.outlayer_material,c.event_id from bilateral_bets b
+        join bet_commands c on c.bet_id=b.id and c.kind='bet' and c.status='done'
+        where b.outlayer_material->'evidence'->>'kind'='open'
+          and b.referee_wallet is not null and b.chain_state is not null
+          and b.accepted_at is not null and b.acceptor_user_id is not null
+          and b.status in ('accepted','proposed','disputed') and b.resolve_at <= clock_timestamp()
+          and clock_timestamp() < b.resolve_at + make_interval(secs => (b.outlayer_material->'evidence'->>'window_seconds')::int)
+          and not exists (select 1 from bot_outbox o where o.dedupe_key='evidence-prompt:'||b.id::text)
+        order by b.resolve_at,b.id limit 100 for update of b skip locked`);
+      for (const bet of bets) {
+        const closesAt = new Date(new Date(bet.resolve_at).getTime() + bet.outlayer_material.evidence.window_seconds * 1000);
+        await post({ key: `evidence-prompt:${bet.id}`, inReplyTo: bet.event_id, betId: bet.id,
+          body: betReplies.evidencePrompt({ closesAt, url: `${config.baseUrl}/bets/${bet.id}` }) }, tx);
+        prompted += 1;
+      }
+    }
+    if (!config.nearai?.rulings) return { prompted };
     const plans = await tx.many(`select * from enclave_plans where source = 'evidence' and prompted_at is null
       order by at for update skip locked`);
-    let prompted = 0;
     for (const plan of plans) {
       const bets = await tx.many(`select b.id, b.resolve_at, c.event_id from bilateral_bets b
         join saves s on s.id = b.source_save_id
         join bet_commands c on c.bet_id = b.id and c.kind = 'bet'
-        where s.statement_id = $1 and b.accepted_at is not null and b.acceptor_user_id is not null
+        where s.statement_id = $1 and b.outlayer_material is null and b.accepted_at is not null and b.acceptor_user_id is not null
           and b.status in ('accepted', 'proposed', 'disputed') order by b.created_at`, [plan.statement_id]);
       for (const bet of bets) {
         const closesAt = plan.closes_at || new Date(new Date(bet.resolve_at).getTime() + config.play.evidenceWindowSeconds * 1000);
@@ -231,10 +259,10 @@ export async function targetEvidenceBet(db, cmd) {
     order by b.accepted_at desc nulls last, b.created_at desc limit 1`, [cmd.target_ref, cmd.x_user_id]);
 }
 
-/** Bounded retries for queue infrastructure failures; refusals never post a reply. */
-export async function runEvidenceCommands(db, config, { limit = 6, fetchPage } = {}) {
+/** Bounded retries for infrastructure failures; refused commands get a reply. */
+export async function runEvidenceCommands(db, config, { limit = 6, fetchPage, chain, fetchImpl = fetch } = {}) {
   const result = { done: 0, refused: 0, retry: 0, failed: 0 };
-  if (!config.nearai?.rulings) return result;
+  if (!config.nearai?.rulings && !config.outlayer?.referee) return result;
   const claimed = await db.tx(async (tx) => {
     const exhausted = await tx.query(`update evidence_commands set status = 'failed',
       detail = coalesce(detail, 'Evidence command stopped after three attempts.'), updated_at = clock_timestamp()
@@ -259,13 +287,16 @@ export async function runEvidenceCommands(db, config, { limit = 6, fetchPage } =
     try {
       const found = await targetEvidenceBet(db, cmd);
       if (!found?.user_id) throw new UserError('Not a bettor on this Bet.', 404);
-      await submitEvidence(db, config, { betId: found.id, userId: found.user_id, side: cmd.side, url: cmd.url,
-        via: 'reply', eventId: cmd.event_id, receivedAt: cmd.created_at, fetchPage });
+      const submitted = await submitEvidence(db, config, { betId: found.id, userId: found.user_id, side: cmd.side, url: cmd.url,
+        via: 'reply', eventId: cmd.event_id, receivedAt: cmd.created_at, fetchPage, chain, fetchImpl });
+      if (submitted?.payload) throw new UserError(`Approve this evidence with your wallet on ${config.baseUrl}/bets/${found.id}/evidence.`, 409);
       await db.query(`update evidence_commands set status = 'done', detail = null, updated_at = clock_timestamp()
         where event_id = $1 and status = 'queued'`, [cmd.event_id]);
       result.done += 1;
     } catch (error) {
       const status = error instanceof UserError ? 'refused' : cmd.attempts >= 3 ? 'failed' : 'queued';
+      if (status === 'refused') await say(db, config, { key: `evidence-refused:${cmd.event_id}`,
+        inReplyTo: cmd.event_id, body: `Evidence was not submitted. ${String(error.message).slice(0, 220)}` });
       await db.query(`update evidence_commands set status = $2, detail = $3, updated_at = clock_timestamp()
         where event_id = $1 and status = 'queued'`, [cmd.event_id, status, String(error.message || error).slice(0, 300)]);
       result[status === 'queued' ? 'retry' : status] += 1;

@@ -66,17 +66,43 @@ export function betCertificate(bet, { joinHref = null, viewer = null, faces = nu
 // Stated Court is a Sputnik DAO; the server's own referee account is not.
 const courtReferee = (account) => /\.sputnik-v2\.testnet$|\.sputnik-dao\.near$/.test(account || '');
 
+// DESIGN.md: show the persisted evidence terms beside the staking action.
+export function committedEvidence(bet) {
+  const evidence = bet.outlayer_material?.evidence || bet.outlayer_evidence;
+  if (!evidence) return '';
+  let words;
+  if (evidence.kind === 'submitted') {
+    words = html`The jury reads the agreed source: ${evidence.items.map(item => html`<a href="${item.url}" rel="noopener noreferrer">${item.url}</a>`)}.`;
+  } else if (evidence.kind === 'coinbase') {
+    const window = evidence.window;
+    words = window.kind === 'moment'
+      ? html`Coinbase ${evidence.product} minute opening price at ${betTime(window.at)}.`
+      : html`Coinbase ${evidence.product} candles from ${betTime(window.start)} to ${betTime(window.end)}.`;
+  } else if (evidence.kind === 'open') {
+    const closes = new Date(Date.parse(bet.resolve_at) + evidence.window_seconds * 1000);
+    words = html`Only links the two sides post after the deadline, from ${betTime(bet.resolve_at)} until ${betTime(closes)}, reach the jury. The window lasts ${evidence.window_seconds} seconds, up to ${evidence.max_per_side} links per side. Add evidence links during this window.`;
+  } else {
+    words = 'The jury chooses the evidence source automatically.';
+  }
+  return html`<p class="quiet" data-committed-evidence><strong>Decided by:</strong> ${words}</p>`;
+}
+
 // The terms as a fold. `extra` is more definition-list rows from the caller.
 export function betTerms(bet, { extra = '', open = false, title = 'Rules', juryReview = false } = {}) {
   return html`<details class="fold"${open ? ' open' : ''}><summary>${title}</summary><dl class="bet-terms">
     <dt>Counts as yes</dt><dd>${bet.criteria}</dd>
-    <dt>Link source</dt><dd><a href="${bet.evidence_source_url}" rel="noopener noreferrer">${bet.evidence_source_url}</a></dd>
+    <dt>${bet.outlayer_material || bet.outlayer_bound
+      ? bet.outlayer_material?.evidence?.kind === 'submitted' ? 'Agreed source' : 'Context link'
+      : 'Link source'}</dt><dd><a href="${bet.evidence_source_url}" rel="noopener noreferrer">${bet.evidence_source_url}</a></dd>
+    ${committedEvidence(bet) ? html`<dt>Evidence</dt><dd>${committedEvidence(bet)}</dd>` : ''}
     <dt>Stake each</dt><dd>${formatTestNear(bet.stake_yocto)} ${unit()}</dd>
     <dt>${network().real ? 'Real NEAR' : 'Test tokens'}</dt><dd>${network().real ? 'Stakes use real NEAR.' : 'Test NEAR has no monetary value.'} Any settlement or refund creates withdrawal credit; transfer needs a separate withdrawal.</dd>
     <dt>Accept before</dt><dd>${nextBetTime(bet.accept_by)}</dd>
     <dt>Result after</dt><dd>${nextBetTime(bet.resolve_at)}</dd>
     <dt>Stake back from</dt><dd>${nextBetTime(new Date(new Date(bet.resolve_at).getTime() + 7 * 86400000))}</dd>
-    <dt>Settlement</dt><dd>${courtReferee(bet.referee_wallet)
+    <dt>Settlement</dt><dd>${bet.outlayer || bet.outlayer_bound || bet.outlayer_material
+      ? html`The OutLayer enclave jury decides through referee <span class="mono">${bet.referee_wallet}</span>. The claim, dates, evidence plan and salt are public on NEAR. The referee can choose yes, no or void; unresolved stakes remain reclaimable after seven days.`
+      : courtReferee(bet.referee_wallet)
       ? html`The recorded Result becomes a proposal in <a class="tl" href="/court">Stated Court</a>, the Sputnik DAO <span class="mono">${bet.referee_wallet}</span> that referees this bet. Its council can vote the proposal down for ten minutes; after that the DAO settles the contract. The referee can only choose yes, no or void between the two sides; it cannot take the stakes. With no Result, each side takes its stake back after that date.${juryReview ? ' A reviewer can ask the council to vote a ruling down within those ten minutes.' : ''}`
       : bet.referee_wallet
       ? html`Stated’s recorded Result for the post decides, and the referee account <span class="mono">${bet.referee_wallet}</span> carries it to the contract. The referee can only choose yes, no or void between the two sides; it cannot take the stakes. With no Result, each side takes its stake back after that date.${juryReview ? ' A reviewer can correct a ruling before it pays out.' : ''}`

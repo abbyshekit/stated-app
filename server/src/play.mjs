@@ -4,16 +4,16 @@
 // person claims the account.
 //
 // On testnet (the default) the treasury also pays for stakes: test NEAR has no
-// monetary value. On mainnet the treasury pays only what a new account needs for
-// network fees, a stake is the person's own NEAR, and only people on the
-// operator's list (STATED_PILOT_X_IDS) get an account at all.
+// monetary value. On mainnet new accounts normally receive only network fees;
+// an optional sponsored grant has a lifetime recipient cap. The configured
+// pilot list (STATED_PILOT_X_IDS), including its '*' option, controls access.
 //
 // Signing here never establishes that anything happened. Every action goes
 // through the same reserved request and finalized-transaction verification as
 // a browser wallet: prepareNearAction, then verifyBetTransaction, then syncNearBet.
 import Decimal from 'decimal.js';
-import { randomBytes } from 'node:crypto';
-import { Account, FailoverRpcProvider, JsonRpcProvider, KeyPair, KeyPairSigner, PublicKey, actions } from 'near-api-js';
+import { createHash, randomBytes } from 'node:crypto';
+import { Account, FailoverRpcProvider, JsonRpcProvider, KeyPair, KeyPairSigner, PublicKey, SignedTransaction, actions, baseEncode } from 'near-api-js';
 import { open, seal } from './crypto.mjs';
 import { kvGet, kvSet } from './db.mjs';
 import { verifyBetTransaction } from './near-execution-state.mjs';
@@ -32,6 +32,35 @@ export const near = (yoctoAmount) => new D(yoctoAmount).div(NEAR).toFixed();
 // stop at the lifetime grant, so one account cannot drain the treasury.
 const LIFETIME_GRANT_YOCTO = yocto('6');
 const TREASURY_LOW_YOCTO = yocto('4');
+const MAINNET_FEE_GRANT_YOCTO = yocto('0.05');
+
+async function initialMainnetGrant(db, config, row, balance) {
+  return db.tx(async (tx) => {
+    // One database-wide reservation lock makes count + assignment atomic across
+    // processes. It is released before the network call; the assignment persists.
+    await tx.query("select pg_advisory_xact_lock(hashtextextended('play-mainnet-sponsor-grants', 0))");
+    const assigned = await tx.one('select * from play_account_grants where x_user_id=$1', [row.x_user_id]);
+    if (assigned) {
+      if (assigned.account_id !== row.account_id || assigned.public_key !== row.public_key) {
+        throw new UserError('This X account already received its starting balance. Restore its original account record before reopening it.', 409);
+      }
+      return assigned.amount_yocto;
+    }
+    // A pre-migration interrupted creation has no reliable funding record. Never
+    // substitute the current configuration for the amount that actually moved.
+    if (balance != null) throw new Error('This unfinished account has no recorded initial grant. Its funding needs operator review.');
+    const requested = yocto(config.play.startNear || '0.05');
+    let amount = requested;
+    if (BigInt(requested) > BigInt(MAINNET_FEE_GRANT_YOCTO)) {
+      const used = await tx.one('select count(*)::int as n from play_account_grants where amount_yocto::numeric > $1::numeric', [MAINNET_FEE_GRANT_YOCTO]);
+      // Zero deliberately disables sponsorship; it never means unlimited.
+      if (used.n >= (config.play.sponsorLimit ?? 25)) amount = MAINNET_FEE_GRANT_YOCTO;
+    }
+    await tx.query('insert into play_account_grants(x_user_id, account_id, public_key, amount_yocto) values($1,$2,$3,$4)',
+      [row.x_user_id, row.account_id, row.public_key, amount]);
+    return amount;
+  });
+}
 
 /**
  * The account a key controls with no transaction at all: its public key in hex. NEAR sent to that
@@ -85,6 +114,23 @@ export function nearChain({ urls = rpcUrls(), fetchImpl = fetch } = {}) {
       }
     },
     callFunds: (accountId, gas = GAS) => functionCallFunds(accountId, gas, { fetchImpl }),
+    async readAccessKeys(accountId) {
+      const state = await rpc('query', { request_type: 'view_access_key_list', finality: 'final', account_id: accountId }, { fetchImpl });
+      const valid = (key) => {
+        try { PublicKey.fromString(key.public_key); } catch { return false; }
+        const access = key.access_key;
+        if (!Number.isSafeInteger(access?.nonce) || access.nonce < 0) return false;
+        if (access.permission === 'FullAccess') return true;
+        const call = access.permission?.FunctionCall;
+        return Boolean(call && (call.allowance === null || typeof call.allowance === 'string' && /^\d+$/.test(call.allowance))
+          && typeof call.receiver_id === 'string' && call.receiver_id.length > 0
+          && Array.isArray(call.method_names) && call.method_names.every((method) => typeof method === 'string'));
+      };
+      if (state?.error || !Array.isArray(state?.keys) || !state.keys.every((key) => key && valid(key))) {
+        throw new Error('Invalid NEAR access key list');
+      }
+      return state.keys;
+    },
     async hasKey(accountId, publicKey, { fullAccess = false } = {}) {
       try {
         const key = await rpc('query', { request_type: 'view_access_key', finality: 'final', account_id: accountId, public_key: publicKey }, { fetchImpl });
@@ -111,6 +157,16 @@ export function nearChain({ urls = rpcUrls(), fetchImpl = fetch } = {}) {
     transfer: ({ fromId, secret, toId, amountYocto }) => send(fromId, secret, toId, [actions.transfer(BigInt(amountYocto))]),
     call: ({ signerId, secret, contractId, method, args, depositYocto = '0', gas = GAS }) => send(signerId, secret, contractId,
       [actions.functionCall(method, args, gas, BigInt(depositYocto))]),
+    async prepareCall({ signerId, secret, contractId, method, args, depositYocto = '0', gas = GAS }) {
+      const transaction = await signer(signerId, secret).createSignedTransaction({ receiverId: contractId,
+        actions: [actions.functionCall(method, args, gas, BigInt(depositYocto))] });
+      return { hash: baseEncode(createHash('sha256').update(transaction.transaction.encode()).digest()),
+        signedTransaction: Buffer.from(transaction.encode()).toString('base64') };
+    },
+    async broadcastCall({ signedTransaction }) {
+      const transaction = SignedTransaction.decode(Buffer.from(signedTransaction, 'base64'));
+      return sent(await provider.sendTransactionUntil(transaction, 'FINAL'));
+    },
     // A read of another contract's state (a token balance, a storage registration). Costs nothing.
     async view({ contractId, method, args = {} }) {
       const result = await rpc('query', { request_type: 'call_function', finality: 'final', account_id: contractId,
@@ -293,18 +349,21 @@ async function provisionPlayAccount(db, config, chain, { xUserId, username }) {
       values ($1, $2, $3, $4) on conflict (x_user_id) do update set x_user_id = excluded.x_user_id returning *`,
     [String(xUserId), accountId, seal(key.secret, config.tokenKey), key.publicKey]);
   }
-  // The key was stored first. Create the account unless an earlier attempt already did.
-  if ((await chain.balance(row.account_id)) == null) {
+  // The key and immutable funding assignment are committed before any money moves.
+  // A retry after account creation uses that assignment, even after config changes.
+  const balance = await chain.balance(row.account_id);
+  const amount = config.near?.real ? await initialMainnetGrant(db, config, row, balance) : yocto(config.play.startNear || '1.6');
+  if (balance == null) {
     // Money is about to leave the treasury: top it up first if it is running low.
     await refillTreasury(db, config, chain);
     const made = await chain.createAccount({ parentId: bank.id, parentSecret: bank.secret, accountId: row.account_id,
-      publicKey: row.public_key, amountYocto: yocto(config.play.startNear || '1.6') });
+      publicKey: row.public_key, amountYocto: amount });
     if (!made.ok) throw new Error(`The play account could not be created: ${made.failure || 'no transaction'}`);
   } else if (!(await chain.hasKey(row.account_id, row.public_key))) {
     throw new Error(`That account name exists on ${network().id} with a key this server does not hold.`);
   }
   return db.one(`update play_accounts set ready = true, granted_yocto = case when granted_yocto = '0' then $2 else granted_yocto end
-    where x_user_id = $1 returning *`, [String(xUserId), yocto(config.play.startNear || '1.6')]);
+    where x_user_id = $1 returning *`, [String(xUserId), amount]);
 }
 
 export async function playAccountFor(db, xUserId) {
@@ -323,24 +382,27 @@ export function secretOf(config, account) {
 export async function shortfall(config, chain, account, neededYocto) {
   const { balance, reserve } = await chain.callFunds(account.account_id);
   const deposit = BigInt(neededYocto);
-  // Only a positive escrow deposit must preserve the grant. A cancellation
-  // or withdrawal can use it to pay network fees.
-  const grant = config.play.fundsStakes === false && deposit > 0n ? BigInt(account.granted_yocto ?? '0') : 0n;
+  // A positive mainnet deposit preserves only the grant's fee portion. A
+  // cancellation or withdrawal can use that reserve to pay network fees.
+  const recorded = BigInt(account.granted_yocto ?? '0');
+  const retained = config.near?.real && recorded > BigInt(MAINNET_FEE_GRANT_YOCTO) ? BigInt(MAINNET_FEE_GRANT_YOCTO) : recorded;
+  const grant = config.play.fundsStakes === false && deposit > 0n
+    ? retained : 0n;
   const want = deposit + (grant > reserve ? grant : reserve);
   return balance >= want ? '0' : (want - balance).toString();
 }
 
 /**
  * Makes sure the account can cover a deposit. On testnet it is topped up from the
- * treasury within the lifetime grant. With real NEAR the treasury never pays for a
- * stake: the person adds the difference themselves.
+ * treasury within the lifetime grant. With real NEAR the initial sponsored balance
+ * can fund stakes, but the treasury never tops it up: the person adds any shortfall.
  */
 export async function ensureFunds(db, config, chain, account, neededYocto) {
   const short = await shortfall(config, chain, account, neededYocto);
   if (short === '0') return;
   if (config.play.fundsStakes === false) {
     const more = new D(short).div(NEAR).toDecimalPlaces(2, Decimal.ROUND_UP).toFixed();
-    throw Object.assign(new UserError(`This account needs ${more} more NEAR for that.`, 409), { funds: true, shortYocto: short });
+    throw Object.assign(new UserError(`This account needs ${more} more NEAR for that.`, 409), { funds: true, shortYocto: short, neededYocto });
   }
   // The grant is reserved in one statement before any money moves, so two actions at once
   // cannot both pass the limit, and a crash can only over-count it.
@@ -365,9 +427,9 @@ export async function ensureFunds(db, config, chain, account, neededYocto) {
  * The wallet step is the only difference from the browser path.
  */
 export async function playAction(db, config, chain, user, betId, input, { fetchImpl = fetch } = {}) {
-  if (input.action === 'accept') {
+  if (['fund', 'accept'].includes(input.action)) {
     const reference = typeof betId === 'string' ? betId.toLowerCase() : betId;
-    return withManagedOperation(db, `managed-accept:${config.nearContract}:${reference}:${user.id}`,
+    return withManagedOperation(db, `managed-${input.action}:${config.nearContract}:${reference}:${user.id}`,
       'Your stake is still being matched. Retry verification shortly.',
       (locked) => performPlayAction(locked, config, chain, user, reference, input, { fetchImpl }));
   }
@@ -376,7 +438,7 @@ export async function playAction(db, config, chain, user, betId, input, { fetchI
 
 // Session-scoped because each reservation and verification must commit normally.
 // All work uses this one connection; waiting contenders hold no pool connection.
-async function withManagedOperation(db, key, busyMessage, fn) {
+export async function withManagedOperation(db, key, busyMessage, fn) {
   const deadline = performance.now() + 5000;
   const busy = () => new UserError(busyMessage, 409);
   for (;;) {
@@ -431,9 +493,24 @@ async function performPlayAction(db, config, chain, user, betId, input, { fetchI
   const account = await playAccountFor(db, user.x_user_id);
   if (!account?.ready) throw new UserError('This person has no play account yet.', 409);
   secretOf(config, account);
+  if (input.action === 'fund') {
+    const bet = await syncNearBet(db, config, user, betId, { fetchImpl, chain });
+    if (String(bet.creator_user_id) === String(user.id) && bet.chain_state?.creator === account.account_id) {
+      return { bet, hash: null, status: 'succeeded' };
+    }
+    const request = await db.one(`select * from bilateral_near_requests where bet_id=$1 and user_id=$2
+      and wallet_account=$3 and method='create_bet' and metadata->>'contract'=$4 order by created_at,id limit 1`,
+    [betId, user.id, account.account_id, config.nearContract]);
+    if (request?.transaction_hash && request.execution_status !== 'failed') {
+      const verified = await verifyBetTransaction(db, config, user, betId,
+        { requestId: request.id, transactionHash: request.transaction_hash }, { fetchImpl });
+      if (verified.status === 'failed') throw new UserError(`NEAR rejected that: ${verified.explanation}`, 409);
+      return { bet: await syncNearBet(db, config, user, betId, { fetchImpl, chain }), hash: request.transaction_hash, status: verified.status };
+    }
+  }
   if (input.action === 'accept') {
     if (!inPilot(config, user.x_user_id)) throw new UserError('Bets with real NEAR are invite-only for now.', 403);
-    const bet = await syncNearBet(db, config, user, betId, { fetchImpl });
+    const bet = await syncNearBet(db, config, user, betId, { fetchImpl, chain });
     const request = await db.one(`select * from bilateral_near_requests
       where bet_id=$1 and user_id=$2 and wallet_account=$3 and method='accept_bet'
       and metadata->>'contract'=$4 order by created_at, id limit 1`,
@@ -452,10 +529,10 @@ async function performPlayAction(db, config, chain, user, betId, input, { fetchI
       const verified = await verifyBetTransaction(db, config, user, betId,
         { requestId: request.id, transactionHash: request.transaction_hash }, { fetchImpl });
       if (verified.status === 'failed') throw new UserError(`NEAR rejected that: ${verified.explanation}`, 409);
-      return { bet: await syncNearBet(db, config, user, betId, { fetchImpl }), hash: request.transaction_hash, status: verified.status };
+      return { bet: await syncNearBet(db, config, user, betId, { fetchImpl, chain }), hash: request.transaction_hash, status: verified.status };
     }
   }
-  const prepared = await prepareNearAction(db, config, user, betId, { ...input, accountId: account.account_id }, { fetchImpl });
+  const prepared = await prepareNearAction(db, config, user, betId, { ...input, accountId: account.account_id }, { fetchImpl, chain });
   const sign = async (tx, current) => {
     const secret = secretOf(config, current);
     await ensureFunds(tx, config, chain, current, prepared.depositYocto);
@@ -472,7 +549,7 @@ async function performPlayAction(db, config, chain, user, betId, input, { fetchI
   if (!sent.hash) throw new Error('The transaction was not accepted by the network.');
   const verified = await verifyBetTransaction(db, config, user, betId, { requestId: prepared.requestId, transactionHash: sent.hash }, { fetchImpl });
   if (verified.status === 'failed') throw new UserError(`NEAR rejected that: ${sent.failure || verified.explanation}`, 409);
-  const bet = await syncNearBet(db, config, user, betId, { fetchImpl });
+  const bet = await syncNearBet(db, config, user, betId, { fetchImpl, chain });
   return { bet, hash: sent.hash, status: verified.status };
 }
 

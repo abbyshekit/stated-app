@@ -1,6 +1,7 @@
 // The Terms of Service and the Privacy Policy. Every statement here describes
 // what the code does; change the text in the same edit as the behaviour.
 import { html } from './html.mjs';
+import Decimal from 'decimal.js';
 
 export const LEGAL_EFFECTIVE = '12 November 2026';
 const REPO = 'https://github.com/abbyshekit/stated-app';
@@ -10,19 +11,22 @@ function contact(bot) {
 }
 
 // Replaces "Test NEAR only" when the server runs on NEAR mainnet (config.near.real).
-function realNearSection() {
+function realNearSection({ pilotXIds, maxStakeNear, sponsored }) {
   return html`<h2>Real NEAR</h2>
-      <p>On this server bets use real NEAR, which has monetary value, and you can lose your stake. The pilot is limited to people we allow; if we have not allowed you, you cannot bet. Every stake is your own NEAR: we do not lend or give you stakes. An escrow contract with no access keys holds both stakes, and a referee contract decides who wins. If nothing settles, the escrow refunds both stakes seven days after the bet’s deadline. Stated takes no share of a pot. The escrow contract keeps a small storage fee, in NEAR, from whoever proposes a bet; the bet’s page shows it.</p>`;
+      <p>On this server bets use real NEAR, which has monetary value, and you can lose your stake. ${pilotXIds.includes('*')
+        ? html`Anyone with an X account can bet at their own risk, up to ${maxStakeNear} NEAR per bet during the pilot, subject to the eligibility rules below.`
+        : html`The pilot is limited to people we allow; if we have not allowed you, you cannot bet. Each bet is limited to ${maxStakeNear} NEAR.`} ${sponsored ? '' : 'Every stake is your own NEAR: we do not lend or give you stakes.'} An escrow contract with no access keys holds both stakes, and a referee contract decides who wins. If nothing settles, the escrow refunds both stakes seven days after the bet’s deadline. Stated takes no share of a pot. The escrow contract keeps a small storage fee, in NEAR, from whoever proposes a bet; the bet’s page shows it.</p>`;
 }
 
-export function termsPage({ bot, real = false }) {
+export function termsPage({ bot, real = false, pilotXIds = [], startNear = '0.05', sponsorLimit = 25, maxStakeNear = '1' }) {
+  const sponsored = real && sponsorLimit > 0 && new Decimal(startNear).gt('0.05');
   return html`
     <article class="legal">
       <h1>Terms of Service</h1>
       <p class="quiet">Effective ${LEGAL_EFFECTIVE}</p>
       <p>These terms cover Stated: this site, the @${bot} bot on X, and the NEAR accounts and contracts Stated runs. By signing in, or by betting through the bot, you agree to them. “We” means the people who run Stated; “you” means you.</p>
 
-      ${real ? realNearSection() : html`<h2>Test NEAR only</h2>
+      ${real ? realNearSection({ pilotXIds, maxStakeNear, sponsored }) : html`<h2>Test NEAR only</h2>
       <p>Stated runs on NEAR testnet, and every stake is test NEAR. Test NEAR has no monetary value: you cannot buy it from us or sell it to us, and winning it is not a prize. Stated takes no share of any pot. The escrow contract keeps a small storage fee, in test NEAR, from whoever proposes a bet; the bet’s page shows it. NEAR testnet can be reset, and accounts, balances and history on it can disappear. If we ever offer bets in real NEAR, they will come with their own terms first; these terms do not cover them.</p>`}
 
       <h2>Who can use Stated</h2>
@@ -31,14 +35,18 @@ export function termsPage({ bot, real = false }) {
       <h2>How a bet works</h2>
       <p>One person offers a bet by replying to a post on X, or on this site, and another person takes it. The post’s words, the deadline and the stake are the bet’s terms, and they cannot change once both sides are in. Each bet’s page shows its rules, including who referees it. Where a bet’s page and these terms differ, the bet’s page governs that bet.</p>
       <p>Stated makes each bettor a NEAR account named after their X handle and holds its key, encrypted, until the bettor claims the account. A NEAR contract with no access keys holds both stakes.</p>
-      <p>After the deadline, three AI models, each running in its own NEAR AI Cloud enclave, decide from the evidence: prices Stated fetches, or links the bettors post. A ruling counts only if all three agree, each with at least 80% confidence. If they do not, a new jury tries; after three undecided juries both stakes go back.</p>
-      <p>A ruling then goes to Stated Court, a Sputnik DAO on NEAR that referees the bet. Its council can vote the ruling down within ten minutes, but it has no duty to review any ruling. After that the Court settles the contract, and the winner can withdraw the pot. If no ruling pays out, each side can take its stake back seven days after the bet’s result time.</p>
+      ${real ? html`<p>After the deadline and any evidence window, the OutLayer referee runs the pinned jury program. Three AI models decide from the committed evidence policy. A Yes or No ruling needs agreement at 80% confidence or more; after three undecided juries, the referee selects Void and both stakes go back. Infrastructure failures have their own bounded retry policy.</p>
+      <p>The referee settles the escrow automatically through OutLayer. Stated sends the payout to an account it manages; if you have claimed your account, withdraw through your wallet. There is no Stated Court vote or manual review step. Each side can reclaim an unresolved stake seven days after the deadline. OutLayer and the model and evidence providers remain dependencies; a jury can agree and still be wrong.</p>` : html`<p>After the deadline, three AI models, each running in its own NEAR AI Cloud enclave, decide from the evidence: prices Stated fetches, or links the bettors post. A ruling counts only if all three agree, each with at least 80% confidence. If they do not, a new jury tries; after three undecided juries both stakes go back.</p>
+      <p>A ruling then goes to Stated Court, a Sputnik DAO on NEAR that referees the bet. Its council can vote the ruling down within ten minutes, but it has no duty to review any ruling. After that the Court settles the contract, and the winner can withdraw the pot. If no ruling pays out, each side can take its stake back seven days after the bet’s result time.</p>`}
 
       <h2>Rulings are final</h2>
       <p>The jury can be wrong. When you bet, you accept as final the ruling that settles the bet on NEAR, and you agree that we are not responsible for a ruling you think is wrong.</p>
 
       <h2>Your account and its key</h2>
-      <p>Until you claim your NEAR account, Stated holds its key and signs your bets and withdrawals for you. You can claim it from your wallet page by adding a key of your own; Stated then removes its key and erases its stored copy. After that only you control the account, and we cannot recover it. ${real ? 'On mainnet, Stated puts only enough NEAR into a new account to cover network fees; every stake is your own NEAR.' : 'The test NEAR we put into accounts is ours to give, and we can limit, pause or stop it.'}</p>
+      <p>Until you claim your NEAR account, Stated holds its key and signs your bets and withdrawals for you. You can claim it from your wallet page by adding a key of your own; Stated then removes its key and erases its stored copy. After that only you control the account, and we cannot recover it. ${real ? sponsored
+        ? html`Stated puts ${startNear} NEAR into each new sponsored account, up to a lifetime limit of ${sponsorLimit} recipients and one grant per X account. That NEAR is yours to bet or withdraw, subject to network fees. Other new accounts receive 0.05 NEAR for network fees; their owners supply their stakes. Stated does not top up mainnet accounts.`
+        : 'On mainnet, Stated puts only enough NEAR into a new account to cover network fees; every stake is your own NEAR.'
+        : 'The test NEAR we put into accounts is ours to give, and we can limit, pause or stop it.'}</p>
 
       <h2>What you post</h2>
       <p>Your posts stay yours, and X’s terms govern them. You give us a free, worldwide, non-exclusive licence to copy, store, show and process the posts, links and evidence you send to Stated or its bot, so that we can run bets, publish rulings and keep their record for as long as Stated runs. You are responsible for what you post and for having the right to post it.</p>

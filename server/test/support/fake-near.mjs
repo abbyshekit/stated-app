@@ -354,7 +354,7 @@ export class FakeNear {
     if (method === 'block') return json({ result: { header: { height: this.height, hash: 'fakeblock', timestamp_nanosec: this.nowNs().toString() } } });
     if (method === 'tx') {
       const tx = this.txs.get(params.tx_hash);
-      return tx ? json({ result: tx }) : json({ error: { message: 'Transaction not found' } });
+      return tx ? json({ result: tx }) : json({ error: { message: 'Transaction not found', cause: { name: 'UNKNOWN_TRANSACTION' } } });
     }
     if (method === 'query' && params.request_type === 'view_account') {
       const account = this.accounts.get(params.account_id);

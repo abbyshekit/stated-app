@@ -7,7 +7,7 @@ import vm from 'node:vm';
 const source = readFileSync(new URL('../public/wallet-client.mjs', import.meta.url), 'utf8')
   .replace(/^import .+;\n/gm, '');
 
-for (const method of ['finalize_unanswered', 'referee_resolve']) {
+for (const method of ['finalize_unanswered', 'referee_resolve', 'submit_evidence']) {
   test(`the browser accepts ${method} and rejects unrelated wallet methods`, () => {
     const requestId = '1102581f-dc77-4d06-886e-8aa4b006ff26';
     const payload = { requestId, accountId: 'bettor.testnet', contract: 'escrow.testnet',

@@ -1,6 +1,9 @@
 // A fake RPC stands in for NEAR. No network access.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { main, runJudge, toBase58, courtPolicyProblems, NETWORKS, TESTNET_ESCROW, MAINNET_ESCROW, RELAY, DAO, BET_ID } from './judge-chain.mjs';
 
 const TESTNET_HASH = 'Bqr2TsgyFRNDw2GZ6q9aT7cMAnjZNERKdzaBstRgKaAg';
@@ -120,6 +123,23 @@ test('missing evidence is a FAIL, not a pass on an unchecked value', async () =>
   assert.equal(failures(results).filter(n => /escrow/.test(n)).length, 2);
 });
 
+test('legacy --save retains the five checks and removes local error paths', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'legacy-judge-'));
+  try {
+    const destination = join(dir, 'result.json');
+    const code = await main(['--save', destination], () => {}, { env: {}, fetchImpl: fakeRpc(chainState()), sleep: async () => {},
+      evidenceDir: '/Users/local-operator/private-evidence' });
+    assert.equal(code, 1);
+    const text = readFileSync(destination, 'utf8');
+    const report = JSON.parse(text);
+    assert.equal(report.mode, 'legacy');
+    assert.equal(report.overall, 'FAIL');
+    assert.equal(report.results.length, 5);
+    assert.equal(report.results.filter(r => !r.ok).length, 2);
+    assert.doesNotMatch(text, /local-operator|private-evidence|\/Users\/|legacy-judge-/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('courtPolicyProblems accepts the live policy and names each deviation', () => {
   assert.deepEqual(courtPolicyProblems(policy()), []);
   const p = policy(); p.roles[1].kind.Group = [];
@@ -132,5 +152,5 @@ test('courtPolicyProblems accepts the live policy and names each deviation', () 
 test('the script reads no key files and sends no transaction method', async () => {
   const { readFileSync } = await import('node:fs');
   const src = readFileSync(new URL('./judge-chain.mjs', import.meta.url), 'utf8');
-  assert.doesNotMatch(src, /broadcast_tx|send_tx|near-credentials|~\/\.keys|\.ssh|process\.env/);
+  assert.doesNotMatch(src, /broadcast_tx|send_tx|near-credentials|~\/\.keys|\.ssh|--env-file/);
 });

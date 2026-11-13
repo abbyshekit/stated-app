@@ -124,8 +124,13 @@ test('home excludes withdrawn, unverified, expired, invited and incompatible off
   assert.doesNotMatch((await s.browser().get('/')).text.split(' settled, ')[0], /Agreed public proposition/);
   s.config.play.enabled = enabled;
   const real = s.config.near.real;
+  // The mainnet home deliberately features and lists the open offer; it is still gone while any case disables it.
   s.config.near.real = true;
-  assert.doesNotMatch((await s.browser().get('/')).text.split(' settled, ')[0], /Agreed public proposition/);
+  const mainnetHome = (await s.browser().get('/')).text;
+  assert.match(mainnetHome, /<h2 class="lead">Open offers<\/h2>[\s\S]*Agreed public proposition/);
+  await s.db.query(cases[0][0], [bet.id]);
+  assert.doesNotMatch((await s.browser().get('/')).text, /Agreed public proposition/);
+  await s.db.query(cases[0][1], [bet.id]);
   s.config.near.real = real;
 });
 

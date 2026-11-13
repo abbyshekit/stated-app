@@ -1,0 +1,132 @@
+{
+  "status": "built_unverified",
+  "scope": "Stated server OutLayer referee integration; uncommitted local changes",
+  "live_operations": {
+    "deployments": false,
+    "posts": false,
+    "transactions": false,
+    "credential_files_read": false
+  },
+  "routing": {
+    "native_plan_workers": [
+      {
+        "model": "gpt-6.1-sol",
+        "effort": "high",
+        "work": "scout, adapter, fake NEAR and bounded five-lens review"
+      },
+      {
+        "model": "gpt-6.1-terra",
+        "effort": "medium",
+        "work": "deployment script"
+      }
+    ],
+    "usage_counters": "unavailable",
+    "external_model_spend": false
+  },
+  "checks": [
+    {
+      "command": "node --test --test-concurrency=1 server/test/outlayer-material.test.mjs server/test/outlayer-fake.test.mjs server/test/outlayer-signing.test.mjs scripts/outlayer-operator.test.mjs server/test/wallet-client.test.mjs",
+      "result": "pass",
+      "tests": 18
+    },
+    {
+      "command": "node --test --test-concurrency=1 server/test/dstack-verifier.test.mjs server/test/evidence-attribution.test.mjs server/test/security-lane-d.test.mjs",
+      "result": "pass",
+      "tests": 34
+    },
+    {
+      "command": "node --test --test-concurrency=1 server/test/article-scan.test.mjs server/test/attested-check.test.mjs server/test/evidence-text.test.mjs",
+      "result": "pass",
+      "tests": 46,
+      "note": "Isolated rerun after load-sensitive failures in the available suite."
+    },
+    {
+      "command": "cargo test --offline --locked --manifest-path contracts/outlayer-referee/Cargo.toml",
+      "result": "pass",
+      "tests": 21,
+      "note": "Used a writable Cargo registry cache under /private/tmp."
+    },
+    {
+      "command": "cargo clippy --offline --locked --all-targets --manifest-path contracts/outlayer-referee/Cargo.toml -- -D warnings",
+      "result": "pass"
+    },
+    {
+      "command": "cargo fmt --manifest-path contracts/outlayer-referee/Cargo.toml -- --check",
+      "result": "pass"
+    },
+    {
+      "command": "cargo build --offline --locked --release --target wasm32-unknown-unknown --manifest-path contracts/outlayer-referee/Cargo.toml",
+      "result": "pass",
+      "note": "Used /private/tmp for Cargo registry and target directories."
+    },
+    {
+      "command": "wasm-tools validate stated_outlayer_referee.wasm",
+      "result": "pass"
+    },
+    {
+      "command": "npm run build:wallet",
+      "result": "pass"
+    },
+    {
+      "command": "git diff --check",
+      "result": "pass"
+    },
+    {
+      "command": "ai-tells-lint.mjs docs/DEPLOY.md",
+      "result": "pass",
+      "score_reviewed": true
+    },
+    {
+      "command": "STATED_TEST_REQUIRE_PG=1 npm test",
+      "result": "blocked",
+      "reason": "initdb fails because sandbox denies shmget (Operation not permitted). No database-backed suite completed."
+    },
+    {
+      "command": "node scripts/test.mjs",
+      "result": "partial",
+      "tests": 471,
+      "passed": 462,
+      "failed": 9,
+      "note": "Database files skipped by the existing runner; the nine load-sensitive failures passed in the isolated 46-test rerun. This run preceded the last focused signing and payout changes."
+    },
+    {
+      "command": "Playwright component screenshot",
+      "result": "blocked",
+      "reason": "Chrome launch aborts under the sandbox; shared-browser tool transport also unavailable."
+    }
+  ],
+  "referee_wasm_sha256": "435dad2b0c9964011f5eb970d9cac7c5084c9bbf295dd80c66f7f2a130b74f36",
+  "contract_change": {
+    "classification": "consequential_cleanup",
+    "reason": "Rust terms_hash vectors exposed serde_json preserve_order feature dependence. Explicit recursive sorting fixes the documented commitment; failed parity was reproduced before the fix and passes after it.",
+    "requested_result_exposure": "get_ruling().result now exposes the latest validated JuryResult. Registration prepays bounded result storage and replacing results reconciles the reserve."
+  },
+  "interface_dependencies": {
+    "open": {
+      "capability": "get_config().supports_open_evidence === true",
+      "material": {
+        "kind": "open",
+        "window_seconds": "STATED_EVIDENCE_WINDOW_SECONDS",
+        "max_links_per_side": 2
+      },
+      "method": "submit_evidence({bet_id,url})",
+      "deposit": "evidence_deposit_yocto from get_config or bounded URL storage allowance",
+      "status": "Assumed interface, awaiting the other contract lane; unavailable on the current contract."
+    },
+    "jury_result": {
+      "accepted_fields": [
+        "result",
+        "jury_result",
+        "last_result"
+      ],
+      "status": "Implemented as get_ruling().result on the rebuilt referee, with validated bounded result storage prepaid at registration. Older status-only contracts remain readable."
+    },
+    "retries": "Signed bytes and transaction hash persist before broadcast. A proven first-send InvalidNonce/expired rejection is retryable; an ambiguous prior broadcast remains bound to its original hash. Ruling attempts use an off-chain intent_key while the call args remain exactly {bet_id}. Settled snapshots retain pending settlement-proof reconciliation."
+  },
+  "unverified": [
+    "PostgreSQL-backed creation, registration, keeper, X evidence and web evidence tests in server/test/outlayer.test.mjs",
+    "Browser screenshots and complete responsive flows",
+    "Live OutLayer execution and escrow payout",
+    "Open contract-lane interface compatibility"
+  ]
+}

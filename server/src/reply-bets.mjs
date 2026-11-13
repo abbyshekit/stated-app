@@ -6,10 +6,12 @@
 //
 // Every public reply is a fixed template. Nothing a person typed is echoed.
 import { createHash } from 'node:crypto';
+import Decimal from 'decimal.js';
 import { evidencePrompts, parseEvidenceCommand, runEvidenceCommands } from './bet-evidence.mjs';
 import { JURY_X_ID, ruleDue, rulingSettles } from './enclave-ruling.mjs';
 import { approveRuling, checkCourt, courtDao, fileRuling, hasReject, isCourtBet, readProposal } from './court-dao.mjs';
-import { createBet } from './bets.mjs';
+import { createBet, requireCreationReferee } from './bets.mjs';
+import { runOutlayerKeeper } from './outlayer.mjs';
 import { consentToPublicBet, publicBet, publishBet } from './bet-public.mjs';
 import { dayMonth } from './marked.mjs';
 import { formatTestNear } from './near-escrow.mjs';
@@ -19,9 +21,9 @@ import { intentsQuotes } from './intents.mjs';
 import { deadlineOf } from './interpret.mjs';
 import { syncNearBet } from './near-bets.mjs';
 import { verifyBetTransaction } from './near-execution-state.mjs';
-import { ensurePlayAccount, inPilot, nearChain, playAccountFor, playAction, referee, refereeSettle, refillTreasury, topUpReferee } from './play.mjs';
+import { ensurePlayAccount, inPilot, nearChain, playAccountFor, playAction, referee, refereeId, refereeSettle, refillTreasury, topUpReferee } from './play.mjs';
 import { completeSetup, signInFromX, UserError, userByXId } from './store.mjs';
-import { assertStakeLimit, limitReply } from './reputation.mjs';
+import { assertMainnetStakeCap, assertStakeLimit, limitReply, stakeCapReply } from './reputation.mjs';
 
 const DAY = 86400000;
 const STAKE = /^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?$/;
@@ -31,8 +33,8 @@ const STAKE = /^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?$/;
  * sentence that merely contains "bet no" ("I bet no one saw this coming") is a
  * claim, never a command.
  */
-export function parseBetCommand(text, { defaultStake = '0.1', now = new Date(), rulings = true } = {}) {
-  const evidence = rulings && parseEvidenceCommand(text);
+export function parseBetCommand(text, { defaultStake = '0.1', now = new Date(), rulings = true, outlayer = false, mainnet = network().real } = {}) {
+  const evidence = rulings && parseEvidenceCommand(text, { outlayer });
   if (evidence) return evidence;
   const typed = String(text || '').replace(/@\w{1,15}/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase().replace(/[.!]+$/, '');
   if (/^(?:take|take it|i take|i'll take it|i’ll take it|take the other side)$/.test(typed)) return { kind: 'take' };
@@ -49,7 +51,10 @@ export function parseBetCommand(text, { defaultStake = '0.1', now = new Date(), 
   }
   const [amount, side] = /^(yes|no)$/.test(m[1] || '') ? [m[2], m[1]] : [m[1], m[2]];
   const stake = amount || defaultStake;
-  if (!STAKE.test(stake) || Number(stake) <= 0 || Number(stake) > 1) return { kind: 'bet', side, error: 'stake' };
+  const valid = mainnet ? /^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,24})?$/.test(stake)
+    && new Decimal(stake).gte('0.1') && new Decimal(stake).lte(1)
+    : STAKE.test(stake) && Number(stake) > 0 && Number(stake) <= 1;
+  if (!valid) return { kind: 'bet', side, error: 'stake' };
   return { kind: 'bet', side, stake, ...(deadline ? { deadline } : {}) };
 }
 
@@ -74,10 +79,15 @@ function requestIdFor(eventId) {
 
 // Built when asked for, so the unit is the one for the network this server is on.
 const refusals = ({ walletUrl = null, config, limit } = {}) => ({
+  referee: 'Mainnet betting is paused until the OutLayer referee is available. Try again later.',
   limit: config && limit ? limitReply(config, limit) : null,
-  stake: `A bet here is between 0.01 and 1 ${unit()}. Try again with an amount in that range.`,
+  cap: config ? stakeCapReply(config) : null,
+  minimum: 'The minimum mainnet stake is 0.1 NEAR. Choose at least 0.1 NEAR.',
+  stake: config?.near?.real ? `A mainnet bet is between 0.1 and ${config.play?.maxStakeNear ?? '1'} NEAR. Choose an amount in that range.` : `A bet here is between 0.01 and 1 ${unit()}. Try again with an amount in that range.`,
   no_date: 'Add a date to make it a bet, like: bet 0.1 yes by 30 Nov.',
   too_soon: 'That post is due too soon to take a bet on.',
+  price_moment: 'That price moment leaves less than 10 minutes to accept. Choose a moment at least one hour and 10 minutes away.',
+  price_range: 'That price range needs at least one hour after acceptance closes. Choose a later window end.',
   too_far: 'That post is dated more than a year out. Bets here settle within a year.',
   resolved: 'That one already has a result.',
   no_offer: 'There is no open bet here to take.',
@@ -85,7 +95,7 @@ const refusals = ({ walletUrl = null, config, limit } = {}) => ({
   taken: 'Someone took that bet first, or it has closed.',
   // With real NEAR the stake is the person's own money, so the answer says where to add it.
   funds: network().real
-    ? `Your account does not hold enough NEAR for that stake yet.${walletUrl ? ` Add some from any chain: ${walletUrl}` : ''}`
+    ? `Your account does not hold enough NEAR for that stake yet.${walletUrl ? ` Send NEAR from any exchange or wallet: ${walletUrl}` : ''}`
     : `That is more ${unit()} than this account has left.`,
   claimed: 'You claimed your account, so place this one from the site with your own wallet.',
   pilot: 'Bets with real NEAR are invite-only for now.',
@@ -204,6 +214,8 @@ export async function queueWebMatchNotice(db, config, user, betId) {
 async function offer(db, config, chain, cmd, deps) {
   if (!inPilot(config, cmd.x_user_id)) throw new Refused('pilot');
   if (['stake', 'too_soon', 'too_far'].includes(cmd.detail)) throw new Refused(cmd.detail);
+  assertMainnetStakeCap(config, cmd.stake_near);
+  requireCreationReferee(config);
   const user = await ensureUser(db, { xUserId: cmd.x_user_id, username: cmd.x_username });
   let betId = cmd.bet_id;
   if (!betId) {
@@ -218,11 +230,13 @@ async function offer(db, config, chain, cmd, deps) {
     if (due > Date.now() + 365 * DAY) throw new Refused('too_far');
     // Keep the existing refusal order, then check before either account can be funded.
     await assertStakeLimit(db, config, user.id, cmd.stake_near);
-    const judge = await referee(db, config, chain);
+    const judge = config.outlayer?.referee ? { id: config.outlayer.referee } : await referee(db, config, chain);
     const bet = await createBet(db, user, {
       requestId: requestIdFor(cmd.event_id),
       claim: cmd.words,
-      criteria: `Yes if what the post says has happened by ${replyDeadline(row.deadline)}. ` + (config.nearai?.rulings
+      criteria: `Yes if what the post says has happened by ${replyDeadline(row.deadline)}. ` + (config.outlayer?.referee
+        ? 'An OutLayer enclave jury decides from the committed evidence plan. If it cannot decide within its retry policy, both stakes go back.'
+        : config.nearai?.rulings
         ? 'Either side can post a link as evidence. A NEAR AI enclave jury rules on it: without credible evidence that it happened, it counts as not having happened. If the jury cannot decide, both stakes go back.'
         : 'Stated’s recorded Result for this post, with its evidence link, decides.'),
       evidenceSourceUrl: row.url,
@@ -231,9 +245,9 @@ async function offer(db, config, chain, cmd, deps) {
       acceptBy: new Date(Math.min(due - 60000, Date.now() + 7 * DAY)).toISOString(),
       resolveAt: new Date(due).toISOString(),
       sourceSaveId: String(cmd.save_id),
-      // New Bets name Stated Court (a Sputnik DAO) as referee when one is configured; old Bets keep theirs.
-      refereeAccount: (await usableCourt(config, chain, judge)) || judge.id,
-    });
+      // New bets prefer OutLayer, then a checked Court, then the server referee.
+      refereeAccount: config.outlayer?.referee || (await usableCourt(config, chain, judge)) || judge.id,
+    }, { config, chain, fetchImpl: deps.fetchImpl });
     betId = bet.id;
     // The post's words now live in the Bet's own terms; the queue keeps no copy.
     await db.query('update bet_commands set bet_id = $2, words = null, updated_at = clock_timestamp() where event_id = $1', [cmd.event_id, betId]);
@@ -292,7 +306,7 @@ async function take(db, config, chain, cmd, deps) {
       await consentToPublicBet(db, user, betId);
       ({ bet } = await playAction(db, config, chain, user, betId, { action: 'accept', termsHash: row.terms_hash }, deps));
     } catch (error) {
-      if (error instanceof UserError && [403, 409].includes(error.status) && !error.funds && error.reason !== 'limit') throw new Refused('taken');
+      if (error instanceof UserError && [403, 409].includes(error.status) && !error.funds && !['limit', 'cap'].includes(error.reason)) throw new Refused('taken');
       throw error;
     }
   }
@@ -331,12 +345,13 @@ export async function runBetCommands(db, config, chain, { limit = 5, fetchImpl =
         continue;
       }
       const reason = error instanceof Refused ? error.reason
-        : (error instanceof UserError && error.reason === 'limit') ? 'limit'
+        : (error instanceof UserError && ['limit', 'cap', 'minimum', 'price_moment', 'price_range'].includes(error.reason)) ? error.reason
+        : (error instanceof UserError && error.status === 503 && /OutLayer referee/.test(error.message)) ? 'referee'
         : (error instanceof UserError && error.funds) ? 'funds'
           : (error instanceof UserError && /claimed/i.test(error.message)) ? 'claimed' : null;
       if (reason) {
         await db.query(`update bet_commands set status = 'refused', words = null, detail = $2, updated_at = clock_timestamp() where event_id = $1 and status = 'queued'`, [cmd.event_id, reason]);
-        await say(db, config, { key: `refused:${cmd.event_id}`, inReplyTo: cmd.event_id, body: betReplies.refused(reason, { walletUrl: `${config.baseUrl}/me/wallet`, config, limit: error.limit }) });
+        await say(db, config, { key: `refused:${cmd.event_id}`, inReplyTo: cmd.event_id, body: betReplies.refused(reason, { walletUrl: `${config.baseUrl}/me/wallet${config.near?.real && error.neededYocto ? `?need=${error.neededYocto}` : ''}`, config, limit: error.limit }) });
         result.refused += 1;
       } else if (cmd.attempts >= 5) {
         await db.query(`update bet_commands set status = 'failed', words = null, detail = $2, updated_at = clock_timestamp() where event_id = $1 and status = 'queued'`,
@@ -426,9 +441,13 @@ const RESULT_TO_OUTCOME = { yes: 'yes', no: 'no', ambiguous: 'void', annulled: '
  * the referee transaction only carries it to the contract.
  */
 export async function settleReplyBets(db, config, chain, { limit = 5, fetchImpl = fetch } = {}) {
-  const judge = await referee(db, config, chain);
+  // Legacy settlements can reuse their existing referee without allocating a
+  // signing account for a mainnet/OutLayer deployment that has never used it.
+  const judgeId = config.near?.real || config.outlayer?.referee
+    ? await refereeId(db, config) : (await referee(db, config, chain)).id;
   // The referee seats this server acts for: its own referee account, and Stated Court when configured.
-  const referees = [judge.id, courtDao(config)].filter(Boolean);
+  const referees = [judgeId, courtDao(config)].filter(Boolean);
+  const payoutReferees = [...referees, config.outlayer?.referee].filter(Boolean);
   const due = await db.many(`select b.id
     from bilateral_bets b join saves s on s.id = b.source_save_id join statements st on st.id = s.statement_id
     where b.referee_wallet = any($1::text[]) and b.chain_state is not null and b.status in ('accepted', 'proposed', 'disputed')
@@ -539,10 +558,10 @@ export async function settleReplyBets(db, config, chain, { limit = 5, fetchImpl 
   // An offer nobody took, on a post that now has a result or whose window has closed: the stake goes back.
   const idle = await db.many(`select b.id, (b.accept_by <= clock_timestamp()) as expired
     from bilateral_bets b left join saves s on s.id = b.source_save_id left join statements st on st.id = s.statement_id
-    where b.referee_wallet = any($1::text[]) and b.chain_state is not null and b.status = 'offered'
+    where (b.referee_wallet = any($1::text[]) or b.outlayer_material is not null) and b.chain_state is not null and b.status = 'offered'
       and (b.accept_by <= clock_timestamp() or st.status in ('yes', 'no', 'ambiguous', 'annulled'))
       and (b.settle_checked_at is null or b.settle_checked_at < clock_timestamp() - interval '5 minutes')
-    order by b.settle_checked_at asc nulls first limit $2`, [referees, limit]);
+    order by b.settle_checked_at asc nulls first limit $2`, [payoutReferees, limit]);
   for (const row of idle) {
     await db.query('update bilateral_bets set settle_checked_at = clock_timestamp() where id = $1', [row.id]);
     try {
@@ -557,10 +576,10 @@ export async function settleReplyBets(db, config, chain, { limit = 5, fetchImpl 
   }
   // Finished reply Bets whose winnings or returned stake have not reached the play account yet.
   const unpaid = await db.many(`select b.id from bilateral_bets b
-    where b.referee_wallet = any($1::text[]) and b.status in ('settled', 'cancelled', 'expired', 'refunded') and b.chain_state is not null
+    where (b.referee_wallet = any($1::text[]) or b.outlayer_material is not null) and b.status in ('settled', 'cancelled', 'expired', 'refunded') and b.chain_state is not null
       and not exists (select 1 from bilateral_bet_events e where e.bet_id = b.id and e.kind = 'play_paid_out')
       and (b.settle_checked_at is null or b.settle_checked_at < clock_timestamp() - interval '5 minutes')
-    order by b.settle_checked_at asc nulls first limit $2`, [referees, limit]);
+    order by b.settle_checked_at asc nulls first limit $2`, [payoutReferees, limit]);
   for (const row of unpaid) {
     await db.query('update bilateral_bets set settle_checked_at = clock_timestamp() where id = $1', [row.id]);
     const bet = await db.one('select * from bilateral_bets where id = $1', [row.id]);
@@ -604,16 +623,16 @@ export function startPlayWorker(db, config, { chain = nearChain(), intervalMs = 
   async function run() {
     if (stopped) return;
     try {
-      // The treasury and the referee are made once, at startup, so the first bet does not wait for them.
-      if (passes === 0) await referee(db, config, chain);
+      // Only legacy testnet deployments provision a signing referee at startup.
+      if (passes === 0 && !config.near?.real && !config.outlayer?.referee) await referee(db, config, chain);
       const name = typeof botUsername === 'function' ? await botUsername() : botUsername;
       const ran = await runBetCommands(db, config, chain, { fetchImpl, botUsername: name || 'stated' });
       passes += 1;
-      if (config.nearai?.rulings && (evidenceCheckedAt === null || Date.now() - evidenceCheckedAt >= 30000)) {
+      if ((config.nearai?.rulings || config.outlayer?.referee) && (evidenceCheckedAt === null || Date.now() - evidenceCheckedAt >= 30000)) {
         evidenceCheckedAt = Date.now();
         const report = (error) => { try { onError?.(error); } catch { /* reporting must not stop commands or settlements */ } };
         try {
-          const evidence = await runEvidenceCommands(db, config);
+          const evidence = await runEvidenceCommands(db, config, { chain, fetchImpl });
           if (evidence.failed) report(new Error(`${evidence.failed} evidence commands failed after three attempts.`));
         } catch (error) { report(error); }
         try {
@@ -625,13 +644,15 @@ export function startPlayWorker(db, config, { chain = nearChain(), intervalMs = 
         } catch (error) { report(error); }
       }
       // Looking for a recorded Result is one query, so it runs every pass; the treasury is checked each minute.
+      const outlayer = await runOutlayerKeeper(db, config, { chain, fetchImpl });
+      if (outlayer.errors) onError?.(new Error(`${outlayer.errors} OutLayer operations failed; they will retry.`));
       const settled = await settleReplyBets(db, config, chain, { fetchImpl });
       if (settled.errors) onError?.(new Error(`${settled.errors} reply-bet settlements failed; they will retry.`));
       // Payments from another chain complete here too, so one finishes with its page closed.
       if (intents) await refreshOpenDeposits(db, config, chain, intents);
       if (passes % 12 === 1) {
         await refillTreasury(db, config, chain);
-        await topUpReferee(db, config, chain);
+        if ((!config.near?.real && !config.outlayer?.referee) || await refereeId(db, config)) await topUpReferee(db, config, chain);
       }
       if (ran.failed) onError?.(new Error(`${ran.failed} reply-bet commands failed after five attempts.`));
       delay = intervalMs;

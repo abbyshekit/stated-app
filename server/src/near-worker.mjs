@@ -1,8 +1,9 @@
 // INTEGRATION: Runs independently of the X worker; schema must add near_attempted_at.
 import { syncNearBet } from './near-bets.mjs';
 import { syncPendingBetTransactions } from './near-execution-state.mjs';
+import { runOutlayerKeeper } from './outlayer.mjs';
 
-export async function syncNearBets(db, config, { limit = 10, fetchImpl = fetch } = {}) {
+export async function syncNearBets(db, config, { limit = 10, fetchImpl = fetch, chain } = {}) {
   if (!Number.isInteger(limit) || limit < 1 || limit > 10) throw new RangeError('limit must be an integer from 1 to 10');
   const claimed = await db.tx(async (tx) => {
     const rows = await tx.many(`select u.*, b.id as bet_id, b.chain_state as before_chain_state
@@ -24,7 +25,7 @@ export async function syncNearBets(db, config, { limit = 10, fetchImpl = fetch }
     result.checked += 1;
     try {
       const { bet_id: betId, before_chain_state: before, ...creator } = row;
-      const after = await syncNearBet(db, config, creator, betId, { fetchImpl });
+      const after = await syncNearBet(db, config, creator, betId, { fetchImpl, chain });
       const transactions = await syncPendingBetTransactions(db, config, betId, { fetchImpl });
       if (JSON.stringify(before) !== JSON.stringify(after.chain_state) || transactions) result.changed += 1;
     } catch {
@@ -34,7 +35,7 @@ export async function syncNearBets(db, config, { limit = 10, fetchImpl = fetch }
   return result;
 }
 
-export function startNearWorker(db, config, { intervalMs = 60000, fetchImpl = fetch, onError } = {}) {
+export function startNearWorker(db, config, { intervalMs = 60000, fetchImpl = fetch, onError, chain } = {}) {
   if (!Number.isFinite(intervalMs) || intervalMs <= 0) throw new RangeError('intervalMs must be positive');
   let stopped = false;
   let timer;
@@ -45,7 +46,11 @@ export function startNearWorker(db, config, { intervalMs = 60000, fetchImpl = fe
   async function run() {
     if (stopped) return;
     try {
-      const result = await syncNearBets(db, config, { fetchImpl });
+      const result = await syncNearBets(db, config, { fetchImpl, chain });
+      if (!config.play?.enabled) {
+        const outlayer = await runOutlayerKeeper(db, config, { fetchImpl, chain });
+        if (outlayer.errors) onError?.(new Error(`${outlayer.errors} OutLayer checks failed; they will retry.`));
+      }
       if (result.errors) onError?.(new Error(`${result.errors} NEAR escrow checks failed; they will retry after the backoff.`));
     } catch (error) {
       try { onError?.(error); } catch { /* Error reporting must not stop reconciliation. */ }

@@ -6,7 +6,7 @@ import { canonicalJson as canonical, fingerprint } from './canonical.mjs';
 import { UserError } from './store.mjs';
 
 const METHODS = new Set(['create_bet', 'accept_bet', 'cancel_bet', 'expire_bet',
-  'propose_outcome', 'confirm_outcome', 'dispute_outcome', 'finalize_unanswered', 'refund_unresolved', 'withdraw']);
+  'propose_outcome', 'confirm_outcome', 'dispute_outcome', 'finalize_unanswered', 'refund_unresolved', 'withdraw', 'submit_evidence']);
 const BINDING_METHODS = new Set(['create_bet', 'accept_bet']);
 const RESERVED_METADATA = new Set(['contract', 'depositYocto', 'requestState']);
 const sameId = (a, b) => String(a) === String(b);
@@ -52,6 +52,8 @@ function validateAction(bet, input) {
   } else {
     const member = creator || sameId(bet.acceptor_user_id, input.user.id);
     if (!member || !chain || input.account !== (creator ? chain.creator : chain.acceptor)) throw changed();
+    if (input.method === 'submit_evidence' && (!bet.outlayer_material || input.contract !== bet.referee_wallet
+      || !['accepted', 'proposed', 'disputed'].includes(chain.status))) throw changed();
     if (input.method === 'propose_outcome') {
       if (!['accepted', 'proposed', 'disputed'].includes(chain.status)
         || String(input.metadata.proposalRevision) !== (BigInt(chain.proposal?.revision || '0') + 1n).toString()) throw changed();
@@ -76,7 +78,7 @@ export async function reserveNearRequest(db, input) {
   if (!bet?.id || !user?.id || !METHODS.has(method) || !args || Array.isArray(args)
     || typeof account !== 'string' || !account || typeof contract !== 'string' || !contract
     || typeof depositYocto !== 'string' || !/^(0|[1-9][0-9]*)$/.test(depositYocto)
-    || (method !== 'withdraw' && args.id !== bet.id)
+    || (method !== 'withdraw' && (method === 'submit_evidence' ? args.bet_id : args.id) !== bet.id)
     || (BINDING_METHODS.has(method) && !/^[a-f0-9]{64}$/.test(args.binding_hash || ''))) {
     throw new UserError('The wallet request is incomplete. Review the challenge and retry.');
   }
@@ -108,6 +110,9 @@ export async function reserveNearRequest(db, input) {
       pending = await tx.many(`select * from bilateral_near_requests where bet_id=$1 and method=$2
         and ($3::bigint is null or user_id=$3)
         order by created_at, id`, [bet.id, method, method === 'accept_bet' ? user.id : null]);
+    } else if (method === 'submit_evidence') {
+      pending = await tx.many(`select * from bilateral_near_requests where bet_id=$1 and method=$2
+        and user_id=$3 and args->>'url'=$4 and execution_status<>'failed' order by created_at,id`, [bet.id, method, user.id, args.url]);
     } else if (method === 'propose_outcome') {
       pending = await tx.many(`select * from bilateral_near_requests where bet_id=$1 and method=$2
         and user_id=$3 and wallet_account=$4 and metadata->>'proposalRevision'=$5

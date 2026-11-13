@@ -9,6 +9,10 @@ import { accountLink, network, transactionLink, unit } from './near-network.mjs'
 import { qrSvg } from './qr.mjs';
 import { nearMark, tokenMark } from './token-logos.mjs';
 import { accountNameFor, claimPlayAccount, ensurePlayAccount, inPilot, near, playAccountFor, yocto } from './play.mjs';
+import { betFor } from './bets.mjs';
+import { STORAGE_FEE_YOCTO } from './near-escrow.mjs';
+import { fundingNeed, fundingPanel, fundingStatus } from './funding-view.mjs';
+import { UserError } from './store.mjs';
 
 /** The tokens a payment can be made in, grouped by chain, as the options of a select. */
 export function tokenChoices(list, chosenId) {
@@ -51,10 +55,23 @@ function standing(d) {
   }
 }
 
-export function registerPlayRoutes({ botUsername, route, db, config, layout, needUser, needPost, csrfField, send, redirect, notFound, chain, quotes = null, payVersion = '' }) {
+export function registerPlayRoutes({ botUsername, route, db, config, layout, needUser, needPost, csrfField, send, redirect, notFound, chain, quotes = null, payVersion = '', allowHeavyRead = null }) {
   if (!config.play?.enabled) return;
   const real = () => network().real;
   const funding = () => Boolean(quotes && fundingOn(config));
+
+  async function neededFor(ctx, bet) {
+    if (!bet) return fundingNeed(ctx.url.searchParams.get('need'));
+    try {
+      const row = await betFor(db, ctx.user, bet);
+      if (row.status !== 'offered') return '0';
+      return (BigInt(row.stake_yocto) + (String(row.creator_user_id) === String(ctx.user.id) && !row.chain_state
+        ? BigInt(STORAGE_FEE_YOCTO) : 0n)).toString();
+    } catch (error) {
+      if (error.status === 404) return '0';
+      throw error;
+    }
+  }
 
   const payRow = (d) => html`<li><a href="/me/wallet/pay/${d.id}">${tokenMark({ symbol: d.origin_symbol, chain: d.origin_chain }, { keep: true })}<b>${amount(d.near_yocto)} NEAR with ${d.origin_symbol} on ${d.origin_chain}</b><span>${standing(d)}</span></a></li>`;
   // Payments still open, shown under the balance: a person coming back looks there for what is left to pay.
@@ -124,6 +141,15 @@ export function registerPlayRoutes({ botUsername, route, db, config, layout, nee
       try { balance = await chain().balance(account.account_id); } catch { balance = null; }
     }
     const claimed = ctx.url.searchParams.get('done') === 'claimed';
+    const needed = real() ? await neededFor(ctx, bet) : '0';
+    let funds = null;
+    if (real() && account?.ready) {
+      try { funds = await fundingStatus(config, chain(), account, needed); }
+      catch { funds = { accountId: account.account_id, balanceNear: balance == null ? null : near(balance),
+        neededYocto: needed, neededNear: near(needed), missingNear: null }; }
+    }
+    const sponsor = real() && account?.ready && BigInt(account.granted_yocto || '0') > BigInt(yocto('0.05'))
+      ? html`<p class="gut">Stated put ${near(account.granted_yocto)} NEAR in this account. It is yours to bet or withdraw.</p>` : '';
     const invited = inPilot(config, ctx.user.x_user_id);
     let intro = '';
     if (!account?.ready) {
@@ -132,14 +158,14 @@ export function registerPlayRoutes({ botUsername, route, db, config, layout, nee
     }
     const about = !account?.ready ? '' : real()
       ? html`<p class="quiet">A real account on NEAR, named after your handle: <span class="acct">${account.account_id}</span>. <a href="${accountLink(account.account_id)}" rel="noopener noreferrer">See it on NEAR</a>.</p>
-          <p class="quiet">It holds real NEAR. ${account.claimed_at ? '' : 'Stated holds the key until you take the account, so a reply on X can place your bets. Taking it puts your key on and removes Stated’s in one transaction. '}Stated paid the network fee to open it. Every stake is your own NEAR.</p>`
+          <p class="quiet">It holds real NEAR. ${account.claimed_at ? '' : 'Stated holds the key until you take the account, so a reply on X can place your bets. Taking it puts your key on and removes Stated’s in one transaction. '}Stated paid to open it.</p>`
       : html`<p class="quiet">A real account on NEAR testnet, named after your handle: <span class="acct">${account.account_id}</span>. <a href="${accountLink(account.account_id)}" rel="noopener noreferrer">See it on NEAR</a>.</p>
           <p class="quiet">Test NEAR has no monetary value. ${account.claimed_at ? '' : 'Stated holds the key until you take the account, so a reply on X can place your bets. Taking it puts your key on and removes Stated’s in one transaction.'} It is topped up from Stated’s testnet treasury, up to a limit per account.</p>`;
     // With real NEAR a person opens the account themselves, having seen the name it will have and that it holds real money.
     const opening = real() && invited && !account?.ready
       ? html`<p class="say">${accountNameFor(ctx.user.x_username, ctx.user.x_user_id, config.play.treasury)}</p>
           <p class="stakes left">It holds real NEAR: your stakes and what you win.</p>
-          <form class="acts" method="post" action="/me/wallet/open">${csrfField(ctx)}${bet ? html`<input type="hidden" name="bet" value="${bet}">` : ''}<button class="primary big" type="submit">Open my account</button></form>
+          <form class="acts" method="post" action="/me/wallet/open">${csrfField(ctx)}${bet ? html`<input type="hidden" name="bet" value="${bet}">` : ''}${needed !== '0' ? html`<input type="hidden" name="need" value="${needed}">` : ''}<button class="primary big" type="submit">Open my account</button></form>
           ${error ? html`<p class="err" role="alert"><b>That didn’t go through.</b> ${error.message}</p>` : ''}`
       : '';
     send(ctx.res, status, await layout(ctx, 'Wallet', html`
@@ -148,7 +174,9 @@ export function registerPlayRoutes({ botUsername, route, db, config, layout, nee
       ${account?.ready || real() ? '' : html`<p class="say">@${await botUsername()} bet ${config.play.defaultStakeNear} no</p>`}
       ${account?.ready ? html`
         <p class="prop">@${ctx.user.x_username}</p>
-        <p class="lead bal">${nearMark({ size: 'md' })}${balance == null ? 'Balance unavailable' : `${new Decimal(near(balance)).toFixed(2)} ${unit()}`}<span>${account.claimed_at ? 'yours' : real() ? '' : 'on testnet'}</span></p>
+        ${funds ? fundingPanel(funds, { payVersion, unavailable: funds.missingNear == null }) : html`<p class="lead bal">${nearMark({ size: 'md' })}${balance == null ? 'Balance unavailable' : `${new Decimal(near(balance)).toFixed(2)} ${unit()}`}<span>${account.claimed_at ? 'yours' : 'on testnet'}</span></p>`}
+        ${sponsor}
+        ${funds && bet ? html`<p class="gut"><a class="tl" href="${returnToBet(bet)}">Return to bet</a></p>` : ''}
         ${await openPayments(ctx, account)}
         ${await addButton(ctx, account, { error: payError })}
         ${claimed ? html`<p class="stakes left" role="status">This account is yours now. Only your wallet can move it.</p>` : ''}
@@ -175,6 +203,22 @@ export function registerPlayRoutes({ botUsername, route, db, config, layout, nee
     await page(ctx);
   });
 
+  // Authenticated read only: a transfer refreshes the account balance without navigating away.
+  route('GET', /^\/me\/wallet\/balance$/, async (ctx) => {
+    if (!(await needUser(ctx))) return;
+    if (allowHeavyRead && !allowHeavyRead(ctx)) return;
+    const value = ctx.url.searchParams.get('need') || '0';
+    if (fundingNeed(value) !== value) throw new UserError('The requested stake amount is invalid. Reopen the bet.');
+    const account = await playAccountFor(db, ctx.user.x_user_id);
+    if (!account?.ready) return notFound(ctx);
+    let status;
+    try { status = await fundingStatus(config, chain(), account, value); }
+    catch { throw new UserError('NEAR balance could not be read. Retry the balance check.', 503); }
+    send(ctx.res, 200, JSON.stringify(status), { kind: 'private', headers: {
+      'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store',
+    } });
+  });
+
   route('POST', /^\/me\/wallet\/claim$/, async (ctx) => {
     const form = await needPost(ctx);
     if (!form) return;
@@ -199,7 +243,8 @@ export function registerPlayRoutes({ botUsername, route, db, config, layout, nee
       if (error.status && error.status < 500) return page(ctx, { error, status: error.status, bet });
       throw error;
     }
-    redirect(ctx.res, bet ? returnToBet(bet) : '/me/wallet?add');
+    const need = fundingNeed(form.get('need'));
+    redirect(ctx.res, bet ? returnToBet(bet) : `/me/wallet?add${need !== '0' ? `&need=${need}` : ''}`);
   });
 
   route('POST', /^\/me\/wallet\/pay$/, async (ctx) => {

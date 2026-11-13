@@ -801,6 +801,18 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
     ctx.res.end(file);
   });
 
+  // Published OutLayer jury builds. Each file is named by its SHA-256, so an address never changes
+  // meaning; the referee contract pins the hash and OutLayer rejects any other bytes.
+  route('GET', /^\/static\/outlayer\/(stated-jury-[0-9a-f]{64}\.wasm)$/, (ctx) => {
+    const name = ctx.params[0];
+    let file;
+    try { file = readFileSync(new URL(`../public/outlayer/${name}`, import.meta.url)); } catch { return notFound(ctx); }
+    if (createHash('sha256').update(file).digest('hex') !== name.slice('stated-jury-'.length, -'.wasm'.length)) return notFound(ctx);
+    ctx.res.writeHead(200, { 'content-type': 'application/wasm', 'content-length': file.length,
+      'cache-control': 'public, max-age=31536000, immutable', 'x-content-type-options': 'nosniff', 'access-control-allow-origin': '*' });
+    ctx.res.end(file);
+  });
+
   route('GET', /^\/static\/pay\.js$/, (ctx) => {
     const etag = `"${PAY_VERSION}"`;
     const headers = { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache', etag,
@@ -895,17 +907,18 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
       ? recent.find((row) => betLines.dares.has(String(row.save_id)) && !isPlaceholder(row)) || null : null;
     const lead = dare || recent.find((row) => verdictOf(row) === 'yes' && row.available && !isPlaceholder(row)) || null;
     const dareBet = dare ? betLines.dareBets.get(String(dare.save_id)) : null;
-    const fallback = !settled && !dareBet && config.play?.enabled && !config.near.real
+    const fallback = !settled && !dareBet && config.play?.enabled
       ? await nextOpenPublicBet(db, ctx.user?.id) : null;
     const rest = recent.filter((row) => fallback || row !== lead).slice(0, 8);
     const fallbackFaces = fallback ? await facesByUsername(db, [fallback.creator_username], ctx.user) : null;
     const featuredId = settled?.id || fallback?.id || dareBet?.id;
-    const listed = hall.rows.filter(bet => bet.id !== featuredId);
+    const listed = config.near.real ? hall.rows : hall.rows.filter(bet => bet.id !== featuredId);
     const offers = listed.filter(bet => betState(bet).open);
     const hasOpenOffers = hall.rows.some(bet => betState(bet).open);
     const active = listed.filter(bet => ['accepted', 'proposed', 'disputed'].includes(bet.status));
     const finished = listed.filter(bet => !betState(bet).open && !active.includes(bet));
-    const homeAction = !ctx.user ? { href: '/signin', label: 'Make a bet' }
+    const homeAction = config.near.real ? { href: ctx.user ? '/me/bets/new' : '/signin?return=%2Fme%2Fbets%2Fnew', label: 'Make a bet' }
+      : !ctx.user ? { href: '/signin', label: 'Make a bet' }
       : fallback ? { href: `/bets/${fallback.id}?join=1#accept`, label: `Bet ${fallback.creator_side === 'yes' ? 'no' : 'yes'}` }
         : dareBet ? { href: `/bets/${dareBet.id}`, label: `Bet ${dareBet.other}` }
           : !settled ? { href: '/me', label: 'Your predictions' } : null;
@@ -913,13 +926,13 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
       <h1 class="visually-hidden">Stated</h1>
       ${settled ? html`<section class="settled-feature">
         ${await rulingPost(db, settled, settled.outcome, { claimHref: `/bets/${settled.id}/ruling` })}
-        <a class="feature-result" href="/bets/${settled.id}/ruling"><div class="verdict ruling-verdict${settled.outcome === 'yes' ? ' yes' : ''}"><b>${settled.outcome === 'yes' ? html`<span class="hl">Yes</span>` : 'No'}</b><span>${dayMonth(settled.enclave.decidedAt || settled.settled_at, { year: true })}</span></div>
+        <a class="feature-result" href="/bets/${settled.id}/ruling"><div class="verdict ruling-verdict${settled.outcome === 'yes' ? ' yes' : ''}"><b>${settled.outcome === 'yes' ? html`<span class="hl">Yes</span>` : 'No'}</b><span>${dayMonth(settled.enclave?.decidedAt || settled.outlayer?.recordedAt || settled.settled_at, { year: true })}</span></div>
         <p class="gut feature-winner">${betLead(settled).text} the ${formatTestNear((BigInt(settled.stake_yocto) * 2n).toString())} ${unit()} pot.</p></a><p class="gut settlement-line">${settlementMarkup(await settlementSentence(db, config, settled))}</p></section>`
       : fallback ? html`${await betSourceHeader(db, null, fallback, config.x.simulatedOrigin)}<p class="prop">${fallback.claim}</p>${await betSourceHeader(db, null, fallback, config.x.simulatedOrigin, { timestamp: true })}${detailBetBlock(fallback, { viewer: ctx.user, faces: fallbackFaces, joinHref: `/bets/${fallback.id}?join=1#accept` })}`
         : lead ? html`${postCard(lead, { faces, sweep: true, link: publicRow(lead).link })}${dareBet ? html`<div class="dare">${dareBet.line}</div>` : ''}` : ''}
-      <p class="pitch home-intro${hasOpenOffers ? '' : ' empty'}">${hasOpenOffers ? '' : 'No open offers right now. '}Reply to any post on X with <span class="mention">@${bot} bet ${config.play.defaultStakeNear} no</span>.${hasOpenOffers ? ' Three AI models judge it and NEAR pays the winner.' : ''}</p>
+      ${config.near.real ? html`<p class="pitch home-intro">Sign in with X, add NEAR to your account, then make or take a bet. The <a class="tl" href="/court">OutLayer referee</a> rules and the winner is paid.</p>` : html`<p class="pitch home-intro${hasOpenOffers ? '' : ' empty'}">${hasOpenOffers ? '' : 'No open offers right now. '}Reply to any post on X with <span class="mention">@${bot} bet ${config.play.defaultStakeNear} no</span>.${hasOpenOffers ? ' Three AI models judge it and NEAR pays the winner.' : ''}</p>`}
       ${homeAction ? html`<div class="acts"><a class="pill solid big" href="${homeAction.href}">${homeAction.label}</a></div>` : ''}
-      ${hall.total ? html`<section id="public-bets"><p class="pitch"><a class="tl" href="#public-bets">${hall.total} ${hall.total === 1 ? 'bet' : 'bets'}</a>, ${hall.settled} settled, ${formatTestNear(hall.wonYocto)} ${unit()} won${outsideTaken >= 1 ? html`, <span class="outside-taken">${outsideTaken} ${outsideTaken === 1 ? 'bet' : 'bets'} taken by people outside the team</span>` : ''}</p>${offers.length ? html`<h2 class="lead">Open offers</h2>${betList(offers, { hall: true })}` : ''}${active.length ? html`<h2 class="lead">Bets in progress</h2>${betList(active, { hall: true })}` : ''}${finished.length ? html`<h2 class="lead">Finished bets</h2>${betList(finished, { hall: true })}` : ''}</section>` : ''}
+      ${hall.total || config.near.real ? html`<section id="public-bets"><p class="pitch"><a class="tl" href="#public-bets">${hall.total} ${hall.total === 1 ? 'bet' : 'bets'}</a>, ${hall.settled} settled, ${formatTestNear(hall.wonYocto)} ${unit()} won${outsideTaken >= 1 || config.near.real ? html`, <span class="outside-taken">${outsideTaken} ${outsideTaken === 1 ? 'bet' : 'bets'} taken by people outside the team</span>` : ''}</p>${offers.length || config.near.real ? html`<h2 class="lead">Open offers</h2>${offers.length ? betList(offers, { hall: true }) : html`<p class="empty quiet">No open offers yet.</p>`}` : ''}${active.length || config.near.real ? html`<h2 class="lead">Bets in progress</h2>${active.length ? betList(active, { hall: true }) : html`<p class="empty quiet">No bets in progress yet.</p>`}` : ''}${finished.length || config.near.real ? html`<h2 class="lead">Finished bets</h2>${finished.length ? betList(finished, { hall: true }) : html`<p class="empty quiet">No finished bets yet.</p>`}` : ''}</section>` : ''}
       ${rest.length ? fileList(rest, publicRow, faces, betLines) : ''}
     `, { flush: true, signin: false, og: {
       title: 'Stated: bets on what is said on X', description: 'Bet on what is said on X, decided by three AI models in NEAR AI enclaves.',
@@ -942,7 +955,8 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
   });
 
   route('GET', /^\/terms$/, async (ctx) => {
-    send(ctx.res, 200, await layout(ctx, 'Terms of Service', termsPage({ bot: await botUsername(), real: config.near.real })));
+    send(ctx.res, 200, await layout(ctx, 'Terms of Service', termsPage({ bot: await botUsername(), real: config.near.real,
+      pilotXIds: config.play.pilotXIds, startNear: config.play.startNear, sponsorLimit: config.play.sponsorLimit, maxStakeNear: config.play.maxStakeNear })));
   });
 
   route('GET', /^\/privacy$/, async (ctx) => {
@@ -1960,8 +1974,8 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
   registerBetStartRoutes({ route, db, config, layout, send, redirect, botUsername, fileList, betLinesFor, publicRow, csp: CONTENT_SECURITY_POLICY });
   registerBetRulingRoutes({ route, db, config, layout, send, notFound, readRuling: readPublicRuling });
   registerCourtRoutes({ route, db, config, layout, send, notFound, chain: chainFor });
-  registerBetEvidenceRoutes({ route, db, config, layout, needPost, csrfField, send, redirect, notFound });
-  registerPlayRoutes({ botUsername, route, db, config, layout, needUser, needPost, csrfField, send, redirect, notFound, chain: chainFor, quotes, payVersion: PAY_VERSION });
+  registerBetEvidenceRoutes({ route, db, config, layout, needPost, csrfField, send, redirect, notFound, chain: chainFor, fetchImpl, walletVersion: WALLET_VERSION });
+  registerPlayRoutes({ botUsername, route, db, config, layout, needUser, needPost, csrfField, send, redirect, notFound, chain: chainFor, quotes, payVersion: PAY_VERSION, allowHeavyRead });
   registerWalletRpc({ route, config, needUser, json, fetchImpl });
   registerShareRoutes({ route, db, config, notFound, headersFor });
 

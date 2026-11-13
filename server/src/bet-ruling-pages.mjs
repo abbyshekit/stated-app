@@ -16,6 +16,7 @@ import { MODEL_LOGOS, modelFace, modelName } from './jury-models.mjs';
 import { jurySentence, settlementMarkup, settlementSentence } from './settlement-view.mjs';
 import { postLogo, postTime, xPostUrl } from './x-post-view.mjs';
 import { betPostTime } from './bet-source-view.mjs';
+import { outlayerRulingBody } from './outlayer-pages.mjs';
 
 const ID = '([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})';
 const percent = (value) => `${new Decimal(value).times(100).toFixed()}%`;
@@ -142,6 +143,8 @@ export function registerBetRulingRoutes({ route, db, config, layout, send, notFo
         record = await readRuling(tx, id);
         return record;
       } });
+      if (bet?.outlayer) return { bet, outlayer: true,
+        post: await rulingPost(tx, bet, bet.outlayer.result?.outcome) };
       // The signed text cannot be redacted. Preserve the JSON route's private-evidence gate.
       if (!bet?.enclave || bet.evidence?.privateItemCount) return null;
       let quotes;
@@ -152,6 +155,8 @@ export function registerBetRulingRoutes({ route, db, config, layout, send, notFo
       return { bet, record, quotes, post: await rulingPost(tx, bet, record.outcome) };
     });
     if (!result) return notFound(ctx);
+    if (result.outlayer) return send(ctx.res, 200, await layout(ctx, 'OutLayer ruling',
+      outlayerRulingBody(result.bet, result.post), { flush: true, signin: false, back: `/bets/${result.bet.id}` }));
     const { bet, record, quotes, post } = result;
     const gpuVerified = record.verdicts.every(verdict => verdict.gpu?.verdict === true);
     const verified = gpuVerified

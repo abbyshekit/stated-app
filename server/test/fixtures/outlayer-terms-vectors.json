@@ -1,0 +1,71 @@
+[
+  {
+    "material": {
+      "bet_id": "3668aa04-7009-4b85-b19d-debfabebbf96",
+      "claim": "NEAR above US$3.30 on Coinbase",
+      "made_at": "2026-11-12T18:00:00.000Z",
+      "deadline": "2026-11-12T19:15:00.000Z",
+      "post_url": "https://x.com/ChainAbstracted/status/2120000000000000000",
+      "evidence": {
+        "kind": "coinbase",
+        "product": "NEAR-USD",
+        "window": {
+          "kind": "moment",
+          "at": "2026-11-12T19:15:00.000Z"
+        }
+      }
+    },
+    "salt": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "hash": "4d67c9dbbc1a90a9130942b5e90c4bc5050283f01a47357833f28e1bc7567e24"
+  },
+  {
+    "material": {
+      "bet_id": "3668aa04-7009-4b85-b19d-debfabebbf96",
+      "claim": "Will the announcement say \"ready\"? café 🚀",
+      "made_at": "2026-11-12T18:00:00.000Z",
+      "deadline": "2026-11-12T19:15:00.000Z",
+      "post_url": "https://x.com/ChainAbstracted/status/2120000000000000000",
+      "evidence": {
+        "kind": "auto"
+      }
+    },
+    "salt": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "hash": "6cfa2b4deb5b4a5121701b5e1c61dd3f6086f677c6b15ca1c8d2223687980007"
+  },
+  {
+    "material": {
+      "bet_id": "3668aa04-7009-4b85-b19d-debfabebbf96",
+      "claim": "NEAR above US$3.30 on Coinbase",
+      "made_at": "2026-11-12T18:00:00.000Z",
+      "deadline": "2026-11-12T19:15:00.000Z",
+      "post_url": "https://x.com/ChainAbstracted/status/2120000000000000000",
+      "evidence": {
+        "kind": "submitted",
+        "items": [
+          {
+            "side": "yes",
+            "url": "https://www.sec.gov/newsroom"
+          }
+        ]
+      }
+    },
+    "salt": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "hash": "6e25f189d0960e3d3f1f57fa72518da373c37660408033b34553c2056fe86ca9"
+  },
+  {
+    "material": {
+      "bet_id": "3668aa04-7009-4b85-b19d-debfabebbf96",
+      "claim": "Nightjar ships a stable release.",
+      "made_at": "2026-11-12T18:00:00.000Z",
+      "deadline": "2026-11-12T19:15:00.000Z",
+      "post_url": "https://x.com/ChainAbstracted/status/2120000000000000000",
+      "evidence": {
+        "kind": "open",
+        "window_seconds": 86400,
+        "max_per_side": 2
+      }
+    },
+    "salt": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "hash": "f6190aabaecaeb3aae6e685c4a4b34e0d7ea49b09c06c612e797107383db1fc8"
+  }
+]

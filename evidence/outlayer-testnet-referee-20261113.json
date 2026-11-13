@@ -1,0 +1,102 @@
+{
+ "network": "testnet",
+ "date": "2026-11-13",
+ "accounts": {
+  "referee": "outlayer-ref1.stated-court-relay.testnet",
+  "escrow": "stated-escrow-52081551be.testnet",
+  "creator": "court-check-647f36b3-b.testnet",
+  "acceptor": "court-check-79d3c73d-a.testnet",
+  "payer_and_parent": "stated-court-relay.testnet",
+  "outlayer": "outlayer.testnet"
+ },
+ "artifacts": {
+  "referee_sha256": "1f6b35b9fce99165af5090ff04d4ff6493933ec90ab3c0a37a532255bf46ed83",
+  "referee_onchain_code_hash_base58": "37eTRabVTkLTgwKc5kDBx2HTrjBy1LLsbqpnsDry678n",
+  "jury_sha256": "3db75833adc5dc14a4d8c6f74eb27b324b7e004717f3fe4111c314ab5ecc4456"
+ },
+ "deploy": {
+  "tx": "gLr8ByF2M2g55hC5rgePNfS9ePc2g5rvA56T5R2R5kF",
+  "amount_yocto": "4000000000000000000000000",
+  "access_keys": 0,
+  "storage_usage_bytes": 296649,
+  "get_config_growth_reserve_bytes": 32768,
+  "supports_open_evidence": true
+ },
+ "fund_compute": {
+  "tx": "6Jbqih2PdjUvxytLp1CZxNtpRp2mwm1Z62CARNJ2sydV",
+  "deposit_yocto": "100000000000000000000000",
+  "budget_after_yocto": "1133510000000000000000000"
+ },
+ "bet": {
+  "id": "2b4b1969-753e-4d1d-b884-20056cf6dc24",
+  "claim": "The Coinbase NEAR-USD price at 2026-11-13T06:35:00.000Z will be above $1.00",
+  "stake_yocto": "1000000000000000000000",
+  "terms_hash": "836e2a1c7e0bdd21ef5511230ed13ae6d57ed4b69bf366bc710abdff7339f241",
+  "deadline": "2026-11-13T06:36:00.000Z",
+  "ready_at": "2026-11-13T06:37:00.000Z",
+  "material": {
+   "bet_id": "2b4b1969-753e-4d1d-b884-20056cf6dc24",
+   "claim": "The Coinbase NEAR-USD price at 2026-11-13T06:35:00.000Z will be above $1.00",
+   "made_at": "2026-11-13T06:29:06.336Z",
+   "deadline": "2026-11-13T06:36:00.000Z",
+   "post_url": "https://stated-production.up.railway.app/",
+   "evidence": {
+    "kind": "coinbase",
+    "product": "NEAR-USD",
+    "window": {
+     "kind": "moment",
+     "at": "2026-11-13T06:35:00.000Z"
+    }
+   }
+  },
+  "contract_terms_hash_matches_server": true,
+  "create_bet_tx": "C6HUTPjH2NTGvEgYDkCtRiMRTYNEAFSkJpgjKcyStJ9Q",
+  "accept_bet_tx": "GLizFhLRMACHVrkSWA7qHH1sAdQuxVNFrJR3MTXA9BHQ",
+  "register_material_tx": "GqUyM7RCM7vogYr7hJmhz54LekjjkL2sEasUYS25mLvU",
+  "register_deposit_yocto": "372400000000000000000000",
+  "register_result": true,
+  "escrow_status_after_accept": "accepted"
+ },
+ "ruling_before": {
+  "stage": "idle",
+  "nonce": 0,
+  "failures": 0,
+  "last_error": null,
+  "outcome": null
+ },
+ "request_ruling": {
+  "tx": "4XmvxTtxPVq2KR7oWAGSoJcUuZmVQPAxCzFHjcjdifvZ",
+  "attached_gas": "300 Tgas",
+  "tx_result": "SuccessValue \"OutLayer execution failed\" (on_ruling return)",
+  "total_gas_burnt_tgas": 22.893,
+  "any_receipt_failed": false,
+  "receipt_chain_gas_burnt_tgas": {
+   "tx_conversion": 0.311,
+   "request_ruling": 2.675,
+   "escrow_get_bet": 1.36,
+   "on_bet": 2.852,
+   "outlayer_estimate": 1.944,
+   "on_priced": 2.92,
+   "outlayer_request_execution": 4.017,
+   "outlayer_resume": 2.672,
+   "on_ruling": 1.91
+  },
+  "outlayer_estimate_yocto": "19001000000000000000000",
+  "outlayer_charged_yocto": "1000000000000000000000",
+  "outlayer_refunded_yocto": "18001000000000000000000",
+  "outlayer_request_id": 36928,
+  "outlayer_log": "Execution promise failed: Failed. Refunded 18001000000000000000000 yoctoNEAR"
+ },
+ "ruling_after": {
+  "stage": "idle",
+  "nonce": 1,
+  "executions": 1,
+  "failures": 1,
+  "admission_failures": 0,
+  "last_error": "OutLayer execution failed",
+  "outcome": null,
+  "next_ns": 1794552574736997000,
+  "started_ns": 1794551850491372500,
+  "retry_delay_seconds_from_start": 724
+ }
+}

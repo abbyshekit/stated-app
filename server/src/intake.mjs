@@ -318,7 +318,8 @@ export async function processMention(db, config, { mention, includes = {}, bot, 
     const bet = config.play?.enabled ? parseBetCommand(commandText, {
       defaultStake: config.play.defaultStakeNear,
       now: mention.created_at || new Date(),
-      rulings: Boolean(config.nearai?.rulings),
+      rulings: Boolean(config.nearai?.rulings || config.outlayer?.referee),
+      outlayer: Boolean(config.outlayer?.referee),
     }) : null;
 
     // Replying inside a thread the bot is already in puts the bot's handle in
@@ -329,7 +330,7 @@ export async function processMention(db, config, { mention, includes = {}, bot, 
       || parentPost?.author_id === bot.userId
       || (parentPost?.entities?.mentions || []).some((m) => m.id === bot.userId || (botName && String(m.username || '').toLowerCase() === botName));
     // Evidence replies belong to the enclave jury; with it switched off they are not read as links to track.
-    if (parent && config.play?.enabled && !config.nearai?.rulings && parseEvidenceCommand(commandText)) {
+    if (parent && config.play?.enabled && !config.nearai?.rulings && !config.outlayer?.referee && parseEvidenceCommand(commandText)) {
       return { outcome: 'ignored_evidence', event: await recordEvent(db, config, mention, { outcome: 'ignored_evidence' }) };
     }
     if (bet?.kind === 'evidence' && parent

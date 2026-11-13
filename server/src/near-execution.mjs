@@ -44,9 +44,9 @@ function validateTransaction(request, result, transactionHash) {
   const call = action?.FunctionCall;
   if (!action || Object.keys(action).length !== 1 || !call
     || call.method_name !== request.method || call.deposit !== request.metadata.depositYocto
-    || !(call.gas === '100000000000000' || (Number.isSafeInteger(call.gas) && call.gas === 100000000000000))) throw mismatch();
+    || String(call.gas) !== (request.metadata.gas || '100000000000000')) throw mismatch();
   let args;
-  try { args = decodeJson(call.args, 10240); }
+  try { args = decodeJson(call.args, 32768); }
   catch { throw mismatch(); }
   if (canonicalJson(args) !== canonicalJson(request.args)) throw mismatch();
 }
@@ -58,6 +58,7 @@ export async function verifyNearExecution(request, transactionHash, { fetchImpl 
     || typeof request.metadata?.contract !== 'string' || !request.metadata.contract
     || typeof request.metadata.depositYocto !== 'string'
     || !/^(0|[1-9][0-9]{0,38})$/.test(request.metadata.depositYocto)
+    || (request.metadata.gas != null && !['100000000000000', '300000000000000'].includes(request.metadata.gas))
     || !request.args || typeof request.args !== 'object' || Array.isArray(request.args)) throw mismatch();
   if (request.method === 'withdraw' && (typeof request.id !== 'string' || !request.id
     || request.args.stated_request_id !== request.id)) {
@@ -82,6 +83,9 @@ export async function verifyNearExecution(request, transactionHash, { fetchImpl 
   }
   if (!Object.hasOwn(status, 'SuccessValue') || typeof status.SuccessValue !== 'string') {
     return answer('pending', PENDING);
+  }
+  if (request.method === 'submit_evidence' && status.SuccessValue === Buffer.from('false').toString('base64')) {
+    return answer('failed', 'The referee declined this evidence submission. Check its evidence window and limits.');
   }
   if (request.method !== 'withdraw') return answer('succeeded', 'NEAR verified that this transaction completed.');
 

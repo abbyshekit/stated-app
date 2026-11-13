@@ -1,4 +1,4 @@
-import { assertHostedConfig, assertNetworkConfig, loadConfig, requireConfig } from './config.mjs';
+import { assertHostedConfig, assertNetworkConfig, botOwnershipLine, loadConfig, requireConfig } from './config.mjs';
 import { createDb } from './db.mjs';
 import { ensureDesk } from './store.mjs';
 import { createApp } from './web.mjs';
@@ -41,6 +41,7 @@ server.listen(config.port, () => {
 });
 
 let stopWorker = null;
+console.log(botOwnershipLine(config));
 const stopNearWorker = config.nearContract ? startNearWorker(db, config, {
   onError: (error) => console.error('[near]', error.message),
 }) : null;

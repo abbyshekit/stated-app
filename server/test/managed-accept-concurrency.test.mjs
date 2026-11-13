@@ -5,6 +5,8 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { startStack, Browser } from './support/app.mjs';
 import { FakeNear } from './support/fake-near.mjs';
+import { FakeOutLayerNear } from './support/fake-outlayer.mjs';
+import { enclaveEnv, fakeNearAi, NEARAI_BASE } from './support/enclave.mjs';
 import { createDb } from '../src/db.mjs';
 import { createApp } from '../src/web.mjs';
 import { primaryRpc } from '../src/near-escrow.mjs';
@@ -30,11 +32,14 @@ async function until(probe) {
 for (const network of ['testnet', 'mainnet']) {
   test(`${network}: managed acceptance concurrency with separate DB pools`, { timeout: 30000 }, async t => {
     const real = network === 'mainnet';
-    const near = new FakeNear({ contract: real ? 'escrow.stated.near' : 'escrow.testnet' });
+    const near = real ? new FakeOutLayerNear({ contract: 'escrow.stated.near', referee: 'jury.stated.near' })
+      : new FakeNear({ contract: 'escrow.testnet' });
+    const ai = fakeNearAi({ respond: () => ({ source: 'evidence' }) });
     if (real) near.accounts.set('stated.near', { balance: BigInt(yocto('100')), keys: new Set(['ed25519:synthetic-bank']) });
     let s, db2, server2, failLockedBet;
     const transactionResults = new Map();
     const fetchImpl = async (url, options) => {
+      if (real && new URL(url).origin === new URL(NEARAI_BASE).origin) return ai.fetchImpl(url, options);
       if (String(url) === primaryRpc()) {
         const input = JSON.parse(options.body);
         if (input.method === 'tx' && transactionResults.has(input.params.tx_hash)) return Response.json({ result: transactionResults.get(input.params.tx_hash) });
@@ -51,7 +56,8 @@ for (const network of ['testnet', 'mainnet']) {
     try {
       s = await startStack({ STATED_NEAR_NETWORK: network, STATED_NEAR_CONTRACT: near.contract,
         STATED_PLAY: '1', STATED_PLAY_AUTOPROVISION: '1', STATED_REPLIES_PER_TAGGER_PER_HOUR: '100',
-        ...(real ? { STATED_MAINNET: 'real-funds', STATED_TOKEN_KEY: 't'.repeat(44),
+        ...(real ? { ...enclaveEnv, STATED_ENCLAVE_RULINGS: '', STATED_OUTLAYER_REFEREE: near.referee,
+          STATED_MAINNET: 'real-funds', STATED_TOKEN_KEY: 't'.repeat(44),
           STATED_PLAY_TREASURY: 'stated.near', STATED_PLAY_TREASURY_KEY: 'ed25519:synthetic-bank',
           STATED_PILOT_X_IDS: '*' } : {}) }, { fetchImpl, chain: near.chain, intents: { tokens: async () => [] } });
       await s.connectBot(s.fakeX.addUser('500', 'statedbot'));

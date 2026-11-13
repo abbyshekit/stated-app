@@ -291,7 +291,7 @@ create table if not exists bilateral_bets (
   invited_user_id bigint references users(id),
   acceptor_user_id bigint references users(id),
   request_id uuid not null,
-  claim text not null check (length(claim) between 1 and 1000),
+  claim text not null check (length(claim) between 1 and 3100),
   criteria text not null check (length(criteria) between 1 and 2000),
   evidence_source_url text not null,
   creator_side text not null check (creator_side in ('yes', 'no')),
@@ -499,6 +499,20 @@ create table if not exists play_accounts (
   created_at timestamptz not null default now(),
   claimed_at timestamptz
 );
+-- Initial mainnet funding is assigned before account creation. Keep these lifetime
+-- reservations independently of account rows so deleting one never reopens a slot.
+create table if not exists play_account_grants (
+  x_user_id text primary key,
+  account_id text not null,
+  public_key text not null,
+  amount_yocto text not null check (amount_yocto ~ '^[0-9]+$' and amount_yocto::numeric > 0),
+  created_at timestamptz not null default now()
+);
+-- Existing ready accounts already received their recorded grant. Mainnet does not
+-- top up stakes, so this also counts historical sponsors against the lifetime cap.
+insert into play_account_grants (x_user_id, account_id, public_key, amount_yocto, created_at)
+  select x_user_id, account_id, public_key, granted_yocto, created_at from play_accounts where ready and granted_yocto::numeric > 0
+  on conflict (x_user_id) do nothing;
 create table if not exists bet_commands (
   event_id text primary key,
   x_user_id text not null,
@@ -680,3 +694,29 @@ create table if not exists evidence_commands (
   updated_at timestamptz not null default clock_timestamp()
 );
 create index if not exists evidence_commands_queue_idx on evidence_commands (created_at) where status = 'queued';
+
+-- Complete, public material for the versioned OutLayer commitment. Older bets stay null.
+-- The form still limits the bettor's proposition to 1000 characters. OutLayer
+-- stores that proposition plus the separately bounded resolution criteria.
+alter table bilateral_bets drop constraint if exists bilateral_bets_claim_check;
+alter table bilateral_bets add constraint bilateral_bets_claim_check check (length(claim) between 1 and 3100);
+alter table bilateral_bets add column if not exists outlayer_material jsonb;
+create table if not exists outlayer_near_requests (
+  id uuid primary key,
+  bet_id uuid not null references bilateral_bets(id) on delete cascade,
+  signer_account text not null,
+  contract_account text not null,
+  method text not null check (method in ('register_material','request_ruling','submit_evidence')),
+  args jsonb not null,
+  deposit_yocto text not null,
+  gas text not null,
+  transaction_hash text unique,
+  execution_status text not null default 'pending',
+  detail text,
+  created_at timestamptz not null default clock_timestamp(),
+  updated_at timestamptz not null default clock_timestamp()
+);
+create index if not exists outlayer_near_requests_bet_idx on outlayer_near_requests(bet_id,method,created_at);
+alter table outlayer_near_requests add column if not exists signed_transaction text;
+alter table outlayer_near_requests add column if not exists broadcast_started_at timestamptz;
+alter table outlayer_near_requests add column if not exists intent_key text;

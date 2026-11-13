@@ -5,11 +5,15 @@ import { submitEvidence } from './bet-evidence.mjs';
 import { evidenceForBet } from './bet-public.mjs';
 import { face, facesByUsername, facesFor } from './certificate.mjs';
 import { nextBetTime } from './bet-view.mjs';
+import { network, unit } from './near-network.mjs';
+import { formatTestNear } from './near-escrow.mjs';
+import { walletTransactionForm } from './near-request-view.mjs';
+import { outlayerEvidenceForBet } from './outlayer.mjs';
 
 const ID = '([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})';
 const opposite = (side) => side === 'yes' ? 'no' : 'yes';
 
-export function registerBetEvidenceRoutes({ route, db, config, layout, needPost, csrfField, send, redirect, notFound, fetchPage }) {
+export function registerBetEvidenceRoutes({ route, db, config, layout, needPost, csrfField, send, redirect, notFound, fetchPage, chain, fetchImpl, walletVersion }) {
   async function findBet(ctx) {
     if (!ctx.user) return null;
     return db.one(`select b.*, creator.x_username as creator_username, s.statement_id, p.closes_at
@@ -17,17 +21,21 @@ export function registerBetEvidenceRoutes({ route, db, config, layout, needPost,
       join users creator on creator.id = b.creator_user_id
       left join saves s on s.id = b.source_save_id
       left join enclave_plans p on p.statement_id = s.statement_id
-      where b.id = $1 and s.statement_id is not null
+      where b.id = $1 and (s.statement_id is not null or b.outlayer_material is not null)
         and (b.creator_user_id = $2 or b.acceptor_user_id = $2)`,
     [ctx.params[0], ctx.user.id]);
   }
 
   async function show(ctx, bet, { error = null, url = '' } = {}) {
-    const rows = bet.statement_id ? await evidenceForBet(db, bet.statement_id, bet.id, ctx.user.id) : [];
-    const closes = bet.closes_at ? new Date(bet.closes_at) : new Date(new Date(bet.resolve_at).getTime() + config.play.evidenceWindowSeconds * 1000);
+    const rows = bet.outlayer_material ? await outlayerEvidenceForBet(db, bet.id)
+      : bet.statement_id ? await evidenceForBet(db, bet.statement_id, bet.id, ctx.user.id) : [];
+    const spec = bet.outlayer_material?.evidence;
+    const closes = spec?.kind === 'open' ? new Date(new Date(bet.resolve_at).getTime() + spec.window_seconds * 1000)
+      : bet.closes_at ? new Date(bet.closes_at) : new Date(new Date(bet.resolve_at).getTime() + config.play.evidenceWindowSeconds * 1000);
     const accepted = bet.acceptor_user_id && bet.accepted_at;
     const open = accepted && ['accepted', 'proposed', 'disputed'].includes(bet.status)
-      && bet.statement_id && Date.now() < closes.getTime();
+      && (bet.outlayer_material ? spec?.kind === 'open' && Date.now() >= new Date(bet.resolve_at).getTime() : bet.statement_id)
+      && Date.now() < closes.getTime();
     const ownSide = String(bet.creator_user_id) === String(ctx.user.id) ? bet.creator_side : opposite(bet.creator_side);
     const path = `/bets/${bet.id}/evidence`;
     let source = bet.source_save_id ? await ownerSave(db, ctx.user, bet.source_save_id) : null;
@@ -60,7 +68,7 @@ export function registerBetEvidenceRoutes({ route, db, config, layout, needPost,
       </div></li>`;
     });
     // DESIGN.md: one fold holds the complete saved text, below the link list.
-    const savedText = rows.length ? html`<details class="fold"><summary>What the jury reads</summary>
+    const savedText = rows.length && !bet.outlayer_material ? html`<details class="fold"><summary>What the jury reads</summary>
       <ul class="posts evidence-list">${rows.map(row => html`<li class="prow"><div>
         <p class="pwho"><b>${row.title || row.final_url || row.url}</b></p>
         ${String(row.body || '').split('\n\n').map(text => html`<p>${text}</p>`)}
@@ -103,7 +111,18 @@ export function registerBetEvidenceRoutes({ route, db, config, layout, needPost,
     const url = String(form.get('url') || '');
     const side = String(bet.creator_user_id) === String(ctx.user.id) ? bet.creator_side : opposite(bet.creator_side);
     try {
-      await submitEvidence(db, config, { betId: bet.id, userId: ctx.user.id, side, url, via: 'page', receivedAt, ...(fetchPage ? { fetchPage } : {}) });
+      const result = await submitEvidence(db, config, { betId: bet.id, userId: ctx.user.id, side, url, via: 'page', receivedAt, chain, fetchImpl, ...(fetchPage ? { fetchPage } : {}) });
+      if (result?.payload) {
+        return send(ctx.res, 200, await layout(ctx, 'Approve evidence', html`
+          <h1 class="gut">Approve evidence</h1><p class="gut">Attach ${formatTestNear(result.depositYocto)} ${unit()} for evidence storage from ${result.accountId || result.payload.accountId}.</p>
+          <p class="gut">${url}</p><div class="acts"><form method="post" action="/bets/${bet.id}/transactions" data-stated-wallet data-near-network="${network().id}">
+            ${csrfField(ctx)}<input type="hidden" name="requestId" value="${result.requestId || result.payload.requestId}">
+            <input type="hidden" name="walletPayload" value="${JSON.stringify(result.payload)}"><input type="hidden" name="transactionHash" value="">
+            <button class="primary big" type="button" data-connect-wallet>Connect wallet</button>
+            <button class="primary big" type="button" data-sign-wallet hidden>Approve request</button><p role="status" data-wallet-status></p>
+          </form></div>${walletTransactionForm({ id: result.requestId || result.payload.requestId }, bet.id, csrfField(ctx))}
+          <script src="/static/wallet.js?v=${walletVersion}" defer></script>`, { back: `/bets/${bet.id}/evidence`, kind: 'private' }), { kind: 'private' });
+      }
     } catch (error) {
       if (!(error instanceof UserError)) throw error;
       const current = await findBet(ctx);

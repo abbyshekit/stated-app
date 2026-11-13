@@ -1,6 +1,7 @@
 import { isNamedAccount, useNetwork } from './near-network.mjs';
 import { parseReputationTiers } from './reputation.mjs';
 import { validateDstackVerifierUrl } from './dstack-verifier.mjs';
+import Decimal from 'decimal.js';
 
 // A test stack's fake NEAR AI answers on a loopback or reserved .test host and has no GPU.
 function testNearAi(url) {
@@ -53,6 +54,28 @@ export function loadConfig(env = process.env) {
   // One process serves one NEAR network; loading a configuration selects it.
   const near = useNetwork(env.STATED_NEAR_NETWORK === 'mainnet' ? 'mainnet' : 'testnet');
   const mainnet = near.id === 'mainnet';
+  const maxStakeNear = env.STATED_MAX_STAKE_NEAR ?? '1';
+  const sponsorLimit = Number(env.STATED_SPONSOR_LIMIT ?? 25);
+  const registrationDailyLimit = Number(env.STATED_OUTLAYER_REGISTRATION_DAILY_LIMIT ?? 5);
+  if (!/^\d+$/.test(String(env.STATED_OUTLAYER_REGISTRATION_DAILY_LIMIT ?? 5)) || !Number.isSafeInteger(registrationDailyLimit)) {
+    throw new Error('STATED_OUTLAYER_REGISTRATION_DAILY_LIMIT must be a nonnegative integer; 0 disables new sponsored registrations.');
+  }
+  const rulingDailyLimit = Number(env.STATED_OUTLAYER_RULING_DAILY_LIMIT ?? 12);
+  if (!/^\d+$/.test(String(env.STATED_OUTLAYER_RULING_DAILY_LIMIT ?? 12)) || !Number.isSafeInteger(rulingDailyLimit)) {
+    throw new Error('STATED_OUTLAYER_RULING_DAILY_LIMIT must be a non-negative integer.');
+  }
+  const startNear = env.STATED_PLAY_START_NEAR || (mainnet ? '0.05' : '1.6');
+  if (mainnet) {
+    if (!/^(?:0|1)(?:\.\d{1,24})?$/.test(maxStakeNear) || !new Decimal(maxStakeNear).gt(0) || new Decimal(maxStakeNear).gt(1)) {
+      throw new Error('STATED_MAX_STAKE_NEAR must be greater than zero and at most 1 NEAR, with up to 24 decimal places.');
+    }
+    if (!/^\d+$/.test(String(env.STATED_SPONSOR_LIMIT ?? 25)) || !Number.isSafeInteger(sponsorLimit)) {
+      throw new Error('STATED_SPONSOR_LIMIT must be a nonnegative integer; 0 disables sponsored balances.');
+    }
+    if (!/^\d{1,16}(?:\.\d{1,24})?$/.test(startNear) || !new Decimal(startNear).gt(0)) {
+      throw new Error('STATED_PLAY_START_NEAR must be a positive NEAR amount with up to 24 decimal places.');
+    }
+  }
   const baseUrl = String(env.STATED_BASE_URL || `http://localhost:${port}`).replace(/\/$/, '');
   const list = (value) => String(value || '').split(',').map((s) => s.trim()).filter(Boolean);
   // A typo must fail closed, rather than silently choose the direct-key path.
@@ -88,6 +111,7 @@ export function loadConfig(env = process.env) {
     // The relay, when set, is the only jury member and enforces the correction
     // window on chain. Its operator remains the play referee account.
     court,
+    outlayer: { referee: courtAccount('STATED_OUTLAYER_REFEREE'), registrationDailyLimit, rulingDailyLimit },
     play: {
       enabled: env.STATED_PLAY === '1' && Boolean(env.STATED_NEAR_CONTRACT),
       treasury: env.STATED_PLAY_TREASURY || '',
@@ -95,9 +119,10 @@ export function loadConfig(env = process.env) {
       autoProvision: env.STATED_PLAY_AUTOPROVISION === '1' && !mainnet,
       defaultStakeNear: env.STATED_PLAY_DEFAULT_STAKE || '0.1',
       reputationTiers: parseReputationTiers(env.STATED_REPUTATION_TIERS),
-      // What a new account starts with. On testnet, enough for one full-size Bet. On mainnet
-      // it is the operator's own NEAR, so it covers network fees only: a stake is the person's money.
-      startNear: env.STATED_PLAY_START_NEAR || (mainnet ? '0.05' : '1.6'),
+      startNear,
+      maxStakeNear,
+      // A lifetime count, reserved before funding. Zero sponsors no accounts.
+      sponsorLimit,
       // On mainnet the treasury never pays for a stake.
       fundsStakes: !mainnet,
       // Who may bet with real NEAR: X user ids, or * for anyone. Empty on mainnet means nobody.
@@ -200,4 +225,8 @@ export function requireConfig(config, keys) {
   if (missing.length) {
     throw new Error(`Missing configuration: ${missing.join(', ')}`);
   }
+}
+
+export function botOwnershipLine(config) {
+  return `X bot ownership: ${config.near?.network || 'testnet'} ${config.worker.enabled ? 'owns mention polling' : 'does not poll mentions'}; STATED_WORKER=${config.worker.enabled ? 1 : 0}, STATED_PLAY=${config.play.enabled ? 1 : 0}, STATED_REPLIES=${config.x.repliesEnabled ? 1 : 0}. Only one network service may own the bot.`;
 }

@@ -267,7 +267,7 @@ test('the evidence prompt is queued once and records when it was prompted', asyn
   assert.equal(ack.in_reply_to, mention.id);
 });
 
-test('an unreadable reply is refused without a public reply', async () => {
+test('an unreadable evidence link is refused with one short public reply', async () => {
   const unreadable = s.fakeX.post(acceptor.x_user_id, '@statedbot no https://example.org/unreadable', { replyTo: offerCommand.id });
   await processMention(s.db, s.config, { mention: unreadable,
     includes: { users: [{ id: acceptor.x_user_id, username: acceptor.x_username }], tweets: [offerCommand] }, bot: await s.x.identity() });
@@ -276,7 +276,8 @@ test('an unreadable reply is refused without a public reply', async () => {
   assert.equal(command.attempts, 1);
   assert.equal(command.status, 'refused');
   assert.equal(command.detail, 'That link could not be read.');
-  assert.equal((await s.db.one('select count(*)::int as n from bot_outbox where in_reply_to=$1', [unreadable.id])).n, 0);
+  const replies = await s.db.many('select body from bot_outbox where in_reply_to=$1', [unreadable.id]);
+  assert.deepEqual(replies.map(row => row.body), ['Evidence was not submitted. That link could not be read.']);
 });
 
 test('the private evidence form fetches a local article and preserves a failed link', async () => {

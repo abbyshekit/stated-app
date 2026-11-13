@@ -1,10 +1,33 @@
 # Stated
 
+## Check it yourself
+
+**Mainnet OutLayer check: pending deployment. Saved PASS: pending at `evidence/judge-outlayer-mainnet.json`.**
+
+After `npm ci`, set the public deployment values in [JUDGE.md](JUDGE.md#outlayer-options), then run:
+
+```sh
+npm run judge -- --outlayer --network mainnet --bet-id "$JUDGE_BET_ID" --save evidence/judge-outlayer-mainnet.json
+```
+
+These checks remain pending until the referee is deployed and a settled bet is published:
+
+- Referee: no access keys; code hash matches the approved referee build.
+- Config: expected escrow, OutLayer contract, jury URL/hash, secrets owner and profile.
+- Jury: downloaded bytes match the pinned SHA-256.
+- Bet: named referee, ruling stage/outcome, successful archival settlement and credits to the correct side.
+
+Settlement credits remain in escrow until withdrawal; this command checks those credits. It reads public RPC, needs no key and exits nonzero on a failed or pending bet check. [Judge CI](.github/workflows/judge.yml) runs offline verification and Rust tests on pushes and pull requests; its daily mainnet check waits for repository variables.
+
 [![checks](https://github.com/abbyshekit/stated-app/actions/workflows/checks.yml/badge.svg)](https://github.com/abbyshekit/stated-app/actions/workflows/checks.yml)
 
 Bet on anything said on X by replying to it. Three models from three makers, each in its own NEAR AI enclave, must all agree who won, or both stakes go back; a NEAR contract pays the winner, and one command re-checks the ruling from outside.
 
-Status on 12 November 2026: running on NEAR testnet with test NEAR. The hosted app paid its first bet on a jury ruling: three models in NEAR AI enclaves agreed on a Coinbase price, Stated Court approved the ruling after its ten-minute window, and the escrow paid the winner. Both sides of that bet belong to the operator. Nobody outside the team has taken a bet yet; the offers below are open to anyone with an X account.
+Status on 13 November 2026: the hosted app runs on NEAR testnet with test NEAR. On 12 November it paid its first bet on a jury ruling: three models in NEAR AI enclaves agreed on a Coinbase price, Stated Court approved the ruling after its ten-minute window, and the escrow paid the winner. Both sides of that bet belong to the operator.
+
+Others have since bet on testnet. The [home page](https://stated-production.up.railway.app/) counter reads "18 bets, 6 settled, 0.84 test NEAR won, 3 bets taken by people outside the team" (read at 17:10 UTC on 13 November). Two of those are [`0bf4f3a7`](https://stated-production.up.railway.app/bets/0bf4f3a7-8dfc-44e2-a139-1e33ce844178) and [`009ce5b5`](https://stated-production.up.railway.app/bets/009ce5b5-8b52-4f38-9117-96ae0e1a1b43): each was offered by @ChainAbstracted and its bet page shows @General_Illia on the other side, 0.1 test NEAR each. The first settled at its deadline, 16:00 UTC on 13 November: Coinbase NEAR-USD traded at US$3.5052, all three models said yes (98%, 99% and 95%), Stated Court let the ruling stand for ten minutes and the escrow paid @ChainAbstracted the 0.2 test NEAR pot ([ruling](https://stated-production.up.railway.app/bets/0bf4f3a7-8dfc-44e2-a139-1e33ce844178/ruling)). The second is due at 16:00 UTC on 14 November. The count is the app's own; this README does not say who runs any X account.
+
+Mainnet, 13 November 2026: `escrow.statedforecast.near` is live with zero access keys (mainnet RPC `view_access_key_list`). It has settled one pilot round by mutual agreement: `pilot-a.statedforecast.near` created bet `15212c45-047a-4552-ba83-8adea874fd3f` and `pilot-b.statedforecast.near` accepted it, 0.01 NEAR each; `pilot-a` proposed yes, `pilot-b` confirmed it, and `pilot-a` withdrew its 0.02 NEAR credit, all between 03:12 and 03:15 UTC (`get_bet` returns `status: settled`, `resolution.method: agreement`, `referee: null`). No referee or jury took part. The OutLayer referee is built, and on testnet its jury and the full call chain ran up to the missing NEAR AI key ([docs/OUTLAYER.md](docs/OUTLAYER.md), [evidence/outlayer-testnet-referee-20261113.json](evidence/outlayer-testnet-referee-20261113.json), [evidence/outlayer-testnet-probe-20261113.json](evidence/outlayer-testnet-probe-20261113.json)). It is not yet deployed on mainnet.
 
 | | |
 | --- | --- |
@@ -31,7 +54,7 @@ Each step says what to do and what you should see. Steps 1 to 6 need no X accoun
 
 ## Take a live bet
 
-These are real offers on X, each funded in a NEAR testnet escrow. Open a link with your own X account and post the reply it prepares; Stated makes you a NEAR account and funds your 0.1 test NEAR stake, so no wallet is needed. The offers were posted by the operator's account, @ChainAbstracted; whoever takes the other side is the first person outside the team to bet.
+These are real offers on X, each funded in a NEAR testnet escrow. Open a link with your own X account and post the reply it prepares; Stated makes you a NEAR account and funds your 0.1 test NEAR stake, so no wallet is needed. The offers were posted by the operator's account, @ChainAbstracted. The first two rows below (13 and 14 November) have since been taken, so their links no longer work; the home page lists the offers still open.
 
 | Decides | The claim | Referee | Take it | Bet page |
 | --- | --- | --- | --- | --- |
@@ -239,11 +262,11 @@ All code was written during the hackathon. Work began on 5 November 2026 in a wo
 | Full-suite tests/pass/fail/skip counts, duration, commit and runtime versions | Latest full-suite record linked in **Tests**; `node scripts/record-test-run.mjs` creates it from the actual PostgreSQL-backed runner output |
 | Local ports 4310 / 4311 / 8080, zero demo delay and Docker PostgreSQL version | [Demo Compose](compose.yaml), [demo walkthrough](docs/DEMO.md), verifier Docker command in **Verify a ruling yourself** |
 | Video date/name, 0.4 demo payout, earlier live Court's two bets | [Demo run](evidence/hackathon-demo-20261111.json), [video](docs/stated-demo-70s.mp4), [earlier Court check](evidence/court-live-2026-11-12.json) |
-| Repository history's 11 November start | `git log --reverse --format='%aI %h'`; pre-git origin and absence of outside participants are the author's account, not independently established by the receipts |
+| Repository history's 11 November start | `git log --reverse --format='%aI %h'`; pre-git origin is the author's account, and who is behind each X account that bet is not established by the receipts |
 
 ## Limits
 
-The hosted payout records demonstrate functionality with operator-controlled participants and test NEAR, which has no monetary value; no one outside the team has taken a bet yet. One bet has been settled through the relay by the hosted app, `3668aa04`, and both of its sides belong to the operator. The council is one operator account. The server holds unclaimed managed-account keys; claiming an account replaces the server's key with the owner's. Testnet cross-chain quotes are NEAR Intents dry runs and move no funds. The mainnet pilot is allowlisted and has not run; mainnet payout, live cross-chain funding and mobile wallet handoff remain unverified.
+The hosted payout records demonstrate functionality with operator-controlled participants and test NEAR, which has no monetary value; the home page counts three bets taken by people outside the team (two of them still open on 13 November), and who runs those accounts is not established here. One bet has been settled through the relay by the hosted app, `3668aa04`, and both of its sides belong to the operator. The council is one operator account. The server holds unclaimed managed-account keys; claiming an account replaces the server's key with the owner's. Testnet cross-chain quotes are NEAR Intents dry runs and move no funds. On mainnet one pilot round settled by mutual agreement, with no referee, and the OutLayer referee is not deployed there; a mainnet referee ruling, live cross-chain funding and mobile wallet handoff remain unverified.
 
 ## AI assistance
 

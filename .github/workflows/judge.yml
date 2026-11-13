@@ -1,0 +1,70 @@
+name: Judge
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '17 8 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      - run: npm run verify:offline
+      - run: npm run test:judge
+
+  rust:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        manifest:
+          - contracts/outlayer-referee/Cargo.toml
+          - outlayer/stated-jury/Cargo.toml
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.93.1
+      - run: cargo test --locked --manifest-path "${{ matrix.manifest }}"
+
+  mainnet:
+    if: >-
+      github.event_name == 'schedule' &&
+      vars.JUDGE_REFEREE != '' && vars.JUDGE_REFEREE_SHA256 != '' &&
+      vars.JUDGE_JURY_SHA256 != '' && vars.JUDGE_WASM_URL != '' &&
+      vars.JUDGE_SECRETS_OWNER != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      JUDGE_REFEREE: ${{ vars.JUDGE_REFEREE }}
+      JUDGE_REFEREE_SHA256: ${{ vars.JUDGE_REFEREE_SHA256 }}
+      JUDGE_JURY_SHA256: ${{ vars.JUDGE_JURY_SHA256 }}
+      JUDGE_WASM_URL: ${{ vars.JUDGE_WASM_URL }}
+      JUDGE_SECRETS_OWNER: ${{ vars.JUDGE_SECRETS_OWNER }}
+      JUDGE_SECRETS_PROFILE: ${{ vars.JUDGE_SECRETS_PROFILE }}
+      JUDGE_BET_ID: ${{ vars.JUDGE_BET_ID }}
+      JUDGE_SETTLEMENT_TX: ${{ vars.JUDGE_SETTLEMENT_TX }}
+      JUDGE_SETTLEMENT_SIGNER: ${{ vars.JUDGE_SETTLEMENT_SIGNER }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      - run: npm run judge -- --outlayer --network mainnet --save judge-outlayer-mainnet.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: judge-outlayer-mainnet
+          path: judge-outlayer-mainnet.json
+          if-no-files-found: warn

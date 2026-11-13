@@ -24,7 +24,7 @@ const MAX_DEPOSIT = 1010000000000000000000000n;
 const MAX_RESPONSE = 1024 * 1024;
 const D = Decimal.clone({ precision: 100 });
 const METHODS = new Set(['create_bet', 'accept_bet', 'cancel_bet', 'expire_bet', 'propose_outcome', 'confirm_outcome', 'dispute_outcome',
-  'finalize_unanswered', 'refund_unresolved', 'withdraw']);
+  'finalize_unanswered', 'refund_unresolved', 'withdraw', 'submit_evidence']);
 
 function account(value, contract = false) {
   if (!(contract ? isNamedAccount(value) : isAccount(value))) throw new Error(`Invalid ${network().id} account`);

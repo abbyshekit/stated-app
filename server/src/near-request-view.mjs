@@ -14,6 +14,7 @@ const ACTIONS = {
   dispute_outcome: 'Dispute result',
   finalize_unanswered: 'Let the result stand',
   refund_unresolved: 'Reclaim stake',
+  submit_evidence: 'Submit evidence',
 };
 const STATUS = { pending: 'Pending verification', failed: 'Transaction failed', succeeded: 'Transaction confirmed' };
 
@@ -24,7 +25,9 @@ export async function latestWalletRequests(db, config, user, betId) {
   return db.many(`select distinct on (method) id, method, wallet_account,
     execution_status, execution_message, transaction_hash
     from bilateral_near_requests where bet_id=$1 and user_id=$2
-    and metadata->>'contract'=$3 and method=any($4::text[])
+    and (metadata->>'contract'=$3 or (method='submit_evidence' and metadata->>'contract'=
+      (select referee_wallet from bilateral_bets where id=$1 and outlayer_material is not null)))
+    and method=any($4::text[])
     order by method, created_at desc, id desc`, [betId, user.id, config.nearContract, Object.keys(ACTIONS)]);
 }
 

@@ -1,4 +1,6 @@
-// Small conveniences for payments and shared Bet links.
+// Small conveniences for payments and shared Bet links. A page may include this script from two folds.
+if (!globalThis.statedPayEnhanced) {
+globalThis.statedPayEnhanced = true;
 //
 // DESIGN.md: preserve the server's complete UTC timestamps, including post times.
 // The cost shown on the form is for the amount and token it opened with. Change either and it goes,
@@ -69,4 +71,37 @@ for (const button of document.querySelectorAll('button[data-copy]')) {
       if (status) status.textContent = '';
     }, 1800);
   });
+}
+
+// DESIGN.md: update persisted balance text in place; keep the account selectable when copying fails.
+for (const panel of document.querySelectorAll('[data-funding]')) {
+  const button = panel.querySelector('[data-refresh-balance]');
+  const balance = panel.querySelector('[data-funding-balance]');
+  const missing = panel.querySelector('[data-funding-missing]');
+  const status = panel.querySelector('[data-funding-status]');
+  const account = panel.querySelector('#funding-account');
+  if (!button || !balance || !missing || !status || !account) continue;
+  let pending = false;
+  const refresh = async () => {
+    if (pending) return;
+    pending = true; button.disabled = true;
+    try {
+      const response = await fetch(`/me/wallet/balance?need=${encodeURIComponent(panel.dataset.neededYocto)}`, {
+        credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(8000),
+      });
+      if (!response.ok) throw new Error('Balance unavailable');
+      const value = await response.json();
+      if (value.accountId !== account.textContent || value.neededYocto !== panel.dataset.neededYocto
+        || !/^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/.test(value.balanceNear)
+        || !/^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/.test(value.missingNear)) throw new Error('Invalid balance');
+      balance.textContent = `${value.balanceNear} NEAR`;
+      missing.textContent = `${value.missingNear} NEAR`;
+      status.textContent = value.missingNear === '0' ? 'Balance updated. You can return to the bet.' : 'Balance updated.';
+    } catch { status.textContent = 'Balance could not be refreshed. Retry the balance check.'; }
+    finally { pending = false; button.disabled = false; }
+  };
+  button.hidden = false;
+  button.addEventListener('click', refresh);
+  setInterval(() => { if (!document.hidden) void refresh(); }, 10000);
+}
 }

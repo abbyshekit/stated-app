@@ -635,6 +635,28 @@ async function runPlan(ctx, material) {
   throw new Error('No model returned a valid plan.');
 }
 
+// Creation commits this one server decision; the OutLayer worker never replans it.
+// A post's existing plan is reusable only for the same claim, dates and source.
+export async function planForOutlayerCreation(db, config, input, { sourceSaveId, fetchImpl = fetch } = {}) {
+  const material = makeMaterial({ ...input, bets: [] });
+  if (sourceSaveId) {
+    const saved = await db.one(`select p.record from saves s join enclave_plans p on p.statement_id=s.statement_id
+      where s.id=$1`, [sourceSaveId]);
+    if (saved?.record) {
+      try {
+        const previous = planMaterial(saved.record);
+        if (['claim', 'madeAt', 'deadline', 'postUrl'].every(key => previous[key] === material[key])) {
+          verifyPlan(saved.record, previous, config.nearai?.quoteRoots);
+          return saved.record;
+        }
+      } catch { /* Invalid or unrelated saved plans cannot choose committed terms. */ }
+    }
+  }
+  const models = [...new Set(config.nearai?.rulingModels || [])];
+  if (!config.nearai?.apiKey || !models.length) fail('Configure the server evidence planner before creating an OutLayer bet.');
+  return runPlan({ config, models, fetchImpl, report() {} }, material);
+}
+
 // Closed candles only: a candle plan is ready a minute after its window ends.
 // The window is never clamped to the part that has closed.
 const CLOSED = `(p.record->'parsed'->>'end')::timestamptz <= $1::timestamptz - interval '60 seconds'`;

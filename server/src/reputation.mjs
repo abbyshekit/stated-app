@@ -25,6 +25,20 @@ export function parseReputationTiers(value = DEFAULT_TIERS) {
 const tiersFor = (config) => config.play?.reputationTiers === undefined
   ? parseReputationTiers() : config.play.reputationTiers;
 
+/** Mainnet's operator cap also applies when reputation limits are disabled. */
+export const stakeCap = (config) => config.near?.real ? D.min(config.play?.maxStakeNear ?? '1', 1).toFixed() : '1';
+export const stakeCapReply = (config) => `The mainnet stake cap is ${stakeCap(config)} NEAR per bet. Choose a stake at or below that cap.`;
+
+export function assertMainnetStakeCap(config, stakeNear) {
+  if (config.near?.real && new D(stakeNear).lt('0.1')) {
+    throw Object.assign(new UserError('The minimum mainnet stake is 0.1 NEAR. Choose at least 0.1 NEAR.', 409),
+      { reason: 'minimum', limit: '0.1' });
+  }
+  if (config.near?.real && aboveLimit(stakeNear, stakeCap(config))) {
+    throw Object.assign(new UserError(stakeCapReply(config), 409), { reason: 'cap', limit: stakeCap(config) });
+  }
+}
+
 /** Internal user ID, bound to an X account. EXISTS avoids counting command retries twice. */
 export async function recordFor(db, userId) {
   return db.one(`select count(*)::int as settled,
@@ -38,9 +52,9 @@ export async function recordFor(db, userId) {
 
 export function limitFor(config, record) {
   const tiers = tiersFor(config);
-  if (!tiers) return '1';
+  if (!tiers) return stakeCap(config);
   const tier = tiers.findLast((item) => record.settled >= item.settled) || tiers[0];
-  return D.min(tier.limit, 1).toFixed();
+  return D.min(tier.limit, stakeCap(config)).toFixed();
 }
 
 export const aboveLimit = (stakeNear, limit) => new D(stakeNear).gt(limit);
@@ -48,6 +62,7 @@ const countWords = (count) => count === 3 ? 'three' : String(count);
 
 export function limitHint(config, record) {
   const limit = limitFor(config, record);
+  if (config.near?.real && limit === stakeCap(config)) return stakeCapReply(config);
   const next = tiersFor(config)?.find((tier) => tier.settled > record.settled && aboveLimit(tier.limit, limit));
   if (!next) return null;
   const until = next.settled === 1 ? 'a bet' : `${countWords(next.settled)} bets`;
@@ -55,17 +70,18 @@ export function limitHint(config, record) {
 }
 
 export function limitReply(config, limit) {
-  const rises = (tiersFor(config) || []).slice(1).map((tier, i) => {
+  const rises = (tiersFor(config) || []).slice(1).filter((tier) => !aboveLimit(tier.limit, stakeCap(config))).map((tier, i) => {
     const after = tier.settled === 1 ? 'a settled bet' : countWords(tier.settled);
     return `${i ? 'to ' : ''}${tier.limit} after ${after}`;
   });
   const last = rises.pop();
   const progression = last ? ` The limit rises to ${rises.length ? `${rises.join(', ')} and ${last}` : last}.` : '';
-  return `New handles can stake up to ${limit} ${unit()}.${progression}`;
+  return `New handles can stake up to ${limit} ${unit()}.${progression}${config.near?.real ? ` ${stakeCapReply(config)}` : ''}`;
 }
 
 /** Call before account provisioning in replies and before reserving any new stake request. */
 export async function assertStakeLimit(db, config, userId, stakeNear) {
+  assertMainnetStakeCap(config, stakeNear);
   if (!tiersFor(config)) return;
   const limit = limitFor(config, await recordFor(db, userId));
   if (aboveLimit(stakeNear, limit)) {

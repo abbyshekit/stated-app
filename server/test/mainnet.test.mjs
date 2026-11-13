@@ -9,11 +9,14 @@
 import test, { after, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { startStack } from './support/app.mjs';
-import { FakeNear } from './support/fake-near.mjs';
+import { FakeOutLayerNear, outlayerDeadlineMs } from './support/fake-outlayer.mjs';
+import { enclaveEnv, fakeNearAi } from './support/enclave.mjs';
+import { outlayerTestFetch } from './support/outlayer-fetch.mjs';
+import { runOutlayerKeeper } from '../src/outlayer.mjs';
 import { assertNetworkConfig, loadConfig } from '../src/config.mjs';
 import { refreshOpenDeposits } from '../src/funding.mjs';
 import { isAccount, network } from '../src/near-network.mjs';
-import { assertDatabaseNetwork, claimPlayAccount, ensureFunds, playAccountFor, shortfall, topUpReferee, yocto } from '../src/play.mjs';
+import { assertDatabaseNetwork, claimPlayAccount, ensureFunds, playAccountFor, referee, shortfall, topUpReferee, yocto } from '../src/play.mjs';
 import { prepareNearAction } from '../src/near-bets.mjs';
 import { runBetCommands, settleReplyBets } from '../src/reply-bets.mjs';
 import { createApp } from '../src/web.mjs';
@@ -22,9 +25,11 @@ import { tick } from '../src/worker.mjs';
 const NEXT = new Date().getUTCFullYear() + 1;
 const TREASURY = 'stated.near';
 const NEAR = (n) => BigInt(yocto(n));
-let s; let near; let X; let adminB;
-const run = () => runBetCommands(s.db, s.config, near.chain, { fetchImpl: near.fetchImpl, botUsername: 'statedbot' });
-const settle = () => settleReplyBets(s.db, s.config, near.chain, { fetchImpl: near.fetchImpl });
+let s; let near; let X;
+const ai = fakeNearAi({ respond: () => ({ source: 'evidence' }) });
+const fetchImpl = outlayerTestFetch({ ai, near: () => near, xBase: () => s?.fakeX.base });
+const run = () => runBetCommands(s.db, s.config, near.chain, { fetchImpl, botUsername: 'statedbot' });
+const settle = () => settleReplyBets(s.db, s.config, near.chain, { fetchImpl });
 const one = (sql, params) => s.db.one(sql, params);
 const botPosts = () => [...s.fakeX.posts.values()].filter((p) => p.author_id === '500');
 const repliesTo = (id) => botPosts().filter((p) => (p.referenced_tweets || []).some((r) => r.id === id)).map((p) => p.text.replace(/^(@\w+ )+/, ''));
@@ -63,23 +68,23 @@ const intents = {
 };
 
 const MAINNET = {
+  ...enclaveEnv, STATED_ENCLAVE_RULINGS: '', STATED_OUTLAYER_REFEREE: 'jury.stated.near',
   STATED_NEAR_NETWORK: 'mainnet', STATED_MAINNET: 'real-funds', STATED_TOKEN_KEY: 'k'.repeat(44),
   STATED_NEAR_CONTRACT: 'escrow.stated.near', STATED_PLAY: '1', STATED_PLAY_TREASURY: TREASURY, STATED_PLAY_TREASURY_KEY: 'ed25519:test-treasury-secret',
   STATED_PILOT_X_IDS: '7001,7002,7004', STATED_INTENTS_QUOTES: '1', STATED_INTENTS_DEPOSITS: '1', STATED_PLAY_SETTLE_DELAY_SECONDS: '0',
 };
 
 before(async () => {
-  near = new FakeNear({ contract: 'escrow.stated.near' });
+  near = new FakeOutLayerNear({ contract: 'escrow.stated.near', referee: 'jury.stated.near' });
+  Object.assign(near.outlayers.get(near.referee).config, { outlayer: 'outlayer.near', secrets_owner: 'sponsor.near' });
   near.chain.depositDelivery = async ({ transactionHash, accountId }) => {
     const delivery = deliveries.get(transactionHash);
     return delivery?.accountId === accountId ? delivery : null;
   };
   near.accounts.set(TREASURY, { balance: NEAR('10'), keys: new Set(['ed25519:treasury']) });
-  s = await startStack(MAINNET, { fetchImpl: near.fetchImpl, chain: near.chain, intents });
+  s = await startStack(MAINNET, { fetchImpl, chain: near.chain, intents });
   await s.connectBot(s.fakeX.addUser('500', 'statedbot'));
   X = Object.fromEntries(['oskar', 'priya', 'walkin', 'lena'].map((name, i) => [name, s.fakeX.addUser(String(7001 + i), name)]));
-  adminB = await s.signIn(s.fakeX.addUser('900', 'reviewer'));
-  await adminB.submit('/setup', { profile: 'private', defaults: 'private' });
 });
 after(async () => { await s?.close(); });
 
@@ -90,8 +95,8 @@ test('the browser wallet cannot prepare a real stake outside the pilot list', as
 });
 
 test('the fee grant cannot fund even a small real stake', async () => {
-  const account = { account_id: 'new.stated.near', granted_yocto: yocto('0.15') };
-  const chain = { balance: async () => yocto('0.15'), callFunds: async () => ({ balance: NEAR('0.15'), reserve: NEAR('0.10682') }) };
+  const account = { account_id: 'new.stated.near', granted_yocto: yocto('0.05') };
+  const chain = { balance: async () => yocto('0.05'), callFunds: async () => ({ balance: NEAR('0.05'), reserve: NEAR('0.01') }) };
   assert.equal(await shortfall(s.config, chain, account, yocto('0.00001')), yocto('0.00001'));
   assert.equal(await shortfall(s.config, { ...chain, callFunds: async () => ({ balance: NEAR('0.13'), reserve: NEAR('0.10682') }) }, account, '0'), '0',
     'withdrawing requires a fee reserve, even if fees have eaten into the original grant');
@@ -148,18 +153,17 @@ test('someone who is not on the list gets no account and one plain answer', asyn
 });
 
 test('a listed person gets an account with network fees only, and a stake they have not paid in is refused with the way to add it', async () => {
-  // The first real command also makes the referee account, which is the operator's own cost.
-  const before = held(TREASURY) - NEAR('0.3');
+  const before = held(TREASURY);
   firstTry = tag(X.oskar, '@statedbot bet 0.2 no', post);
   await tick(s.db, s.config, s.x);
   assert.deepEqual(await run(), { done: 0, refused: 1, retry: 0, failed: 0 });
   const id = await accountOf(X.oskar);
   assert.equal(id, 'oskar.stated.near');
   assert.equal(held(id), NEAR('0.05'), 'enough for fees, not for a stake');
-  assert.equal(held('referee.stated.near'), NEAR('0.3'));
+  assert.equal(near.accounts.has('referee.stated.near'), false, 'new mainnet bets never allocate a direct signing referee');
   assert.equal(before - held(TREASURY), NEAR('0.05'), 'and that is all the treasury paid toward the person');
   await tick(s.db, s.config, s.x);
-  assert.deepEqual(repliesTo(firstTry.id), [`Your account does not hold enough NEAR for that stake yet. Add some from any chain: ${s.config.baseUrl}/me/wallet`]);
+  assert.deepEqual(repliesTo(firstTry.id), [`Your account does not hold enough NEAR for that stake yet. Send NEAR from any exchange or wallet: ${s.config.baseUrl}/me/wallet?need=${yocto('0.21')}`]);
   assert.equal(near.bets.size, 0, 'nothing reached the escrow');
   const offer = await one(`select status from bilateral_bets order by created_at desc limit 1`);
   assert.equal(offer.status, 'cancelled', 'the unfunded offer does not linger');
@@ -170,9 +174,11 @@ let oskarB; let firstPayment;
 test('the wallet page takes a payment from another chain: an amount, a token and the address it will come from', async () => {
   oskarB = await s.signIn(X.oskar);
   const wallet = await oskarB.get('/me/wallet');
-  assert.match(wallet.text, /<p class="lead bal"><span class="tok md"><img src="\/static\/tokens\/chain-near\.png\?v=[0-9a-f]{10}" alt="" width="32" height="32"><\/span>0\.05 NEAR<span><\/span><\/p>/);
+  assert.match(wallet.text, /data-funding-balance>0\.05 NEAR/);
   // A logo is served from this origin, as a PNG that may be kept; anything not in the set is not found.
-  const logo = await s.browser().get(/src="(\/static\/tokens\/chain-near\.png\?v=[0-9a-f]{10})"/.exec(wallet.text)[1]);
+  const logoPath = /src="(\/static\/tokens\/chain-base\.png\?v=[0-9a-f]{10})"/.exec(wallet.text)?.[1];
+  assert.ok(logoPath, 'the selected payment token shows its chain logo');
+  const logo = await s.browser().get(logoPath);
   assert.equal(logo.status, 200);
   assert.equal(logo.headers.get('content-type'), 'image/png');
   assert.match(logo.headers.get('cache-control'), /immutable/);
@@ -293,7 +299,7 @@ test('NEAR that arrives wrapped is unwrapped, and the page stops asking', async 
   assert.match(after.text, /<a class="pill solid big" href="\/me\/wallet\?add#add">Add NEAR from another chain<\/a>/);
   assert.doesNotMatch(after.text, /id="add-refund"/);
   assert.match((await oskarB.get('/me/wallet?add')).text, /id="add-refund"/);
-  assert.match(after.text, /<p class="lead bal"><span class="tok md"><img [^>]*><\/span>0\.55 NEAR<span><\/span><\/p>/);
+  assert.match(after.text, /data-funding-balance>0\.54875 NEAR/);
   assert.match(after.text, /<summary>Past payments<\/summary><ul class="pays past"><li><a href="\/me\/wallet\/pay\/[0-9a-f-]{36}"><span class="tok"><img [^>]*><img class="on" [^>]*><\/span><b>0\.5 NEAR with USDC on Base<\/b><span>In your account<\/span>/, 'a finished payment is kept behind one row');
 });
 
@@ -384,14 +390,14 @@ test('with their own NEAR in the account, the same reply funds the bet, and the 
   assert.deepEqual(repliesTo(offerCmd.id), [`0.2 NEAR says this does not happen by 28 Feb ${NEXT}. To take the other side, reply here with "@statedbot take".`]);
 });
 
-test('the other side opens an account on the site, sends NEAR straight to it, takes the bet and is paid when right', async () => {
+test('the other side opens an account on the site, sends NEAR straight to it, takes the bet and receives the OutLayer payout', async (t) => {
   const priyaB = await s.signIn(X.priya);
   const empty = await priyaB.get('/me/wallet');
   assert.match(empty.text, /Open my account/);
   assert.match(empty.text, /<p class="say">priya\.stated\.near<\/p>/, 'the name the account will have, before it is opened');
   assert.match(empty.text, /It holds real NEAR/);
   const opened = await priyaB.submit('/me/wallet/open', {}, { from: '/me/wallet' });
-  assert.match(opened.text, /<p class="lead bal"><span class="tok md"><img [^>]*><\/span>0\.05 NEAR<span><\/span><\/p>/);
+  assert.match(opened.text, /data-funding-balance>0\.05 NEAR/);
   assert.match(opened.text, /Add NEAR from a NEAR wallet/);
   const id = await accountOf(X.priya);
   assert.equal(id, 'priya.stated.near');
@@ -411,13 +417,17 @@ test('the other side opens an account on the site, sends NEAR straight to it, ta
   assert.doesNotMatch(bet.text, /test NEAR|testnet/, 'nothing on a mainnet page calls the stake test NEAR');
   assert.doesNotMatch(bet.text, /Cross-chain quote|Pay from another chain/, 'an accepted Bet cannot ask a visitor to fund the open seat');
 
-  const st = await one(`select st.id from statements st join sources src on src.id = st.source_id where src.platform_id = $1`, [post.id]);
-  await adminB.submit(`/admin/resolve/${st.id}`, { outcome: 'yes', url: 'https://example.org/evidence', note: 'Release 2.0.0 is tagged.', known: new Date().toISOString().slice(0, 10) }, { from: '/admin' });
+  const stored = await one('select * from bilateral_bets where id=$1', [betId]);
+  assert.equal(stored.referee_wallet, near.referee);
+  assert.ok(stored.outlayer_material, 'mainnet creation commits the OutLayer reveal');
+  t.mock.timers.enable({ apis: ['Date'], now: outlayerDeadlineMs(stored) + stored.outlayer_material.evidence.window_seconds * 1000 + 1 });
+  near.queueRuling(betId, { outcome: 'yes' });
+  assert.equal((await runOutlayerKeeper(s.db, s.config, { chain: near.chain, fetchImpl })).errors, 0);
+  assert.equal(near.bets.get(betId).status, 'settled');
   const before = held(id);
   const result = await settle();
   assert.equal(result.errors, 0);
   await tick(s.db, s.config, s.x);
-  assert.deepEqual(repliesTo(offerCmd.id).slice(1), ['It happened. @priya wins the 0.4 NEAR pot.']);
   assert.equal(held(id) - before, NEAR('0.4'), 'the pot is in the winner’s account');
   const paid = await priyaB.get(`/bets/${betId}`);
   assert.match(paid.text, /Paid to your account\. <a class="tl" href="https:\/\/nearblocks\.io\/txns\/[1-9A-HJ-NP-Za-km-z]+"/, 'the payout links to the mainnet explorer');
@@ -434,14 +444,15 @@ test('an account its owner has taken is paid into from their own wallet, not thr
   await claimPlayAccount(s.db, s.config, near.chain, X.priya.id, 'ed25519:8hSHprDq2StXwMtNd43wDTXQYsjXcD4MJTXQYsjXcc5');
   const priyaB = await s.signIn(X.priya);
   const wallet = await priyaB.get('/me/wallet');
-  assert.match(wallet.text, /<span>yours<\/span>/);
+  assert.match(wallet.text, /You hold the only key\./);
   assert.doesNotMatch(wallet.text, /Add NEAR from another chain/);
   const res = await priyaB.submit('/me/wallet/pay', { near: '0.5', pay: 'nep141:base-usdc.omft.near', refundTo: '0x1111111111111111111111111111111111111111' }, { from: '/me/wallet' });
   assert.equal(res.status, 409);
   assert.match(res.text, /Send NEAR to it from your own wallet/);
 });
 
-test('the referee refills below the actual call reserve and stops once funded', async () => {
+test('an existing legacy referee refills below the actual call reserve and stops once funded', async () => {
+  await referee(s.db, s.config, near.chain);
   const id = 'referee.stated.near';
   near.accounts.get(id).balance = NEAR('0.103');
   const before = held(TREASURY);
@@ -515,10 +526,15 @@ test('a Bet link carries a new user through wallet setup and sufficient funding 
   assert.equal((await lenaB.submit(path + '/take', { termsHash: 'wrong', publicConsent: '1' }, { from: take })).status, 409);
   assert.equal(near.bets.get(ref).status, 'offered');
   const treasuryBefore = held(TREASURY);
+  const sentBefore = near.sent.length;
   const accepted = await lenaB.submit(path + '/take', { termsHash, publicConsent: '1' }, { from: take });
   assert.match(accepted.text, /Both sides are in/);
   assert.equal(near.bets.get(ref).acceptor, account);
-  assert.equal(held(TREASURY), treasuryBefore);
+  // The treasury pays the referee's registration of the claim, never any part of the stake.
+  const fromTreasury = near.sent.slice(sentBefore).filter((request) => request.signerId === TREASURY);
+  assert.deepEqual(fromTreasury.map((request) => request.method), ['register_material']);
+  const spent = treasuryBefore - held(TREASURY);
+  assert.ok(spent > 0n && spent <= BigInt(fromTreasury[0].depositYocto), 'the treasury paid for registration storage only');
   const requests = near.sent.filter((request) => request.method === 'accept_bet' && request.args.id === ref);
   assert.equal(requests.length, 1);
   await lenaB.submit(path + '/take', { termsHash, publicConsent: '1' }, { from: take });

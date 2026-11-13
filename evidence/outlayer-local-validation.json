@@ -1,0 +1,284 @@
+{
+  "observed_at": "2026-11-13T06:43:42.945Z",
+  "status": "PASS",
+  "live_execution_verified": false,
+  "network_calls": "none by this runner; dependency reads are offline",
+  "reproducibility": {
+    "source_checkouts": 2,
+    "different_checkout_path_lengths": true,
+    "cargo_homes": 2,
+    "target_directories": 2,
+    "raw_byte_identical": true,
+    "byte_identical": true,
+    "local_path_scan": "PASS",
+    "referee_max_bytes": 300000,
+    "near_host_imports": "PASS"
+  },
+  "rustc": "rustc 1.93.1 (01f6ddf75 2026-02-11)",
+  "artifacts": [
+    {
+      "path": "outlayer/stated-jury/target/reproducible/wasm32-wasip2/release/stated-jury.wasm",
+      "raw_bytes": 845087,
+      "raw_sha256": "85198c7afbfca6ad6cb42c76fe064abdf480d18f4db4955b90ce205d768d9791",
+      "bytes": 845087,
+      "sha256": "85198c7afbfca6ad6cb42c76fe064abdf480d18f4db4955b90ce205d768d9791"
+    },
+    {
+      "path": "contracts/outlayer-referee/target/reproducible/wasm32-unknown-unknown/release/stated_outlayer_referee.wasm",
+      "raw_bytes": 366450,
+      "raw_sha256": "060afd90241448ac48fa6f55cc0c0e1f28a9aa7bb82305e28c4df388aeec1670",
+      "bytes": 296163,
+      "sha256": "1f6b35b9fce99165af5090ff04d4ff6493933ec90ab3c0a37a532255bf46ed83"
+    }
+  ],
+  "commands": [
+    {
+      "command": "cargo",
+      "args": [
+        "test",
+        "--offline",
+        "--locked",
+        "--manifest-path",
+        "outlayer/stated-jury/Cargo.toml"
+      ],
+      "cwd": "<repo>/",
+      "exit_code": 0,
+      "output": "\nrunning 69 tests\ntest budget::tests::late_evidence_cannot_spend_reserved_jury_time ... ok\ntest budget::tests::planner_fallbacks_share_thirty_seconds ... ok\ntest budget::tests::an_expired_stage_cannot_be_restarted ... ok\ntest budget::tests::minimum_stage_time_is_required ... ok\ntest budget::tests::stages_preserve_the_run_reserve ... ok\ntest budget::tests::late_stages_fail_before_starting_requests ... ok\ntest evidence::regressions::evidence_decodes_stray_9d_lossily ... ok\ntest core_url::tests::lean_url_policy_rejects_idna_and_numeric_host_evasions ... ok\ntest evidence::regressions::r7_header_foreign_self_closing_children_preserve_article ... ok\ntest evidence::regressions::r7_discarded_content_stays_excluded_after_implied_descendant_closes ... ok\ntest evidence::regressions::evidence_raw_prefix_stops_at_cap_and_decodes_split_utf8 ... ok\ntest evidence::regressions::r7_discarded_end_tags_close_unclosed_descendants ... ok\ntest core_url::tests::every_core_accepted_url_is_accepted_by_runner ... ok\ntest evidence::regressions::redirects_resolve_chain_and_reject_unsafe_missing_and_sixth_hops ... ok\ntest material_decode::tests::evidence_wire_variants_allow_any_key_order ... ok\ntest material_decode::tests::price_window_wire_preserves_variants_and_rejects_invalid_shapes ... ok\ntest material_decode::tests::evidence_wire_rejects_duplicate_unknown_missing_and_mistyped_fields ... ok\ntest r5_tests::r5_form_keeps_visible_text_and_excludes_controls ... ok\ntest r5_tests::r5_main_content_precedes_leading_chrome ... ok\ntest evidence::regressions::implied_closes_do_not_escape_hidden_or_unclosed_nav_subtrees ... ok\ntest r5_tests::r5_no_readable_evidence_aborts_on_every_attempt ... ok\ntest tests::auto_without_price_plan_stops_before_jury ... ok\ntest r5_tests::r5_mixed_evidence_preserves_retry_policy ... ok\ntest tests::coinbase_fetch_failure_remains_hard_failure_on_every_attempt ... ok\ntest tests::committed_window_dates_reject_pre_epoch_and_beyond_deadline_day ... ok\ntest evidence::regressions::html_retained_text_is_bounded_per_scope ... ok\ntest tests::coverage_requires_ninety_percent_and_bounded_edges ... ok\ntest tests::completed_unclear_is_a_result_and_reason_limits_fail_closed ... ok\ntest tests::evidence_deadlines_cover_slow_body_drips_and_total_batch ... ok\ntest tests::evidence_response_policy_rejects_redirects_ambiguous_types_and_binary ... ok\ntest tests::decimal_prices_preserve_fractional_values ... ok\ntest tests::evidence_whitespace_matches_ecmascript ... ok\ntest tests::evidence_urls_allow_public_sources_and_reject_parser_evasions ... ok\ntest tests::execution_attempt_is_required_in_serialized_input ... ok\ntest tests::execution_attempt_rejects_zero_and_invalid_types_before_network ... ok\ntest tests::exhausted_unreadable_links_remain_infrastructure_failures ... ok\ntest tests::execution_sources_reject_wrong_mode_side_count_and_url_before_network ... ok\ntest tests::hash_is_fixed_order_and_changes_with_bet_terms ... ok\ntest tests::first_two_unreadable_executions_abort_before_jury ... ok\ntest tests::html_extraction_preserves_title_entities_and_visible_words ... ok\ntest tests::html_hidden_subtrees_and_malformed_closures_do_not_leak ... ok\ntest tests::malformed_verdict_is_infrastructure_failure ... ok\ntest tests::moment_uses_open_and_binds_material_policy_evidence ... ok\ntest r5_tests::r5_implied_closes_keep_long_documents_readable ... ok\ntest tests::open_candles_and_missing_duplicate_rows_fail_before_jury ... ok\ntest tests::open_evidence_has_strict_bounds_and_backward_compatible_execution_decode ... ok\ntest tests::planner_failure_and_noncanonical_material_stop_without_jury ... ok\ntest tests::open_evidence_orders_sources_and_keeps_material_projection_hash ... ok\ntest tests::planner_fallback_uses_first_valid_plan_then_one_jury ... ok\ntest tests::products_and_submitted_urls_cannot_choose_arbitrary_hosts ... ok\ntest tests::range_segments_round_clip_and_cover_exactly ... ok\ntest core_url::tests::punycode_mutations_preserve_core_runner_subset ... ok\ntest tests::result_byte_limit_rejects_oversize_json ... ok\ntest tests::result_attempt_is_required_positive_and_bound_without_changing_material_hash ... ok\ntest tests::self_closing_foreign_roots_preserve_following_visible_text ... ok\ntest tests::roster_order_duplicates_confidence_and_disagreement ... ok\ntest tests::submitted_requires_at_least_one_source ... ok\ntest tests::third_attempt_dead_link_does_not_abort_ruling_and_records_empty_hash ... ok\ntest tests::utc_grammar_and_unknown_fields_are_rejected ... ok\ntest tests::verdict_whitespace_matches_ecmascript ... ok\ntest tests::submitted_text_is_fetched_and_json_escaped ... ok\ntest tests::worst_case_result_fits_sixteen_kibibytes ... ok\ntest evidence::regressions::r7_inline_svg_chart_with_2000_self_closing_paths_stays_readable ... ok\ntest r5_tests::r5_lossy_body_expansion_is_not_an_oversize_source ... ok\ntest core_url::tests::core_acceptance_implies_runner_acceptance_for_ascii_boundary_corpus ... ok\ntest r5_tests::r5_evidence_body_cap_matches_server ... ok\ntest tests::html_metadata_and_budget_limits_fail_closed ... ok\ntest tests::batched_pages_are_extracted_and_hashed_in_input_order ... ok\ntest r5_tests::r5_maximum_evidence_batch_stays_bounded ... ok\n\ntest result: ok. 69 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.87s\n\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n   Compiling stated-jury v0.1.0 (<repo>/outlayer/stated-jury)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.84s\n     Running unittests src/lib.rs (outlayer/stated-jury/target/debug/deps/stated_jury-8b12477e71d2497c)\n     Running unittests src/main.rs (outlayer/stated-jury/target/debug/deps/stated_jury-1904e4de96e3002e)\n   Doc-tests stated_jury\n"
+    },
+    {
+      "command": "cargo",
+      "args": [
+        "clippy",
+        "--offline",
+        "--locked",
+        "--all-targets",
+        "--manifest-path",
+        "outlayer/stated-jury/Cargo.toml",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "cwd": "<repo>/",
+      "exit_code": 0,
+      "output": "    Checking stated-jury v0.1.0 (<repo>/outlayer/stated-jury)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.87s\n"
+    },
+    {
+      "command": "cargo",
+      "args": [
+        "fmt",
+        "--manifest-path",
+        "outlayer/stated-jury/Cargo.toml",
+        "--",
+        "--check"
+      ],
+      "cwd": "<repo>/",
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "command": "cargo",
+      "args": [
+        "test",
+        "--offline",
+        "--locked",
+        "--manifest-path",
+        "contracts/outlayer-referee/Cargo.toml"
+      ],
+      "cwd": "<repo>/",
+      "exit_code": 0,
+      "output": "\nrunning 78 tests\ntest tests::an_unclosed_candle_cannot_consume_failures - should panic ... ok\ntest tests::early_request_rejected - should panic ... ok\ntest tests::evidence_callback_cannot_be_forged - should panic ... ok\ntest tests::committed_material_cannot_change_claim_or_plan ... ok\ntest tests::deadline_fixture_matches_iso ... ok\ntest tests::chain_binding_checks_every_field ... ok\ntest tests::evidence_public_method_rejects_before_deadline - should panic ... ok\ntest tests::evidence_public_method_rejects_precommitted_only_bets - should panic ... ok\ntest tests::evidence_checks_escrow_and_captures_predecessor_not_signer ... ok\ntest tests::evidence_public_method_rejects_late_submission - should panic ... ok\ntest tests::evidence_public_method_rejects_x_before_reading_escrow - should panic ... ok\ntest tests::failed_execution_has_no_caller_refund_claim_on_another_bets_funds ... ok\ntest tests::eighth_failure_selects_void_and_next_request_rechecks_escrow ... ok\ntest tests::evidence_storage_shortfall_rolls_back_and_returns_all ... ok\ntest tests::evidence_assigns_escrow_side_charges_actual_storage_and_refunds_excess ... ok\ntest tests::failed_payment_keeps_outcome_for_retry ... ok\ntest tests::forged_public_callback_rejected - should panic ... ok\ntest tests::evidence_callback_read_failure_returns_deposit ... ok\ntest tests::evidence_callback_rechecks_closing_boundary_and_ruling_stage ... ok\ntest tests::open_ruling_rejects_before_window_close - should panic ... ok\ntest tests::open_commitment_binds_window_and_limit ... ok\ntest tests::print_terms_hash_vectors ... ok\ntest tests::evidence_callback_rejects_invalid_url_or_sequence_without_storage_growth ... ok\ntest tests::quote_cap_and_growth_reserve_cannot_be_spent ... ok\ntest tests::mock_outlayer_round_trip_builds_current_abi_and_pays ... ok\ntest tests::r3_accepting_older_result_preserves_request_nonce ... ok\ntest tests::r3_attempt_binding_rejects_valid_result_for_wrong_execution ... ok\ntest tests::r3_growth_reserve_covers_maximum_outstanding_and_result ... ok\ntest tests::r3_late_decisive_result_after_window_still_pays_selected_outcome ... ok\ntest tests::r3_attempt_counts_dispatches_not_requests_or_funding_failures ... ok\ntest tests::r3_old_failure_limit_invalidates_newer_pricing_before_void_retry ... ok\ntest tests::r3_older_unclear_invalidates_newer_running_callback ... ok\ntest tests::r3_older_unclear_enforces_fresh_retry_delay - should panic ... ok\ntest tests::r3_failure_limit_waits_for_outstanding_winner ... ok\ntest tests::r3_failed_payout_receipt_retries_winner_across_window ... ok\ntest tests::r3_only_dispatched_nonces_can_report ... ok\ntest tests::open_ruling_waits_until_close_and_forwards_committed_material_and_ordered_urls ... ok\ntest tests::r3_timeout_at_seven_failures_preserves_late_winner ... ok\ntest tests::r3_selected_yes_no_retry_payout_after_refund_window ... ok\ntest tests::evidence_cap_is_per_side_and_callbacks_preserve_invocation_order ... ok\ntest tests::r4_no_returns_unused_storage_reserve ... ok\ntest tests::r4_paid_evidence_does_not_consume_registration_reserve ... ok\ntest tests::r4_failed_settlement_preserves_reserve_and_success_is_idempotent ... ok\ntest tests::r4_refund_preserves_other_rulings_and_pending_deposits ... ok\ntest tests::r4_yes_returns_unused_storage_reserve ... ok\ntest tests::r6_empty_open_preserves_binding_selected_outcomes_and_seven_day_refund ... ok\ntest tests::r4_outstanding_growth_and_error_storage_are_reserved_exactly ... ok\ntest tests::regression_config_advertises_open_evidence_and_actual_timeout ... ok\ntest tests::r6_non_open_modes_with_no_onchain_links_still_price ... ok\ntest tests::registration_requires_chain_commitment_and_referee ... ok\ntest tests::r6_one_open_link_still_prices_and_dispatches ... ok\ntest tests::regression_moment_nanoseconds_saturate ... ok\ntest tests::r6_empty_open_voids_without_compute_and_refunds_reserve_once ... ok\ntest tests::r4_void_returns_unused_storage_reserve ... ok\ntest tests::regression_paying_relaunch_recognizes_first_settlement_without_second_call ... ok\ntest tests::r4_external_terminal_returns_unused_storage_reserve_once ... ok\ntest tests::regression_infrastructure_backoff_combines_counters_and_caps_shift ... ok\ntest tests::regression_range_nanoseconds_saturate ... ok\ntest tests::regression_older_failures_count_once_without_interrupting_newer_attempt ... ok\ntest tests::regression_registration_reserve_matches_shared_interface ... ok\ntest tests::regression_timeout_waits_900_seconds - should panic ... ok\ntest tests::regression_result_limit_matches_shared_interface ... ok\ntest tests::regression_older_unclear_uses_normal_allowance_and_invalidates_newer_read ... ok\ntest tests::evidence_requires_bettor_and_complete_matching_active_escrow_bet ... ok\ntest tests::request_never_accepts_a_callers_compute_deposit - should panic ... ok\ntest tests::regression_unclear_keeps_fixed_delay_after_infrastructure_failure ... ok\ntest tests::regression_older_settlement_success_is_terminal_and_failure_is_ignored ... ok\ntest tests::two_priced_requests_cannot_spend_the_same_pool_balance ... ok\ntest tests::regression_selected_outcome_and_terminal_stages_reject_older_results ... ok\ntest tests::stale_result_cannot_settle ... ok\ntest tests::timeout_preserves_outstanding_and_seven_days_routes_to_refund ... ok\ntest tests::validated_result_is_public_and_uses_its_prepaid_storage_reserve ... ok\ntest tests::third_undecided_voids_but_failure_does_not_count_as_undecided ... ok\ntest tests::underfunding_and_price_lookup_failure_cannot_force_void ... ok\ntest tests::result_binding_and_decision_tampering_fails_without_using_jury_retry ... ok\ntest tests::regression_older_valid_result_wins_and_invalidates_newer_attempt ... ok\ntest tests::regression_admission_reverts_void_only_on_twenty_fourth_failure ... ok\ntest tests::regression_escrow_read_failures_use_admission_allowance ... ok\n\ntest result: ok. 78 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.62s\n\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n   Compiling stated-jury v0.1.0 (<repo>/outlayer/stated-jury)\n   Compiling stated-outlayer-referee v0.1.0 (<repo>/contracts/outlayer-referee)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.81s\nwarning: the following packages contain code that will be rejected by a future version of Rust: wasmparser v0.78.2\nnote: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`\n     Running unittests src/lib.rs (contracts/outlayer-referee/target/debug/deps/stated_outlayer_referee-b02b4c2291733398)\n   Doc-tests stated_outlayer_referee\n"
+    },
+    {
+      "command": "cargo",
+      "args": [
+        "clippy",
+        "--offline",
+        "--locked",
+        "--all-targets",
+        "--manifest-path",
+        "contracts/outlayer-referee/Cargo.toml",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "cwd": "<repo>/",
+      "exit_code": 0,
+      "output": "    Checking stated-jury v0.1.0 (<repo>/outlayer/stated-jury)\n    Checking stated-outlayer-referee v0.1.0 (<repo>/contracts/outlayer-referee)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.72s\nwarning: the following packages contain code that will be rejected by a future version of Rust: wasmparser v0.78.2\nnote: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`\n"
+    },
+    {
+      "command": "cargo",
+      "args": [
+        "fmt",
+        "--manifest-path",
+        "contracts/outlayer-referee/Cargo.toml",
+        "--",
+        "--check"
+      ],
+      "cwd": "<repo>/",
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "command": "cargo",
+      "args": [
+        "test",
+        "--offline",
+        "--locked",
+        "--no-default-features",
+        "--lib",
+        "--manifest-path",
+        "outlayer/stated-jury/Cargo.toml"
+      ],
+      "cwd": "<repo>/",
+      "exit_code": 0,
+      "output": "\nrunning 6 tests\ntest core_url::tests::every_core_accepted_url_is_accepted_by_runner ... ok\ntest core_url::tests::lean_url_policy_rejects_idna_and_numeric_host_evasions ... ok\ntest core_tests::lean_result_preserves_exact_decimal_summary ... ok\ntest material_decode::tests::evidence_wire_variants_allow_any_key_order ... ok\ntest material_decode::tests::price_window_wire_preserves_variants_and_rejects_invalid_shapes ... ok\ntest material_decode::tests::evidence_wire_rejects_duplicate_unknown_missing_and_mistyped_fields ... ok\n\ntest result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s\n     Running unittests src/lib.rs (outlayer/stated-jury/target/debug/deps/stated_jury-86c799e1bb475874)\n"
+    },
+    {
+      "command": "cargo",
+      "args": [
+        "clippy",
+        "--offline",
+        "--locked",
+        "--no-default-features",
+        "--lib",
+        "--manifest-path",
+        "outlayer/stated-jury/Cargo.toml",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "cwd": "<repo>/",
+      "exit_code": 0,
+      "output": "    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.13s\n"
+    },
+    {
+      "command": "cargo",
+      "args": [
+        "clippy",
+        "--offline",
+        "--locked",
+        "--release",
+        "--target",
+        "wasm32-wasip2",
+        "--bin",
+        "stated-jury",
+        "--manifest-path",
+        "outlayer/stated-jury/Cargo.toml",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "cwd": "<repo>/",
+      "exit_code": 0,
+      "output": "    Checking stated-jury v0.1.0 (<repo>/outlayer/stated-jury)\n    Finished `release` profile [optimized] target(s) in 1.15s\n"
+    },
+    {
+      "command": "node",
+      "args": [
+        "scripts/verify-outlayer-parity.mjs"
+      ],
+      "cwd": "<repo>/",
+      "exit_code": 0,
+      "output": "PASS: exact prompts, material hashes, 15 complete verdict-input comparisons, 30 extraction cases (24 shared, 6 deliberate differences), 162 decision cases. Mock transport only; no live inference or OutLayer execution.\n"
+    },
+    {
+      "command": "node",
+      "args": [
+        "scripts/verify-outlayer-escrow-window.mjs"
+      ],
+      "cwd": "<repo>/",
+      "exit_code": 0,
+      "output": "\nrunning 1 test\ntest tests::r3_escrow_accepts_yes_no_after_refund_floor_in_every_active_state ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 71 filtered out; finished in 0.42s\n\nPASS: actual escrow source pays selected yes/no after seven days in accepted, proposed and disputed states (six cases). Local VM only.\n"
+    },
+    {
+      "command": "node",
+      "args": [
+        "<temporary>/source-a/scripts/build-outlayer-wasm.mjs",
+        "--cargo-home",
+        "<cargo-home>",
+        "--target-dir",
+        "<temporary>/target-one",
+        "--wasm-opt",
+        "<repo>/outlayer/stated-jury/target/build-tools/binaryen/bin/wasm-opt"
+      ],
+      "cwd": "<temporary>/source-a",
+      "exit_code": 0,
+      "output": "Optimizer: wasm-opt version 123 (version_123)\nstated-jury.wasm: raw 845087 bytes; final 845087 bytes\nstated_outlayer_referee.wasm: raw 366450 bytes; final 296163 bytes\n[\n  {\n    \"path\": \"<temporary>/target-one/wasm32-wasip2/release/stated-jury.wasm\",\n    \"raw_bytes\": 845087,\n    \"raw_sha256\": \"85198c7afbfca6ad6cb42c76fe064abdf480d18f4db4955b90ce205d768d9791\",\n    \"bytes\": 845087,\n    \"sha256\": \"85198c7afbfca6ad6cb42c76fe064abdf480d18f4db4955b90ce205d768d9791\"\n  },\n  {\n    \"path\": \"<temporary>/target-one/wasm32-unknown-unknown/release/stated_outlayer_referee.wasm\",\n    \"raw_bytes\": 366450,\n    \"raw_sha256\": \"060afd90241448ac48fa6f55cc0c0e1f28a9aa7bb82305e28c4df388aeec1670\",\n    \"bytes\": 296163,\n    \"sha256\": \"1f6b35b9fce99165af5090ff04d4ff6493933ec90ab3c0a37a532255bf46ed83\"\n  }\n]\n   Compiling proc-macro2 v1.0.107\n   Compiling unicode-ident v1.0.27\n   Compiling quote v1.0.47\n   Compiling stable_deref_trait v1.2.1\n   Compiling smallvec v1.16.5\n   Compiling siphasher v1.0.4\n   Compiling rand_core v0.6.4\n   Compiling litemap v0.8.3\n   Compiling serde_core v1.0.229\n   Compiling utf_types v1.0.0\n   Compiling version_check v0.9.5\n   Compiling writeable v0.6.4\n   Compiling phf_shared v0.11.3\n   Compiling rand v0.8.8\n   Compiling utf8_iter v1.1.0\n   Compiling icu_properties_data v2.4.0\n   Compiling cfg-if v1.0.5\n   Compiling icu_normalizer_data v2.4.0\n   Compiling parking_lot_core v0.9.12\n   Compiling generic-array v0.14.7\n   Compiling scopeguard v1.2.0\n   Compiling typenum v1.20.1\n   Compiling serde v1.0.229\n   Compiling autocfg v1.5.1\n   Compiling phf_generator v0.11.3\n   Compiling new_debug_unreachable v1.0.6\n   Compiling phf_codegen v0.11.3\n   Compiling lock_api v0.4.14\n   Compiling num-traits v0.2.19\n   Compiling mac v0.1.1\n   Compiling wit-bindgen-rt v0.33.0\n   Compiling parking_lot v0.12.5\n   Compiling precomputed-hash v0.1.1\n   Compiling futf v0.1.5\n   Compiling utf-8 v0.7.6\n   Compiling syn v3.0.10\n   Compiling string_cache_codegen v0.5.4\n   Compiling zmij v1.0.23\n   Compiling tendril v0.4.3\n   Compiling syn v2.0.119\n   Compiling markup5ever v0.14.1\n   Compiling phf v0.11.3\n   Compiling bitflags v2.13.2\n   Compiling serde_json v1.0.154\n   Compiling crypto-common v0.1.7\n   Compiling block-buffer v0.10.4\n   Compiling percent-encoding v2.3.2\n   Compiling rust_decimal v1.43.0\n   Compiling log v0.4.35\n   Compiling form_urlencoded v1.2.2\n   Compiling digest v0.10.7\n   Compiling memchr v2.8.3\n   Compiling arrayvec v0.7.8\n   Compiling itoa v1.0.19\n   Compiling chrono v0.4.45\n   Compiling wasi v0.13.3+wasi-0.2.2\n   Compiling sha2 v0.10.9\n   Compiling hex v0.4.3\n   Compiling synstructure v0.14.0\n   Compiling zerovec-derive v0.11.7\n   Compiling displaydoc v0.2.7\n   Compiling serde_derive v1.0.229\n   Compiling zerofrom-derive v0.1.8\n   Compiling yoke-derive v0.8.4\n   Compiling match_token v0.1.0\n   Compiling zerofrom v0.1.8\n   Compiling yoke v0.8.4\n   Compiling zerovec v0.11.9\n   Compiling zerotrie v0.2.5\n   Compiling tinystr v0.8.5\n   Compiling potential_utf v0.1.6\n   Compiling icu_collections v2.4.0\n   Compiling icu_locale_core v2.4.0\n   Compiling string_cache v0.8.9\n   Compiling icu_provider v2.4.0\n   Compiling html5ever v0.29.1\n   Compiling icu_properties v2.4.0\n   Compiling icu_normalizer v2.4.0\n   Compiling idna_adapter v1.2.2\n   Compiling idna v1.1.0\n   Compiling url v2.5.8\n   Compiling stated-jury v0.1.0 (/private<temporary>/source-a/outlayer/stated-jury)\n    Finished `release` profile [optimized] target(s) in 23.63s\n   Compiling serde_core v1.0.229\n   Compiling ident_case v1.0.1\n   Compiling hashbrown v0.17.1\n   Compiling winnow v1.0.5\n   Compiling equivalent v1.0.3\n   Compiling toml_datetime v1.1.3+spec-1.1.0\n   Compiling cfg_aliases v0.2.2\n   Compiling serde v1.0.229\n   Compiling once_cell v1.21.4\n   Compiling syn v3.0.10\n   Compiling borsh v1.8.1\n   Compiling syn v2.0.119\n   Compiling strsim v0.11.1\n   Compiling generic-array v0.14.9\n   Compiling zmij v1.0.23\n   Compiling indexmap v2.14.2\n   Compiling serde_json v1.0.154\n   Compiling toml_parser v1.1.5+spec-1.1.0\n   Compiling memchr v2.8.3\n   Compiling itoa v1.0.19\n   Compiling foldhash v0.2.0\n   Compiling typenum v1.20.1\n   Compiling toml_edit v0.25.19+spec-1.1.0\n   Compiling fnv v1.0.7\n   Compiling rustversion v1.0.23\n   Compiling hex v0.4.3\n   Compiling num-traits v0.2.19\n   Compiling base64 v0.23.1\n   Compiling bs58 v0.5.1\n   Compiling near-sys v0.2.13\n   Compiling darling_core v0.24.1\n   Compiling proc-macro-crate v3.5.0\n   Compiling near-sdk-env v0.1.5\n   Compiling darling_core v0.20.11\n   Compiling crypto-common v0.1.6\n   Compiling block-buffer v0.10.4\n   Compiling near-crypto-hash v0.2.0\n   Compiling near-sdk-macros v5.29.1\n   Compiling wee_alloc v0.4.5\n   Compiling heck v0.5.0\n   Compiling digest v0.10.7\n   Compiling serde_derive v1.0.229\n   Compiling borsh-derive v1.8.1\n   Compiling cfg-if v1.0.5\n   Compiling memory_units v0.4.0\n   Compiling base64 v0.22.1\n   Compiling cfg-if v0.1.10\n   Compiling cfg_eval v0.1.2\n   Compiling strum_macros v0.26.4\n   Compiling Inflector v0.11.4\n   Compiling strum v0.26.3\n   Compiling sha2 v0.10.9\n   Compiling chrono v0.4.45\n   Compiling darling_macro v0.20.11\n   Compiling darling_macro v0.24.1\n   Compiling darling v0.20.11\n   Compiling darling v0.24.1\n   Compiling serde_with_macros v3.24.0\n   Compiling serde_with v3.24.0\n   Compiling near-account-id v2.6.0\n   Compiling near-token v0.3.6\n   Compiling near-gas v0.3.7\n   Compiling stated-jury v0.1.0 (/private<temporary>/source-a/outlayer/stated-jury)\n   Compiling near-global-contracts v0.2.5\n   Compiling near-sdk-core v4.2.2\n   Compiling near-sdk v5.29.0\n   Compiling stated-outlayer-referee v0.1.0 (/private<temporary>/source-a/contracts/outlayer-referee)\n    Finished `release` profile [optimized] target(s) in 17.08s\n"
+    },
+    {
+      "command": "node",
+      "args": [
+        "<temporary>/source-with-a-longer-checkout-name/scripts/build-outlayer-wasm.mjs",
+        "--cargo-home",
+        "<temporary>/cargo-home",
+        "--target-dir",
+        "<temporary>/target-two",
+        "--wasm-opt",
+        "<repo>/outlayer/stated-jury/target/build-tools/binaryen/bin/wasm-opt"
+      ],
+      "cwd": "<temporary>/source-with-a-longer-checkout-name",
+      "exit_code": 0,
+      "output": "Optimizer: wasm-opt version 123 (version_123)\nstated-jury.wasm: raw 845087 bytes; final 845087 bytes\nstated_outlayer_referee.wasm: raw 366450 bytes; final 296163 bytes\n[\n  {\n    \"path\": \"<temporary>/target-two/wasm32-wasip2/release/stated-jury.wasm\",\n    \"raw_bytes\": 845087,\n    \"raw_sha256\": \"85198c7afbfca6ad6cb42c76fe064abdf480d18f4db4955b90ce205d768d9791\",\n    \"bytes\": 845087,\n    \"sha256\": \"85198c7afbfca6ad6cb42c76fe064abdf480d18f4db4955b90ce205d768d9791\"\n  },\n  {\n    \"path\": \"<temporary>/target-two/wasm32-unknown-unknown/release/stated_outlayer_referee.wasm\",\n    \"raw_bytes\": 366450,\n    \"raw_sha256\": \"060afd90241448ac48fa6f55cc0c0e1f28a9aa7bb82305e28c4df388aeec1670\",\n    \"bytes\": 296163,\n    \"sha256\": \"1f6b35b9fce99165af5090ff04d4ff6493933ec90ab3c0a37a532255bf46ed83\"\n  }\n]\n   Compiling proc-macro2 v1.0.107\n   Compiling unicode-ident v1.0.27\n   Compiling quote v1.0.47\n   Compiling stable_deref_trait v1.2.1\n   Compiling smallvec v1.16.5\n   Compiling rand_core v0.6.4\n   Compiling siphasher v1.0.4\n   Compiling utf_types v1.0.0\n   Compiling version_check v0.9.5\n   Compiling writeable v0.6.4\n   Compiling serde_core v1.0.229\n   Compiling rand v0.8.8\n   Compiling phf_shared v0.11.3\n   Compiling litemap v0.8.3\n   Compiling utf8_iter v1.1.0\n   Compiling icu_normalizer_data v2.4.0\n   Compiling parking_lot_core v0.9.12\n   Compiling generic-array v0.14.7\n   Compiling icu_properties_data v2.4.0\n   Compiling cfg-if v1.0.5\n   Compiling new_debug_unreachable v1.0.6\n   Compiling autocfg v1.5.1\n   Compiling scopeguard v1.2.0\n   Compiling phf_generator v0.11.3\n   Compiling serde v1.0.229\n   Compiling typenum v1.20.1\n   Compiling num-traits v0.2.19\n   Compiling phf_codegen v0.11.3\n   Compiling lock_api v0.4.14\n   Compiling mac v0.1.1\n   Compiling futf v0.1.5\n   Compiling utf-8 v0.7.6\n   Compiling wit-bindgen-rt v0.33.0\n   Compiling precomputed-hash v0.1.1\n   Compiling zmij v1.0.23\n   Compiling tendril v0.4.3\n   Compiling parking_lot v0.12.5\n   Compiling phf v0.11.3\n   Compiling rust_decimal v1.43.0\n   Compiling serde_json v1.0.154\n   Compiling crypto-common v0.1.7\n   Compiling block-buffer v0.10.4\n   Compiling bitflags v2.13.2\n   Compiling percent-encoding v2.3.2\n   Compiling log v0.4.35\n   Compiling digest v0.10.7\n   Compiling form_urlencoded v1.2.2\n   Compiling itoa v1.0.19\n   Compiling memchr v2.8.3\n   Compiling arrayvec v0.7.8\n   Compiling sha2 v0.10.9\n   Compiling hex v0.4.3\n   Compiling syn v3.0.10\n   Compiling string_cache_codegen v0.5.4\n   Compiling syn v2.0.119\n   Compiling wasi v0.13.3+wasi-0.2.2\n   Compiling markup5ever v0.14.1\n   Compiling chrono v0.4.45\n   Compiling synstructure v0.14.0\n   Compiling zerovec-derive v0.11.7\n   Compiling displaydoc v0.2.7\n   Compiling serde_derive v1.0.229\n   Compiling zerofrom-derive v0.1.8\n   Compiling yoke-derive v0.8.4\n   Compiling match_token v0.1.0\n   Compiling zerofrom v0.1.8\n   Compiling yoke v0.8.4\n   Compiling zerovec v0.11.9\n   Compiling zerotrie v0.2.5\n   Compiling tinystr v0.8.5\n   Compiling potential_utf v0.1.6\n   Compiling icu_collections v2.4.0\n   Compiling icu_locale_core v2.4.0\n   Compiling string_cache v0.8.9\n   Compiling icu_provider v2.4.0\n   Compiling html5ever v0.29.1\n   Compiling icu_properties v2.4.0\n   Compiling icu_normalizer v2.4.0\n   Compiling idna_adapter v1.2.2\n   Compiling idna v1.1.0\n   Compiling url v2.5.8\n   Compiling stated-jury v0.1.0 (/private<temporary>/source-with-a-longer-checkout-name/outlayer/stated-jury)\n    Finished `release` profile [optimized] target(s) in 18.96s\n   Compiling ident_case v1.0.1\n   Compiling serde_core v1.0.229\n   Compiling winnow v1.0.5\n   Compiling equivalent v1.0.3\n   Compiling hashbrown v0.17.1\n   Compiling toml_datetime v1.1.3+spec-1.1.0\n   Compiling serde v1.0.229\n   Compiling cfg_aliases v0.2.2\n   Compiling syn v3.0.10\n   Compiling syn v2.0.119\n   Compiling borsh v1.8.1\n   Compiling strsim v0.11.1\n   Compiling once_cell v1.21.4\n   Compiling generic-array v0.14.9\n   Compiling zmij v1.0.23\n   Compiling indexmap v2.14.2\n   Compiling serde_json v1.0.154\n   Compiling itoa v1.0.19\n   Compiling toml_parser v1.1.5+spec-1.1.0\n   Compiling typenum v1.20.1\n   Compiling foldhash v0.2.0\n   Compiling memchr v2.8.3\n   Compiling hex v0.4.3\n   Compiling rustversion v1.0.23\n   Compiling fnv v1.0.7\n   Compiling toml_edit v0.25.19+spec-1.1.0\n   Compiling num-traits v0.2.19\n   Compiling bs58 v0.5.1\n   Compiling base64 v0.23.1\n   Compiling proc-macro-crate v3.5.0\n   Compiling darling_core v0.24.1\n   Compiling darling_core v0.20.11\n   Compiling near-sys v0.2.13\n   Compiling near-sdk-env v0.1.5\n   Compiling crypto-common v0.1.6\n   Compiling block-buffer v0.10.4\n   Compiling wee_alloc v0.4.5\n   Compiling near-crypto-hash v0.2.0\n   Compiling near-sdk-macros v5.29.1\n   Compiling heck v0.5.0\n   Compiling serde_derive v1.0.229\n   Compiling borsh-derive v1.8.1\n   Compiling cfg_eval v0.1.2\n   Compiling strum_macros v0.26.4\n   Compiling digest v0.10.7\n   Compiling memory_units v0.4.0\n   Compiling Inflector v0.11.4\n   Compiling strum v0.26.3\n   Compiling cfg-if v0.1.10\n   Compiling base64 v0.22.1\n   Compiling cfg-if v1.0.5\n   Compiling sha2 v0.10.9\n   Compiling chrono v0.4.45\n   Compiling darling_macro v0.20.11\n   Compiling darling_macro v0.24.1\n   Compiling darling v0.20.11\n   Compiling darling v0.24.1\n   Compiling serde_with_macros v3.24.0\n   Compiling near-account-id v2.6.0\n   Compiling near-gas v0.3.7\n   Compiling near-token v0.3.6\n   Compiling stated-jury v0.1.0 (/private<temporary>/source-with-a-longer-checkout-name/outlayer/stated-jury)\n   Compiling serde_with v3.24.0\n   Compiling near-sdk-core v4.2.2\n   Compiling near-global-contracts v0.2.5\n   Compiling near-sdk v5.29.0\n   Compiling stated-outlayer-referee v0.1.0 (/private<temporary>/source-with-a-longer-checkout-name/contracts/outlayer-referee)\n    Finished `release` profile [optimized] target(s) in 17.48s\n"
+    },
+    {
+      "command": "cargo",
+      "args": [
+        "build",
+        "--offline",
+        "--locked",
+        "--no-default-features",
+        "--example",
+        "core-hash-probe",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--target-dir",
+        "<temporary>/probe",
+        "--manifest-path",
+        "outlayer/stated-jury/Cargo.toml"
+      ],
+      "cwd": "<repo>/",
+      "exit_code": 0,
+      "output": "   Compiling version_check v0.9.5\n   Compiling proc-macro2 v1.0.107\n   Compiling unicode-ident v1.0.27\n   Compiling quote v1.0.47\n   Compiling typenum v1.20.1\n   Compiling autocfg v1.5.1\n   Compiling serde_core v1.0.229\n   Compiling zmij v1.0.23\n   Compiling serde v1.0.229\n   Compiling serde_json v1.0.154\n   Compiling memchr v2.8.3\n   Compiling generic-array v0.14.7\n   Compiling itoa v1.0.19\n   Compiling num-traits v0.2.19\n   Compiling cfg-if v1.0.5\n   Compiling hex v0.4.3\n   Compiling syn v3.0.10\n   Compiling crypto-common v0.1.7\n   Compiling block-buffer v0.10.4\n   Compiling digest v0.10.7\n   Compiling sha2 v0.10.9\n   Compiling chrono v0.4.45\n   Compiling serde_derive v1.0.229\n   Compiling stated-jury v0.1.0 (<repo>/outlayer/stated-jury)\n    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.43s\n"
+    },
+    {
+      "command": "wasm-tools",
+      "args": [
+        "validate",
+        "<temporary>/target-one/wasm32-wasip2/release/stated-jury.wasm"
+      ],
+      "cwd": "<repo>/",
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "command": "wasm-tools",
+      "args": [
+        "validate",
+        "<temporary>/target-one/wasm32-unknown-unknown/release/stated_outlayer_referee.wasm"
+      ],
+      "cwd": "<repo>/",
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "command": "wasm-tools",
+      "args": [
+        "validate",
+        "<temporary>/target-two/wasm32-wasip2/release/stated-jury.wasm"
+      ],
+      "cwd": "<repo>/",
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "command": "wasm-tools",
+      "args": [
+        "validate",
+        "<temporary>/target-two/wasm32-unknown-unknown/release/stated_outlayer_referee.wasm"
+      ],
+      "cwd": "<repo>/",
+      "exit_code": 0,
+      "output": ""
+    }
+  ]
+}

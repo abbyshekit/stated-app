@@ -1,0 +1,208 @@
+{
+  "observed_at": "2026-11-13T01:33:33.735939+00:00",
+  "read_only": true,
+  "resource_limits": {
+    "max_instructions": 10000000000,
+    "max_memory_mb": 128,
+    "max_execution_seconds": 180
+  },
+  "input_len": 16384,
+  "source_commit": "2d50bfab14389857e6e50e84e76d5652b944e1cc",
+  "queries": [
+    {
+      "network": "testnet",
+      "rpc": "https://rpc.testnet.fastnear.com",
+      "account": "outlayer.testnet",
+      "method": "get_config",
+      "block_height": 277443512,
+      "block_hash": "B6sW5A7SWrMtJV215bs5zBy1CeCBoqid1MCT16oejfcY",
+      "result": [
+        "owner.outlayer.testnet",
+        "worker.outlayer.testnet"
+      ]
+    },
+    {
+      "network": "testnet",
+      "rpc": "https://rpc.testnet.fastnear.com",
+      "account": "outlayer.testnet",
+      "method": "get_pricing",
+      "block_height": 277443510,
+      "block_hash": "G4yZTEYfHQoYGxnAxpfyyr5EnLyggJwA1EfTwy7bUjBy",
+      "result": [
+        "1000000000000000000000",
+        "100000000000000",
+        "100000000000000000",
+        "100000000000000000"
+      ]
+    },
+    {
+      "network": "testnet",
+      "rpc": "https://rpc.testnet.fastnear.com",
+      "account": "outlayer.testnet",
+      "method": "get_max_limits",
+      "block_height": 277443512,
+      "block_hash": "B6sW5A7SWrMtJV215bs5zBy1CeCBoqid1MCT16oejfcY",
+      "result": [
+        500000000000,
+        180,
+        300
+      ]
+    },
+    {
+      "network": "testnet",
+      "rpc": "https://rpc.testnet.fastnear.com",
+      "account": "outlayer.testnet",
+      "method": "is_paused",
+      "block_height": 277443511,
+      "block_hash": "5t7fSJ1M9BD7B8iX26AgQLMoRjmQTN8M8d43owTu1Nm2",
+      "result": false
+    },
+    {
+      "network": "testnet",
+      "rpc": "https://rpc.testnet.fastnear.com",
+      "account": "outlayer.testnet",
+      "method": "estimate_execution_cost",
+      "block_height": 277443513,
+      "block_hash": "CqGs4SivawxXkuZpHfyJi7xQwdpdKpwCpxpRCNHiBpEB",
+      "result": "19001000000000000000000"
+    },
+    {
+      "network": "testnet",
+      "rpc": "https://rpc.testnet.fastnear.com",
+      "account": "outlayer.testnet",
+      "method": "view_access_key_list",
+      "block_height": 277443513,
+      "block_hash": "CqGs4SivawxXkuZpHfyJi7xQwdpdKpwCpxpRCNHiBpEB",
+      "result": {
+        "key_count": 1,
+        "full_access_count": 1,
+        "permission_groups": [
+          {
+            "permission": "FullAccess",
+            "count": 1
+          }
+        ],
+        "function_call_receivers": []
+      }
+    },
+    {
+      "network": "testnet",
+      "rpc": "https://rpc.testnet.fastnear.com",
+      "account": "worker.outlayer.testnet",
+      "method": "view_access_key_list",
+      "block_height": 277443514,
+      "block_hash": "6URPFRLYm1gxHHCGRx532t7qjGKnVUVUNyL6gbcLP8Ue",
+      "result": {
+        "key_count": 63,
+        "full_access_count": 3,
+        "permission_groups": [
+          {
+            "permission": "FullAccess",
+            "count": 3
+          }
+        ],
+        "function_call_receivers": [
+          "outlayer.testnet",
+          "worker.outlayer.testnet"
+        ]
+      }
+    },
+    {
+      "network": "mainnet",
+      "rpc": "https://rpc.mainnet.fastnear.com",
+      "account": "outlayer.near",
+      "method": "get_config",
+      "block_height": 224294956,
+      "block_hash": "8wFbeARhFsqSZWf3h6tZfPoAxHKGiKPhay64vzT1S17L",
+      "result": [
+        "owner.outlayer.near",
+        "worker.outlayer.near"
+      ]
+    },
+    {
+      "network": "mainnet",
+      "rpc": "https://rpc.mainnet.fastnear.com",
+      "account": "outlayer.near",
+      "method": "get_pricing",
+      "block_height": 224294956,
+      "block_hash": "8wFbeARhFsqSZWf3h6tZfPoAxHKGiKPhay64vzT1S17L",
+      "result": [
+        "1000000000000000000000",
+        "100000000000000",
+        "100000000000000000",
+        "100000000000000000"
+      ]
+    },
+    {
+      "network": "mainnet",
+      "rpc": "https://rpc.mainnet.fastnear.com",
+      "account": "outlayer.near",
+      "method": "get_max_limits",
+      "block_height": 224294957,
+      "block_hash": "5hhmuUZ6xSZ7tye6zSZfczJA7gq2P7NWkpuEC2WprieU",
+      "result": [
+        500000000000,
+        180,
+        300
+      ]
+    },
+    {
+      "network": "mainnet",
+      "rpc": "https://rpc.mainnet.fastnear.com",
+      "account": "outlayer.near",
+      "method": "is_paused",
+      "block_height": 224294957,
+      "block_hash": "5hhmuUZ6xSZ7tye6zSZfczJA7gq2P7NWkpuEC2WprieU",
+      "result": false
+    },
+    {
+      "network": "mainnet",
+      "rpc": "https://rpc.mainnet.fastnear.com",
+      "account": "outlayer.near",
+      "method": "estimate_execution_cost",
+      "block_height": 224294957,
+      "block_hash": "5hhmuUZ6xSZ7tye6zSZfczJA7gq2P7NWkpuEC2WprieU",
+      "result": "19001000000000000000000"
+    },
+    {
+      "network": "mainnet",
+      "rpc": "https://rpc.mainnet.fastnear.com",
+      "account": "outlayer.near",
+      "method": "view_access_key_list",
+      "block_height": 224294957,
+      "block_hash": "5hhmuUZ6xSZ7tye6zSZfczJA7gq2P7NWkpuEC2WprieU",
+      "result": {
+        "key_count": 1,
+        "full_access_count": 1,
+        "permission_groups": [
+          {
+            "permission": "FullAccess",
+            "count": 1
+          }
+        ],
+        "function_call_receivers": []
+      }
+    },
+    {
+      "network": "mainnet",
+      "rpc": "https://rpc.mainnet.fastnear.com",
+      "account": "worker.outlayer.near",
+      "method": "view_access_key_list",
+      "block_height": 224294957,
+      "block_hash": "5hhmuUZ6xSZ7tye6zSZfczJA7gq2P7NWkpuEC2WprieU",
+      "result": {
+        "key_count": 14,
+        "full_access_count": 3,
+        "permission_groups": [
+          {
+            "permission": "FullAccess",
+            "count": 3
+          }
+        ],
+        "function_call_receivers": [
+          "outlayer.near"
+        ]
+      }
+    }
+  ]
+}

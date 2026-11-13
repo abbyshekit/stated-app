@@ -6,6 +6,7 @@ import { isAccount } from './near-network.mjs';
 import { idOf, UserError } from './store.mjs';
 import { readPublicResultEvidence } from './bet-result-evidence.mjs';
 import { readEnclaveRuling } from './enclave-ruling.mjs';
+import { readOutlayerRuling, outlayerEvidenceForBet } from './outlayer.mjs';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const HASH = /^[a-f0-9]{64}$/;
@@ -18,7 +19,7 @@ const SELECT = `select b.id, b.creator_user_id, b.acceptor_user_id, b.invited_us
   b.claim, b.criteria, b.evidence_source_url, b.creator_side, b.stake_yocto,
   b.accept_by, b.resolve_at, b.created_at, b.accepted_at, b.settled_at,
   b.creator_wallet, b.acceptor_wallet, b.invited_wallet, b.terms_hash, b.referee_wallet,
-  b.chain_state, b.near_height, b.near_verified_at,
+  b.chain_state, b.near_height, b.near_verified_at, b.outlayer_material,
   p.published_at, creator.x_username as creator_username,
   acceptor.x_username as acceptor_username, clock_timestamp() as read_at,
   exists (select 1 from bilateral_near_requests r
@@ -109,6 +110,8 @@ function view(row) {
   return {
     id: row.id,
     terms_hash: row.terms_hash,
+    outlayer_bound: Boolean(row.outlayer_material),
+    outlayer_evidence: row.outlayer_material?.evidence || null,
     claim: row.claim,
     criteria: row.criteria,
     evidence_source_url: row.evidence_source_url,
@@ -173,6 +176,7 @@ export async function readPublicBet(tx, id, { evidenceWindowSeconds = 86400, rea
   const row = await tx.one(`${SELECT} where b.id=$1 and p.withdrawn_at is null for share of b,p`, [id]);
   if (!row) return null;
   const bet = view(row);
+  if (row.outlayer_material) bet.outlayer = await readOutlayerRuling(tx, id);
   // DESIGN.md: only published Bets disclose the verified call and submitted links.
   // Full source text belongs in the signed JSON, never in this page projection.
   const record = await readRuling(tx, id);
@@ -189,13 +193,23 @@ export async function readPublicBet(tx, id, { evidenceWindowSeconds = 86400, rea
     join statements st on st.id=s.statement_id
     left join enclave_plans p on p.statement_id=s.statement_id where b.id=$1`, [id]);
   bet.result_recorded_at = timestamp(post?.resolved_at);
+  if (bet.outlayer?.material.evidence.kind === 'open') {
+    const spec = bet.outlayer.material.evidence;
+    const closesAt = new Date(Date.parse(bet.resolve_at) + spec.window_seconds * 1000).toISOString();
+    const submittedLinks = await outlayerEvidenceForBet(tx, id);
+    bet.evidence = { closesAt, privateItemCount: 0,
+      items: submittedLinks.map(item => ({ side: item.side, url: item.url, title: '', by: null, at: timestamp(item.at) })),
+      open: Boolean(!bet.outlayer.result && bet.accepted_at && row.acceptor_user_id
+        && ['accepted','proposed','disputed'].includes(bet.status)
+        && Date.parse(bet.resolve_at) <= new Date(row.read_at).getTime() && new Date(row.read_at).getTime() < Date.parse(closesAt)) };
+  }
   const rows = post ? await evidenceForBet(tx, post.statement_id, id) : [];
   const submitted = record?.evidence.kind === 'submitted' ? record.evidence : null;
   const visibleIds = new Set(rows.map(item => String(item.id)));
   const privateItemCount = (submitted?.items || []).filter(item => !visibleIds.has(String(item.id))).length;
   // A juror's reason can quote evidence from a private Bet on the same post: then the page shows no reason.
   if (bet.enclave && privateItemCount) bet.enclave.reason = null;
-  if (post?.source === 'evidence' || rows.length || submitted) {
+  if (!bet.outlayer && (post?.source === 'evidence' || rows.length || submitted)) {
     const closesAt = timestamp(post?.closes_at || submitted?.closesAt
       || new Date(new Date(bet.resolve_at).getTime() + evidenceWindowSeconds * 1000));
     bet.evidence = {
@@ -212,17 +226,20 @@ export async function readPublicBet(tx, id, { evidenceWindowSeconds = 86400, rea
   if (bet.settled_by !== 'referee' || !['yes', 'no'].includes(bet.outcome)) return bet;
 
   // This call resolves one Bet. A wallet withdrawal may combine credit from several Bets.
-  const proof = await tx.one(`select detail->>'transactionHash' as hash from bilateral_bet_events
+  const proof = await tx.one(`select detail->>'transactionHash' as hash, detail->>'transactionAttribution' as attribution from bilateral_bet_events
     where bet_id=$1 and actor_user_id=$2 and kind='referee_resolved'
       and detail->>'outcome'=$3 and detail->>'referee'=$4
     order by id desc limit 1`, [id, row.creator_user_id, bet.outcome, bet.referee_wallet]);
   const hash = proof?.hash;
   if (hash && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(hash) && baseDecode(hash).length === 32) {
     bet.settlement_transaction_hash = hash;
+    bet.settlement_transaction_attribution = proof.attribution || null;
     const evidence = await readPublicResultEvidence(tx, bet);
     if (evidence) bet.result_evidence = evidence;
-    // Settlement creates credit. Only a verified winner withdrawal proves payment.
-    if (record?.mode === 'ruling') bet.payout_completed = Boolean(await tx.one(`select 1 from bilateral_near_requests r
+  }
+  // Settlement creates credit. A verified winner withdrawal proves payment
+  // independently of whether this server sent the permissionless ruling request.
+  if (record?.mode === 'ruling' || bet.outlayer?.result) bet.payout_completed = Boolean(await tx.one(`select 1 from bilateral_near_requests r
       where r.bet_id=$1 and r.method='withdraw' and r.execution_status='succeeded'
         and r.transaction_hash is not null and r.execution_checked_at is not null
         and r.args->>'stated_request_id'=r.id::text and r.created_at >= $2
@@ -231,7 +248,6 @@ export async function readPublicBet(tx, id, { evidenceWindowSeconds = 86400, rea
           and e.actor_user_id=$5 and e.kind='play_paid_out') limit 1`,
     [id, row.settled_at, bet.outcome === bet.creator_side ? bet.creator_wallet : bet.acceptor_wallet,
       bet.outcome === bet.creator_side ? row.creator_user_id : row.acceptor_user_id, row.creator_user_id]));
-  }
   return bet;
 }
 

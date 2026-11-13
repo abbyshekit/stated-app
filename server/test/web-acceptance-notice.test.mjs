@@ -3,6 +3,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { startStack } from './support/app.mjs';
 import { FakeNear } from './support/fake-near.mjs';
+import { FakeOutLayerNear } from './support/fake-outlayer.mjs';
+import { enclaveEnv, fakeNearAi } from './support/enclave.mjs';
+import { outlayerTestFetch } from './support/outlayer-fetch.mjs';
 import { ensurePlayAccount, playAccountFor, yocto } from '../src/play.mjs';
 import { queueWebMatchNotice, runBetCommands } from '../src/reply-bets.mjs';
 import { reserveNearRequest } from '../src/near-request.mjs';
@@ -12,14 +15,18 @@ for (const network of ['testnet', 'mainnet']) {
   test(`${network}: web acceptance match notices (real PG/HTTP, fake NEAR/X)`, async (t) => {
     const real = network === 'mainnet';
     const contract = real ? 'escrow.stated.near' : 'escrow.testnet';
-    const near = new FakeNear({ contract });
+    const near = real ? new FakeOutLayerNear({ contract, referee: 'jury.stated.near' }) : new FakeNear({ contract });
+    const ai = fakeNearAi({ respond: () => ({ source: 'evidence' }) });
+    let s;
+    const fetchImpl = real ? outlayerTestFetch({ ai, near: () => near, xBase: () => s?.fakeX.base }) : near.fetchImpl;
     if (real) near.accounts.set('stated.near', { balance: BigInt(yocto('100')), keys: new Set(['ed25519:treasury']) });
-    const s = await startStack({
+    s = await startStack({
       STATED_NEAR_NETWORK: network, STATED_NEAR_CONTRACT: contract, STATED_PLAY: '1', STATED_PLAY_AUTOPROVISION: '1',
       STATED_REPLIES_PER_TAGGER_PER_HOUR: '100',
-      ...(real ? { STATED_MAINNET: 'real-funds', STATED_TOKEN_KEY: 't'.repeat(44), STATED_PLAY_TREASURY: 'stated.near',
+      ...(real ? { ...enclaveEnv, STATED_ENCLAVE_RULINGS: '', STATED_OUTLAYER_REFEREE: near.referee,
+        STATED_MAINNET: 'real-funds', STATED_TOKEN_KEY: 't'.repeat(44), STATED_PLAY_TREASURY: 'stated.near',
         STATED_PLAY_TREASURY_KEY: 'ed25519:test-only', STATED_PILOT_X_IDS: '*' } : {}),
-    }, { fetchImpl: near.fetchImpl, chain: near.chain });
+    }, { fetchImpl, chain: near.chain });
     try {
       await s.connectBot(s.fakeX.addUser('500', 'statedbot'));
       const creator = s.fakeX.addUser('8101', 'notice_maker');
@@ -36,7 +43,7 @@ for (const network of ['testnet', 'mainnet']) {
         browsers.set(person.id, browser);
       }
       const b = browsers.get(taker.id);
-      const run = () => runBetCommands(s.db, s.config, near.chain, { fetchImpl: near.fetchImpl, botUsername: 'statedbot' });
+      const run = () => runBetCommands(s.db, s.config, near.chain, { fetchImpl, botUsername: 'statedbot' });
       const offer = async () => {
         const source = s.fakeX.post(sourceAuthor.id, `A private phrase ships before March 1, ${new Date().getUTCFullYear() + 1}.`);
         const command = s.fakeX.post(creator.id, '@statedbot bet 0.1 no', { replyTo: source.id });
