@@ -1,0 +1,25 @@
+{
+  "date": "2026-11-13",
+  "network": "NEAR testnet",
+  "betUrl": "https://stated-production.up.railway.app/bets/0bf4f3a7-8dfc-44e2-a139-1e33ce844178",
+  "contract": "stated-escrow-52081551be.testnet",
+  "stakeYoctoEach": "100000000000000000000000",
+  "outcome": "yes",
+  "court": {
+    "dao": "stated-court.sputnik-v2.testnet",
+    "relay": "jury.stated-court-relay.testnet",
+    "proposalId": 5,
+    "approve": "3FZyCTXXow6VWe49m5GkKKxJtU9uTa65AkFwWMZU2yV9",
+    "approveSigner": "referee.stated-play-6cf0876dd7.testnet"
+  },
+  "transactions": {
+    "approve": "3FZyCTXXow6VWe49m5GkKKxJtU9uTa65AkFwWMZU2yV9",
+    "withdraw": "86Q3rWtHT2wHrYvabKTvra4sP54PFVbqcc2ZfDZEBn3j"
+  },
+  "payout": {
+    "recipient": "chainabstracted.stated-play-6cf0876dd7.testnet",
+    "amountYocto": "200000000000000000000000",
+    "transferReceipt": "ABCKUZBNJ7VwcSmPQAFLUTA3MCqbAzob2iH28mZeczjC",
+    "callbackReceipt": "FhC1PzyXA3BgJESiQzyHsvjSzgWZFBAV5fBJ3ZowPH3h"
+  }
+}

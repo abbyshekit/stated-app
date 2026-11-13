@@ -25,7 +25,7 @@ const sputnikDao = account => typeof account === 'string' && account.endsWith('.
 const LIMITS = [
   'RPC corroboration only; this command does not verify a light-client proof.',
   'Social X links and the human outcome decision are not checked.',
-  'Both recorded social identities are operator controlled; this demonstrates functionality, not independent adoption.',
+  'The verifier establishes on-chain delivery. It does not establish who controls the participants.',
   'Testnet tokens only. No transactions are submitted and no current withdrawal credit is asserted.',
 ];
 

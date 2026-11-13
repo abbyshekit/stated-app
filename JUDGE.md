@@ -1,5 +1,16 @@
 # Judge path
 
+## Verify the demo bet
+
+The [demo video](docs/stated-demo-live-testnet.mp4) shows the [ruling on bet 0bf4f3a7](https://stated-production.up.railway.app/bets/0bf4f3a7-8dfc-44e2-a139-1e33ce844178/ruling) and its 0.2 test NEAR withdrawal. Run these after `npm ci`. They use public data and need no wallet or API key.
+
+```sh
+node scripts/verify-enclave-ruling.mjs https://stated-production.up.railway.app 0bf4f3a7-8dfc-44e2-a139-1e33ce844178
+node scripts/verify-hosted-payout.mjs evidence/hosted-demo-payout-testnet-20261113.json
+```
+
+The first command checks the signed ruling and its link to Stated Court proposal 5. The second checks the approved proposal and the exact withdrawal, including the transfer to the winning account and its successful escrow callback.
+
 ## Check it yourself
 
 **Mainnet OutLayer deployment: 9 of 9 checks passed.** [Saved verification](evidence/judge-outlayer-mainnet.json)
@@ -66,7 +77,7 @@ Five minutes, nine steps. Each is a command or a link, then exactly what you sho
 ## Current testnet path
 
 - Stated lets two people bet on a post on X. Three models from three makers, each in its own NEAR AI enclave, must all agree on the outcome (80% confidence or more) or both stakes go back. A NEAR escrow contract pays the winner.
-- It runs on NEAR **testnet, with test NEAR**. One bet has been paid on a jury ruling, `3668aa04`, and **both of its sides belong to the operator**. On 13 November the testnet home page counts three bets taken by people outside the team; who runs those X accounts is not established here ([README, status](README.md)). The mainnet escrow is deployed with no access keys and has settled one pilot round by mutual agreement between two pilot accounts; the OutLayer referee is deployed on mainnet ([saved verification](evidence/judge-outlayer-mainnet.json)).
+- The testnet app uses test NEAR. The first jury payout, `3668aa04`, involved two operator accounts. The demo shows a later bet between two X handles, and the payout verifier establishes the account that received the transfer. On mainnet, the escrow settled one pilot bet by agreement. The OutLayer referee is deployed there ([saved verification](evidence/judge-outlayer-mainnet.json)).
 - The home page shows "N bets taken by people outside the team" only when N is at least 1, counting public bets whose taker is not an operator account.
 
 ## 1. See the ruling (30 seconds, browser)
