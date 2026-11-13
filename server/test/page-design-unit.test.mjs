@@ -37,6 +37,7 @@ function fakeDb(rows, { profile = false, publishedAt = null } = {}) {
       if (sql.includes("from users where kind = 'person'")) return { id: '1', kind: 'person', x_user_id: '1', x_username: 'alice', x_name: 'Private Name', profile_visibility: 'private' };
       if (sql.includes('from bilateral_bets b\n  join bilateral_bet_publications')) return rows.find(r => r.id === params[0]) || null;
       if (sql.includes('bot_credentials')) return { x_username: 'statedforecast' };
+      if (sql.includes('chain_state->>\'acceptor\'')) return { n: '0' };
       if (sql.includes('from bot_outbox')) return { post_id: payout.social.offer.split('/').at(-1) };
       if (sql.includes('select source_save_id from bilateral_bets')) return { source_save_id: '42' };
       if (sql.includes('from saves') && sql.includes('join users')) return null;

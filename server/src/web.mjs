@@ -36,7 +36,7 @@ import { createReadLimiter } from './public-read-limits.mjs';
 import { esc, html, pct, raw, signed, when } from './html.mjs';
 import { face, facesByUsername, facesFor } from './certificate.mjs';
 import { kvGet } from './db.mjs';
-import { metrics } from './metrics.mjs';
+import { metrics, outsideBetsTaken } from './metrics.mjs';
 import { purgeOrphanXSources, resolveStatement } from './notify.mjs';
 import { canViewProfile, ownerSaveView, profileIsPublic, PUBLIC_SAVE_SQL, publicSaveView } from './privacy.mjs';
 import { privacyPage, termsPage } from './legal-pages.mjs';
@@ -873,6 +873,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
   route('GET', /^\/$/, async (ctx) => {
     ensureVisitor(ctx);
     const hall = await publicBetHall(db);
+    const outsideTaken = await outsideBetsTaken(db, { exclude: config.excludeXIds, admins: config.adminXIds });
     const bot = await botUsername();
     // One row per statement: the author's own save wins over a follower's.
     const seen = new Map();
@@ -918,7 +919,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
         : lead ? html`${postCard(lead, { faces, sweep: true, link: publicRow(lead).link })}${dareBet ? html`<div class="dare">${dareBet.line}</div>` : ''}` : ''}
       <p class="pitch home-intro${hasOpenOffers ? '' : ' empty'}">${hasOpenOffers ? '' : 'No open offers right now. '}Reply to any post on X with <span class="mention">@${bot} bet ${config.play.defaultStakeNear} no</span>.${hasOpenOffers ? ' Three AI models judge it and NEAR pays the winner.' : ''}</p>
       ${homeAction ? html`<div class="acts"><a class="pill solid big" href="${homeAction.href}">${homeAction.label}</a></div>` : ''}
-      ${hall.total ? html`<section id="public-bets"><p class="pitch"><a class="tl" href="#public-bets">${hall.total} ${hall.total === 1 ? 'bet' : 'bets'}</a>, ${hall.settled} settled, ${formatTestNear(hall.wonYocto)} ${unit()} won</p>${offers.length ? html`<h2 class="lead">Open offers</h2>${betList(offers, { hall: true })}` : ''}${active.length ? html`<h2 class="lead">Bets in progress</h2>${betList(active, { hall: true })}` : ''}${finished.length ? html`<h2 class="lead">Finished bets</h2>${betList(finished, { hall: true })}` : ''}</section>` : ''}
+      ${hall.total ? html`<section id="public-bets"><p class="pitch"><a class="tl" href="#public-bets">${hall.total} ${hall.total === 1 ? 'bet' : 'bets'}</a>, ${hall.settled} settled, ${formatTestNear(hall.wonYocto)} ${unit()} won${outsideTaken >= 1 ? html`, <span class="outside-taken">${outsideTaken} ${outsideTaken === 1 ? 'bet' : 'bets'} taken by people outside the team</span>` : ''}</p>${offers.length ? html`<h2 class="lead">Open offers</h2>${betList(offers, { hall: true })}` : ''}${active.length ? html`<h2 class="lead">Bets in progress</h2>${betList(active, { hall: true })}` : ''}${finished.length ? html`<h2 class="lead">Finished bets</h2>${betList(finished, { hall: true })}` : ''}</section>` : ''}
       ${rest.length ? fileList(rest, publicRow, faces, betLines) : ''}
     `, { flush: true, signin: false, og: {
       title: 'Stated: bets on what is said on X', description: 'Bet on what is said on X, decided by three AI models in NEAR AI enclaves.',
@@ -941,7 +942,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
   });
 
   route('GET', /^\/terms$/, async (ctx) => {
-    send(ctx.res, 200, await layout(ctx, 'Terms of Service', termsPage({ bot: await botUsername() })));
+    send(ctx.res, 200, await layout(ctx, 'Terms of Service', termsPage({ bot: await botUsername(), real: config.near.real })));
   });
 
   route('GET', /^\/privacy$/, async (ctx) => {

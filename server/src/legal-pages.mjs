@@ -9,15 +9,21 @@ function contact(bot) {
   return html`<p>Open an issue at <a href="${REPO}/issues" rel="noopener noreferrer">github.com/abbyshekit/stated-app</a>, or reply to <a href="https://x.com/${bot}" rel="noopener noreferrer">@${bot}</a> on X. For a private request, such as deleting your account, open an issue saying only that you have one, and we will reply there with a private way to reach us.</p>`;
 }
 
-export function termsPage({ bot }) {
+// Replaces "Test NEAR only" when the server runs on NEAR mainnet (config.near.real).
+function realNearSection() {
+  return html`<h2>Real NEAR</h2>
+      <p>On this server bets use real NEAR, which has monetary value, and you can lose your stake. The pilot is limited to people we allow; if we have not allowed you, you cannot bet. Every stake is your own NEAR: we do not lend or give you stakes. An escrow contract with no access keys holds both stakes, and a referee contract decides who wins. If nothing settles, the escrow refunds both stakes seven days after the bet’s deadline. Stated takes no share of a pot. The escrow contract keeps a small storage fee, in NEAR, from whoever proposes a bet; the bet’s page shows it.</p>`;
+}
+
+export function termsPage({ bot, real = false }) {
   return html`
     <article class="legal">
       <h1>Terms of Service</h1>
       <p class="quiet">Effective ${LEGAL_EFFECTIVE}</p>
       <p>These terms cover Stated: this site, the @${bot} bot on X, and the NEAR accounts and contracts Stated runs. By signing in, or by betting through the bot, you agree to them. “We” means the people who run Stated; “you” means you.</p>
 
-      <h2>Test NEAR only</h2>
-      <p>Stated runs on NEAR testnet, and every stake is test NEAR. Test NEAR has no monetary value: you cannot buy it from us or sell it to us, and winning it is not a prize. Stated takes no share of any pot. The escrow contract keeps a small storage fee, in test NEAR, from whoever proposes a bet; the bet’s page shows it. NEAR testnet can be reset, and accounts, balances and history on it can disappear. If we ever offer bets in real NEAR, they will come with their own terms first; these terms do not cover them.</p>
+      ${real ? realNearSection() : html`<h2>Test NEAR only</h2>
+      <p>Stated runs on NEAR testnet, and every stake is test NEAR. Test NEAR has no monetary value: you cannot buy it from us or sell it to us, and winning it is not a prize. Stated takes no share of any pot. The escrow contract keeps a small storage fee, in test NEAR, from whoever proposes a bet; the bet’s page shows it. NEAR testnet can be reset, and accounts, balances and history on it can disappear. If we ever offer bets in real NEAR, they will come with their own terms first; these terms do not cover them.</p>`}
 
       <h2>Who can use Stated</h2>
       <p>You must be at least 18 and able to make a binding agreement, and using Stated must be lawful where you are.</p>

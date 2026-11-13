@@ -12,6 +12,7 @@
     "migrate": "node --env-file-if-exists=.env server/src/cli.mjs migrate",
     "demo": "node server/dev/simulated-x.mjs",
     "verify": "node scripts/verify.mjs",
+    "judge": "node scripts/judge-chain.mjs",
     "verify:offline": "node scripts/verify.mjs --offline",
     "test": "node scripts/test.mjs",
     "test:all": "node --test --test-concurrency=1 score.test.mjs domain.test.mjs xpost.test.mjs sim.test.mjs server/test/*.test.mjs",

@@ -146,3 +146,24 @@ export async function metrics(db, { exclude = [] } = {}) {
     },
   };
 }
+
+/**
+ * Public bets that someone outside the team has taken: a published, not
+ * withdrawn bet whose finalized chain snapshot names an acceptor, and whose
+ * taker's X id is in neither the metrics exclusion list nor the admin ids.
+ * Returns the count, which is 0 when there are none; callers show it only
+ * when it is at least 1.
+ */
+export async function outsideBetsTaken(db, { exclude = [], admins = [] } = {}) {
+  const ids = [...new Set([...exclude, ...admins])];
+  const row = await db.one(
+    `select count(*) as n
+     from bilateral_bets b
+     join bilateral_bet_publications p on p.bet_id = b.id and p.withdrawn_at is null
+     join users a on a.id = b.acceptor_user_id
+     where b.chain_state->>'acceptor' is not null
+       and not (a.x_user_id = any($1))`,
+    [ids.length ? ids : ['__none__']],
+  );
+  return Number(row?.n || 0);
+}

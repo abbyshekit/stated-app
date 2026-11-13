@@ -11,6 +11,7 @@ Status on 12 November 2026: running on NEAR testnet with test NEAR. The hosted a
 | Tracks | Open Innovation `open`; Privacy & Private AI `privacy`; Social Money `social`; AI Security & Defense `security` |
 | Hosted app | https://stated-production.up.railway.app (NEAR testnet, test NEAR) |
 | Demo video | [docs/stated-demo-70s.mp4](docs/stated-demo-70s.mp4) (recorded on 11 November, before the jury ruled on a bet) |
+| Judge path | [JUDGE.md](JUDGE.md): five minutes, read-only; `npm run judge` checks the deployed contracts through public NEAR RPC |
 | Quick check | `npm ci`, then `npm run verify`; without network access, `npm run verify:offline` |
 | Tests | `npm test`: the whole suite with PostgreSQL 15+, otherwise the files that need no database |
 | Security | [docs/SECURITY.md](docs/SECURITY.md): a security review of the code and the hosted app, each finding and its fix |

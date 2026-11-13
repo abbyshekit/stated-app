@@ -285,6 +285,7 @@ test('JSON, ruling HTML and the home feature share a verified record and recheck
     if (sql.startsWith('select b.id, b.creator_user_id')) return db.public ? bet : null;
     if (sql.startsWith('select e.id as event_id') || sql.startsWith('select detail')) return cachedOne(sql);
     if (sql.includes('bot_credentials')) return { x_username: 'statedforecast' };
+    if (sql.includes('chain_state->>\'acceptor\'')) return { n: '0' };
     if (sql.startsWith('select s.statement_id')) return db.record.evidence.kind === 'submitted' ? { statement_id: '7' } : null;
     if (/^select (source_save_id|src.published_at)/.test(sql)) return null;
     assert.fail(sql);

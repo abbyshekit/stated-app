@@ -23,6 +23,28 @@ test('the Terms describe a test-NEAR service with its jury, Court and limits', (
   assert.doesNotMatch(words, /play money|live on mainnet|audit|independent/i);
 });
 
+test('the testnet Terms are unchanged and carry no real-NEAR section', () => {
+  const plain = String(termsPage({ bot: 'statedforecast' }));
+  assert.equal(String(termsPage({ bot: 'statedforecast', real: false })), plain);
+  assert.doesNotMatch(text(plain), /Real NEAR|you can lose your stake|pilot is limited/);
+  assert.match(plain, /<h2>Test NEAR only<\/h2>/);
+});
+
+test('on mainnet the Terms state the real-NEAR pilot instead of the test-NEAR section', () => {
+  const page = String(termsPage({ bot: 'statedforecast', real: true }));
+  const words = text(page);
+  assert.match(page, /<h2>Real NEAR<\/h2>/);
+  assert.match(words, /bets use real NEAR, which has monetary value/);
+  assert.match(words, /The pilot is limited to people we allow/);
+  assert.match(words, /Every stake is your own NEAR/);
+  assert.match(words, /An escrow contract with no access keys holds both stakes, and a referee contract decides who wins/);
+  assert.match(words, /refunds both stakes seven days after the bet’s deadline/);
+  assert.match(words, /Stated takes no share of a pot\. The escrow contract keeps a small storage fee, in NEAR/);
+  assert.doesNotMatch(page, /<h2>Test NEAR only<\/h2>/);
+  assert.doesNotMatch(words, /every stake is test NEAR/);
+  assert.match(words, /limited to CAD 100/, 'the rest of the Terms still applies');
+});
+
 test('the Privacy Policy names what is public, each cookie, each recipient and the choices', () => {
   const page = String(privacyPage({ bot: 'statedforecast', sessionDays: 30, textPolicy: 'public' }));
   const words = text(page);
