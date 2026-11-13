@@ -214,7 +214,7 @@ test('the wallet page takes a payment from another chain: an amount, a token and
   assert.match(page.text, /<h1 class="send">Send <b class="sel" id="pay-amount">1\.801942<\/b> USDC<span>on Base, for 0\.5 NEAR<\/span><\/h1>/);
   assert.match(page.text, /<p class="payhead"><span class="tok lg"><img src="\/static\/tokens\/token-usdc\.png[^>]*><img class="on" src="\/static\/tokens\/chain-base\.png/, 'the token and its chain head the page');
   assert.match(page.text, /Only USDC, only on Base\. Send exactly this amount, once\./);
-  assert.match(page.text, /<p class="lead timeleft">Expires in (59|60) min<span>at <time datetime="[0-9T:.\-]+Z">\d\d:\d\d UTC<\/time><\/span><\/p>/);
+  assert.match(page.text, /<p class="lead timeleft">Expires in (59|60) min<span>at <time datetime="[0-9T:.\-]+Z">\d\d:\d\d UTC \d{1,2} [A-Z][a-z]{2} \d{4}<\/time><\/span><\/p>/);
   // The address is in blocks of four with no spaces between them, so it reads in groups and copies whole.
   assert.match(page.text, /<p class="payto" id="pay-address"><i>0x<\/i><i>PayH<\/i><i>ere\d+<\/i><\/p>/);
   // The address is also a code to scan and has copy buttons, which a small same-origin script turns on.
