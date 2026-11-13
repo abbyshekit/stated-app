@@ -38,7 +38,7 @@ export function termsPage({ bot, real = false }) {
       <p>The jury can be wrong. When you bet, you accept as final the ruling that settles the bet on NEAR, and you agree that we are not responsible for a ruling you think is wrong.</p>
 
       <h2>Your account and its key</h2>
-      <p>Until you claim your NEAR account, Stated holds its key and signs your bets and withdrawals for you. You can claim it from your wallet page by adding a key of your own; Stated then removes its key and erases its stored copy. After that only you control the account, and we cannot recover it. The test NEAR we put into accounts is ours to give, and we can limit, pause or stop it.</p>
+      <p>Until you claim your NEAR account, Stated holds its key and signs your bets and withdrawals for you. You can claim it from your wallet page by adding a key of your own; Stated then removes its key and erases its stored copy. After that only you control the account, and we cannot recover it. ${real ? 'On mainnet, Stated puts only enough NEAR into a new account to cover network fees; every stake is your own NEAR.' : 'The test NEAR we put into accounts is ours to give, and we can limit, pause or stop it.'}</p>
 
       <h2>What you post</h2>
       <p>Your posts stay yours, and X’s terms govern them. You give us a free, worldwide, non-exclusive licence to copy, store, show and process the posts, links and evidence you send to Stated or its bot, so that we can run bets, publish rulings and keep their record for as long as Stated runs. You are responsible for what you post and for having the right to post it.</p>
@@ -48,9 +48,9 @@ export function termsPage({ bot, real = false }) {
       <ul>
         <li>break the law, or use Stated to harass, threaten or defame anyone or to expose anyone’s private information;</li>
         <li>post evidence you know is false, or try to steer the jury with instructions hidden in a page or a post;</li>
-        <li>use several X accounts to bet against yourself or to collect more test NEAR than one account gets;</li>
+        <li>${real ? 'use several X accounts to bet against yourself;' : 'use several X accounts to bet against yourself or to collect more test NEAR than one account gets;'}</li>
         <li>overload, attack or scrape Stated, its contracts or its hosting, or test their security beyond normal use without asking us first;</li>
-        <li>sell test NEAR from Stated, or promise anyone real value for it.</li>
+        ${real ? '' : html`<li>sell test NEAR from Stated, or promise anyone real value for it.</li>`}
       </ul>
       <p>We can refuse or call off a bet, pause an account, or remove content when it breaks these terms, or when security or the law requires it.</p>
 
@@ -58,7 +58,7 @@ export function termsPage({ bot, real = false }) {
       <p>Stated’s code is published under the MIT License at <a href="${REPO}" rel="noopener noreferrer">github.com/abbyshekit/stated-app</a>. That licence covers the code; these terms cover the service we run.</p>
 
       <h2>No warranty</h2>
-      <p>Stated is a test service provided “as is” and “as available”. We do not promise that it will work, stay available, rule correctly, or keep your data or test NEAR, and to the fullest extent the law allows we disclaim all implied warranties. The AI models, NEAR, NEAR AI Cloud, X and the sites behind evidence links are run by others, and we are not responsible for them.</p>
+      <p>Stated is a ${real ? 'pilot' : 'test'} service provided “as is” and “as available”. We do not promise that it will work, stay available, rule correctly, or keep your data${real ? '' : ' or test NEAR'}, and to the fullest extent the law allows we disclaim all implied warranties. The AI models, NEAR, NEAR AI Cloud, X and the sites behind evidence links are run by others, and we are not responsible for them.</p>
 
       <h2>Limits on our liability</h2>
       <p>To the fullest extent the law allows, we are not liable for any indirect, incidental, special, consequential or punitive loss, or for lost data, profits or goodwill, and our total liability for all claims about Stated is limited to CAD 100. These limits do not apply to fraud, gross negligence or wilful misconduct, or to anything else the law does not allow us to limit.</p>
@@ -81,7 +81,7 @@ export function termsPage({ bot, real = false }) {
     </article>`;
 }
 
-export function privacyPage({ bot, sessionDays, textPolicy }) {
+export function privacyPage({ bot, sessionDays, textPolicy, real = false }) {
   return html`
     <article class="legal">
       <h1>Privacy Policy</h1>
@@ -90,7 +90,7 @@ export function privacyPage({ bot, sessionDays, textPolicy }) {
 
       <h2>Much of Stated is public by design</h2>
       <p>A bet made on X is a set of public posts, and the bot’s replies name the bettors. A published bet’s page shows the post, the stake, the evidence and the ruling, and the X handle of each side that bet from an X account. Its ruling’s record, including what each model was sent and what it answered, is published for anyone to check, except jurors’ reasons when the ruling also covered a private bet. A bet made by replying on X is published; a bet started on this site is published only when its creator chooses. Before publication or after its creator takes it off public pages, its bettors can see its page, and signed-in people with its link can also see it while it is an open invitation.</p>
-      <p>Each bettor’s NEAR account is named after their X handle. NEAR testnet records every account, deposit, ruling and payout publicly, and Stated Court’s proposals and votes are public there too. We cannot delete what is on NEAR, and posts on X are governed by X.</p>
+      <p>Each bettor’s NEAR account is named after their X handle. ${real ? 'NEAR' : 'NEAR testnet'} records every account, deposit, ruling and payout publicly, and Stated Court’s proposals and votes are public there too. We cannot delete what is on NEAR, and posts on X are governed by X.</p>
 
       <h2>What Stated collects</h2>
       <ul>

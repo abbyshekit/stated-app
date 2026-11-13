@@ -74,3 +74,18 @@ test('both pages escape the bot handle', () => {
   assert.doesNotMatch(String(termsPage({ bot: '<x>' })), /<x>/);
   assert.doesNotMatch(String(privacyPage({ bot: '<x>', sessionDays: 30 })), /<x>/);
 });
+
+test('on mainnet the Terms and Privacy Policy never call stakes test NEAR', () => {
+  const words = (page) => String(page).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  const terms = words(termsPage({ bot: 'statedforecast', real: true }));
+  assert.doesNotMatch(terms, /test NEAR|test service/);
+  assert.match(terms, /Stated is a pilot service/);
+  assert.match(terms, /every stake is your own NEAR/);
+  const testnet = words(termsPage({ bot: 'statedforecast' }));
+  assert.match(testnet, /Stated is a test service/);
+  assert.match(testnet, /sell test NEAR from Stated/);
+  const privacy = words(privacyPage({ bot: 'statedforecast', sessionDays: 30, real: true }));
+  assert.match(privacy, /NEAR records every account, deposit, ruling and payout publicly/);
+  assert.doesNotMatch(privacy, /NEAR testnet records/);
+  assert.match(words(privacyPage({ bot: 'statedforecast', sessionDays: 30 })), /NEAR testnet records every account/);
+});

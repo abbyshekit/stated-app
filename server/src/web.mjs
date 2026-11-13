@@ -947,7 +947,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
 
   route('GET', /^\/privacy$/, async (ctx) => {
     send(ctx.res, 200, await layout(ctx, 'Privacy Policy', privacyPage({
-      bot: await botUsername(), sessionDays: config.sessionDays, textPolicy: config.x.textPolicy,
+      bot: await botUsername(), sessionDays: config.sessionDays, textPolicy: config.x.textPolicy, real: Boolean(config.near.real),
     })));
   });
 
