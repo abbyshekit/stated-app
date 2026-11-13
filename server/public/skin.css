@@ -260,7 +260,7 @@ label.check { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10
 .stakes.left { text-align: left; padding-top: 6px; color: var(--dim); text-wrap: pretty; }
 /* A link at the end of a sentence keeps a 44px tap height without changing the line. */
 p.gut > .tl, p.stakes > .tl { display: inline; min-height: 0; padding-block: 14px; }
-p.pitch > .tl { display: inline; padding: 14px 4px; line-height: 20px; }
+p.pitch > .tl { display: inline; padding: 14px 0; line-height: 20px; }
 /* Short action links never break; a pasted URL still wraps. */
 p.gut > .tl:not(.unread), p.stakes > .tl { white-space: nowrap; }
 p.gut.settlement-line > .tl:not(.unread) { white-space: normal; }
@@ -499,7 +499,7 @@ input.bad[aria-invalid="true"],
 .seat b { white-space: normal; word-break: normal; overflow-wrap: anywhere; overflow: visible; text-overflow: clip; text-wrap: wrap; }
 @media (max-width: 420px) { .seat b { font-size: 15px; } }
 .bet-seats .seat b { font-size: 15px; font-weight: 700; color: var(--ink); white-space: nowrap; overflow-wrap: normal; line-height: 1.4; }
-.bet-seats .seat b.account-name { white-space: normal; overflow-wrap: anywhere; }
+.bet-seats .seat b.account-name { white-space: nowrap; overflow-wrap: normal; }
 .bet-seats .seat b.long-handle { font-size: 13px; }
 @media (max-width: 420px) { .bet-seats .pot { padding-top: 12px; } }
 /* DESIGN.md: below 360 the stake sits above two half-width seats and the jury uses rows. */

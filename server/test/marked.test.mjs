@@ -129,7 +129,12 @@ test('betBlock escapes names and preserves complete handles and account ids', ()
   }
   assert.match(text(betBlock(bet({ creator_username: 'abcdefghijkl' }))), /<b>@abcdefghijkl<\/b>/);
   const out = text(betBlock(bet({ creator_username: null, creator_wallet: 'a'.repeat(64) })));
-  assert.ok(out.includes(`<b class="account-name">${'a'.repeat(64)}</b>`));
+  const id = 'a'.repeat(64);
+  assert.ok(out.includes(`<b class="account-name" title="${id}">`), 'the full id is the title');
+  assert.ok(out.includes(`<span aria-hidden="true">${id.slice(0, 11)}…${id.slice(-9)}</span>`), 'a long id keeps its start and end on one line');
+  assert.ok(out.includes(`<span class="visually-hidden">${id}</span>`), 'screen readers get the full id');
+  const short = text(betBlock(bet({ creator_username: null, creator_wallet: 'alice.testnet' })));
+  assert.ok(short.includes('<b class="account-name" title="alice.testnet">alice.testnet</b>'), 'a short id shows in full');
   const hostile = text(betBlock(bet({ creator_username: '<img src=x>' })));
   assert.doesNotMatch(hostile, /<img src=x>/);
   assert.match(hostile, /@&lt;img src=x&gt;/);

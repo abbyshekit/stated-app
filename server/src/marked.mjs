@@ -94,6 +94,14 @@ export function betLead(bet, { viewer = null } = {}) {
 // yellow, because a Bet is settled by agreement and not by the Result.
 // DESIGN.md: preserve the complete account id; CSS wraps it anywhere it needs to.
 const handleWords = (label) => String(label);
+// A long NEAR account id keeps its start and end on one line, the way wallets show addresses; the full
+// id stays in the title and for screen readers, and in full in the bet's Rules.
+const ACCOUNT_SHOWN = 22;
+export function accountLabel(id) {
+  const full = String(id);
+  if (full.length <= ACCOUNT_SHOWN) return full;
+  return html`<span aria-hidden="true">${full.slice(0, 11)}…${full.slice(-9)}</span><span class="visually-hidden">${full}</span>`;
+}
 
 export function betBlock(bet, { viewer = null, faces = null, joinHref = null, lead = true, cameTrue = false } = {}) {
   const { funded, expired, open, decided } = betState(bet);
@@ -120,7 +128,7 @@ export function betBlock(bet, { viewer = null, faces = null, joinHref = null, le
       return joinHref && !asker ? html`<a class="seat" href="${joinHref}">${inner}</a>` : html`<div class="seat">${inner}</div>`;
     }
     const state = decided ? (bet.outcome === side ? ' won' : ' lost') : '';
-    return html`<div class="seat${state}">${face({ url: who.url, name: who.initial })}<b${who.account ? html` class="account-name"` : ''}>${handleWords(who.label)}</b><span>${stance}</span></div>`;
+    return html`<div class="seat${state}">${face({ url: who.url, name: who.initial })}${who.account ? html`<b class="account-name" title="${who.label}">${accountLabel(who.label)}</b>` : html`<b>${handleWords(who.label)}</b>`}<span>${stance}</span></div>`;
   };
   let pot;
   if (decided) pot = html`<b>${both}</b><small>${unit()}</small><small>${(bet.settled_by || bet.chain_state?.resolution?.method) === 'referee' ? 'won' : 'credited'}</small>`;
