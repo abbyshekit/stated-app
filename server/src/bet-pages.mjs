@@ -269,7 +269,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
     if (funds.missingNear !== '0') return html`${fundingPanel(funds, { payVersion })}<p class="gut"><a class="tl" href="${wallet}">Open wallet</a></p>`;
     return html`<p class="stakes">Deposit ${formatTestNear(needed)} NEAR from ${account.account_id}, including storage.</p>
       <div class="acts"><form method="post" action="${pathFor(bet.id)}/fund">${csrfField(ctx)}<input type="hidden" name="managed" value="1">
-        ${ctx.url.searchParams.get('join') === '1' ? publishConsent() : ''}
+        ${ctx.url.searchParams.get('join') === '1' ? html`<input type="hidden" name="publicationChoice" value="1">${publishConsent()}` : ''}
         <button class="primary big" type="submit">Deposit stake</button></form></div>`;
   }
 
@@ -609,23 +609,26 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
       if (published) return publicPage(ctx, published);
     }
     if (!(await ready(ctx))) return;
-    const bet = await betFor(db, ctx.user, ctx.params[0]);
-    const creator = String(bet.creator_user_id) === String(ctx.user.id);
-    if (bet.status !== 'offered' || bet.expired || (creator && bet.chain_state)) return redirect(ctx.res, pathFor(bet.id));
-    const published = creator ? null : await publicBet(db, bet.id);
+    const bet = await betFor(db, ctx.user, ctx.params[0], { allowDraftPlaceholder: true });
+    const creator = Boolean(bet && String(bet.creator_user_id) === String(ctx.user.id));
+    if (bet && (bet.status !== 'offered' || bet.expired || (creator && bet.chain_state))) return redirect(ctx.res, pathFor(bet.id));
+    const published = bet && !creator ? await publicBet(db, bet.id) : null;
     if (!creator && !published?.funded) return show(ctx, 'Waiting for the proposer', html`
       <div class="hero"><h1>Waiting for the proposer</h1></div>
       <p class="gut">The other side opens when the proposer funds and publishes the bet.</p>
-      <div class="acts"><a class="pill solid big" href="${pathFor(bet.id)}?review=1">Check again</a></div>`);
+      <div class="acts"><a class="pill solid big" href="${pathFor(ctx.params[0])}?review=1">Check again</a></div>`);
     const limit = !inPilot(config, ctx.user.x_user_id)
       ? 'Bets with real NEAR are invite-only for now.' : await takeLimit(ctx, bet);
     const side = creator ? bet.creator_side : otherSide(bet);
     const stake = formatTestNear(bet.stake_yocto);
     const deposit = creator ? formatTestNear((BigInt(bet.stake_yocto) + BigInt(STORAGE_FEE_YOCTO)).toString()) : stake;
-    const previous = creator && await db.one(`select metadata from bilateral_near_requests
-      where bet_id=$1 and user_id=$2 and method='create_bet' order by created_at limit 1`, [bet.id, ctx.user.id]);
-    const canPayFromAnotherChain = quotes && fundingOn(config) && !previous
-      && !(await playAccountFor(db, ctx.user.x_user_id))?.claimed_at;
+    const previous = await db.one(`select metadata, wallet_account from bilateral_near_requests
+      where bet_id=$1 and user_id=$2 and method=$3 order by created_at limit 1`,
+    [bet.id, ctx.user.id, creator ? 'create_bet' : 'accept_bet']);
+    const play = quotes && fundingOn(config) ? await playAccountFor(db, ctx.user.x_user_id) : null;
+    const canPayFromAnotherChain = quotes && fundingOn(config) && !play?.claimed_at
+      && (!previous || previous.wallet_account === play?.account_id)
+      && (creator || managedOffer(bet, ctx.user, play));
     // The stored claim includes the jury's exact criteria after this marker.
     // Show those criteria separately in Rules, keeping the proposition readable.
     const claim = bet.outlayer_material ? bet.claim.split('\n\nCounts as yes:\n', 1)[0] : bet.claim;
@@ -1032,8 +1035,8 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
         if (!config.near?.real || !config.play?.enabled || String(before.creator_user_id) !== String(ctx.user.id)) {
           throw new UserError('This bet cannot be funded from your Stated account.', 403);
         }
-        await playAction(db, config, chain(), ctx.user, id,
-          { action: 'fund', publishAfterFunding: form.get('publishAfterFunding') === '1' }, { fetchImpl });
+        const publishAfterFunding = form.get('publicationChoice') === '1' ? form.get('publishAfterFunding') === '1' : undefined;
+        await playAction(db, config, chain(), ctx.user, id, { action: 'fund', publishAfterFunding }, { fetchImpl });
         return redirect(ctx.res, pathFor(id));
       }
       const input = Object.fromEntries(['accountId', 'termsHash', 'proposalId', 'proposalRevision', 'proposalOutcome', 'outcome', 'evidenceUrl', 'note'].map((key) => [key, form.get(key)]));

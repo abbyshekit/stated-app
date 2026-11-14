@@ -60,18 +60,31 @@ for (const form of document.querySelectorAll('form[data-stated-wallet], form[dat
   const sign = form.querySelector('[data-sign-wallet]');
   const status = form.querySelector('[data-wallet-status]');
   const hashInput = form.elements.namedItem('transactionHash');
+  const publication = form.elements.namedItem('publishAfterFunding');
   if (!connect || !sign || !status || !hashInput) continue;
   const networkId = form.dataset.nearNetwork === 'mainnet' ? 'mainnet' : 'testnet';
   let account;
   let payload;
 
-  const busy = (value) => { connect.disabled = value; sign.disabled = value; };
+  const busy = (value) => {
+    connect.disabled = value;
+    sign.disabled = value;
+    if (publication) publication.disabled = value;
+  };
   const submitHash = (hash) => {
     if (typeof hash !== 'string' || !hashPattern.test(hash)) return false;
     hashInput.value = hash;
     form.requestSubmit();
     return true;
   };
+
+  publication?.addEventListener('change', () => {
+    if (!account) return;
+    account = undefined;
+    connect.hidden = false;
+    sign.hidden = true;
+    status.textContent = 'Connect your wallet to update your publication choice.';
+  });
 
   connect.addEventListener('click', async () => {
     account = undefined;
@@ -90,6 +103,7 @@ for (const form of document.querySelectorAll('form[data-stated-wallet], form[dat
       if (prepare) {
         const data = new URLSearchParams(new FormData(form));
         data.set('accountId', accountId);
+        if (publication?.checked) data.set('publishAfterFunding', publication.value);
         const response = await fetch(prepare, { method: 'POST', body: data, redirect: 'error' });
         const result = await response.json();
         if (!response.ok) {
@@ -99,8 +113,6 @@ for (const form of document.querySelectorAll('form[data-stated-wallet], form[dat
         form.elements.namedItem('requestId').value = result.requestId;
         form.elements.namedItem('walletPayload').value = JSON.stringify(result);
         payload = readPayload(form, networkId);
-        const publication = form.elements.namedItem('publishAfterFunding');
-        if (publication) publication.disabled = true;
       }
       if (accountId !== payload.accountId) {
         status.textContent = `Connect the ${networkId} wallet ${payload.accountId} and try again.`;

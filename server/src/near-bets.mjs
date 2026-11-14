@@ -202,7 +202,7 @@ export async function prepareNearAction(db, config, user, id, input, options = {
       args.referee = bet.referee_wallet;
     }
     deposit = (BigInt(bet.stake_yocto) + BigInt(STORAGE_FEE_YOCTO)).toString();
-    if (input.publishAfterFunding === true) metadata.publishAfterFunding = true;
+    if (typeof input.publishAfterFunding === 'boolean') metadata.publishAfterFunding = input.publishAfterFunding;
   } else if (action === 'accept') {
     if (creator || bet.status !== 'offered' || !chain || bet.expired || input.termsHash !== bet.terms_hash
       || (bet.invited_user_id && !same(bet.invited_user_id, user.id))) throw new UserError('Review the funded offer before accepting it.', 409);

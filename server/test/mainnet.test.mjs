@@ -172,6 +172,16 @@ test('an explicit natural X mention queues a structured UTC draft; the same text
   assert.equal(near.bets.has(done.bet_id), false);
   await tick(s.db, s.config, s.x);
   assert.deepEqual(repliesTo(mention.id), [`Your bet draft is ready for wallet review: ${s.config.baseUrl}/bets/${done.bet_id}?review=1`]);
+
+  const outsider = await s.signIn(s.fakeX.addUser('7999', 'draftreader'));
+  await outsider.submit('/setup', { profile: 'private', defaults: 'private' });
+  const path = `/bets/${done.bet_id}`;
+  const waiting = await outsider.get(`${path}?review=1`);
+  assert.match(waiting.text, /Waiting for the proposer/);
+  assert.doesNotMatch(waiting.text, /FAA lifts restrictions/);
+  const privateDraft = await outsider.get(path);
+  assert.equal(privateDraft.status, 404);
+  assert.doesNotMatch(privateDraft.text, /FAA lifts restrictions/);
 });
 
 test('someone who is not on the list gets no account and one plain answer', async () => {
@@ -444,6 +454,10 @@ test('the creator reviews and funds the X draft before publishing it', async () 
   await ensurePlayAccount(s.db, s.config, near.chain, { xUserId: maker.x_user_id, username: maker.x_username });
   near.deliver('oskar.stated.near', yocto('0.21'), { wrapped: false });
   await playAction(s.db, s.config, near.chain, maker, betId, { action: 'fund' }, { fetchImpl });
+  const visitor = await s.signIn(X.priya);
+  await visitor.submit('/setup', { profile: 'private', defaults: 'private' });
+  assert.equal((await visitor.get(`/bets/${betId}`)).status, 404, 'X draft terms stay private after funding without publication');
+  assert.match((await visitor.get(draftLink)).text, /Waiting for the proposer/);
   await publishBet(s.db, maker, betId);
   assert.equal(near.bets.get(betId).creator, 'oskar.stated.near');
   assert.equal(held(TREASURY), treasuryBefore, 'the creator funds from their own wallet');

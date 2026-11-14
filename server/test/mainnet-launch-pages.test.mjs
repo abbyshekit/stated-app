@@ -111,6 +111,12 @@ test('a sentence opens an unsigned review and the verified wallet deposit opens 
   const payload = JSON.parse(prepared.text);
   assert.equal(payload.method, 'create_bet');
   assert.equal(payload.depositYocto, yocto('0.26'));
+  const privateRetry = await alice.submit(`/api/bets/${id}/prepare-wallet`, { ...request, publishAfterFunding: '0' });
+  assert.deepEqual(JSON.parse(privateRetry.text), payload, 'changing publication choice leaves this signing request intact');
+  const reserved = () => s.db.one('select metadata from bilateral_near_requests where id=$1', [payload.requestId]);
+  assert.equal((await reserved()).metadata.publishAfterFunding, false);
+  assert.deepEqual(JSON.parse((await alice.submit(`/api/bets/${id}/prepare-wallet`, request)).text), payload);
+  assert.equal((await reserved()).metadata.publishAfterFunding, true);
   assert.equal(near.bets.has(id), false);
   assert.equal(await s.db.one('select bet_id from bilateral_bet_publications where bet_id=$1', [id]), null);
 

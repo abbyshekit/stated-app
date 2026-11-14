@@ -13,6 +13,8 @@ import { betFor } from './bets.mjs';
 import { STORAGE_FEE_YOCTO } from './near-escrow.mjs';
 import { fundingNeed, fundingPanel, fundingStatus } from './funding-view.mjs';
 import { UserError } from './store.mjs';
+import { publicBet } from './bet-public.mjs';
+import { betState } from './marked.mjs';
 
 /** The tokens a payment can be made in, grouped by chain, as the options of a select. */
 export function tokenChoices(list, chosenId) {
@@ -258,6 +260,22 @@ export function registerPlayRoutes({ botUsername, route, db, config, layout, nee
     const typed = { near: String(form.get('near') || '').slice(0, 6), assetId: String(form.get('pay') || '').slice(0, 200), refundTo: String(form.get('refundTo') || '').slice(0, 128) };
     let deposit;
     try {
+      if (bet) {
+        const offer = await betFor(db, ctx.user, bet);
+        const proposer = String(offer.creator_user_id) === String(ctx.user.id);
+        const account = await playAccountFor(db, ctx.user.x_user_id);
+        const reserved = await db.one(`select wallet_account from bilateral_near_requests
+          where bet_id=$1 and user_id=$2 and method=$3 order by created_at limit 1`,
+        [bet, ctx.user.id, proposer ? 'create_bet' : 'accept_bet']);
+        if (!account?.ready || account.claimed_at || offer.expired || offer.status !== 'offered'
+          || (reserved && reserved.wallet_account !== account.account_id)
+          || (proposer ? offer.chain_state : (!betState(offer).open || !offer.referee_wallet
+            || offer.chain_state?.referee !== offer.referee_wallet || account.account_id === offer.chain_state.creator
+            || account.account_id === offer.referee_wallet || (offer.invited_wallet && offer.invited_wallet !== account.account_id)
+            || !(await publicBet(db, bet))?.funded))) {
+          throw new UserError('This bet cannot use your Stated account. Return to the bet to use your signing wallet.', 409);
+        }
+      }
       deposit = await startDeposit(db, config, chain(), quotes, ctx.user, typed);
     } catch (error) {
       // Anything this step can say about itself, NEAR Intents being unreachable included, is said on the form.

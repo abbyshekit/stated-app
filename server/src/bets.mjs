@@ -323,7 +323,7 @@ export async function createBet(db, user, input, { config, chain, fetchImpl = fe
   });
 }
 
-export async function betFor(db, user, id) {
+export async function betFor(db, user, id, { allowDraftPlaceholder = false } = {}) {
   const actor = person(user);
   const reference = uuid(id);
   return db.tx(async (tx) => {
@@ -331,6 +331,17 @@ export async function betFor(db, user, id) {
     // would revoke this viewer's access halfway through the detail read.
     const bet = await tx.one('select * from bilateral_bets where id = $1 for share', [reference]);
     if (!bet || !visible(bet, actor)) throw new UserError('This bet is unavailable to your account.', 404);
+    // The bot's review URL exposes the ID, so it cannot grant access to the terms.
+    if (network().real && !participant(bet, actor) && !bet.invited_user_id) {
+      const access = bet.chain_state && await tx.one(`select (
+        not exists (select 1 from bet_commands c where c.bet_id = $1 and c.kind = 'bet')
+        or exists (select 1 from bilateral_bet_publications p where p.bet_id = $1 and p.withdrawn_at is null)
+      ) as allowed`, [reference]);
+      if (!access?.allowed) {
+        if (allowDraftPlaceholder) return null;
+        throw new UserError('This bet is unavailable to your account.', 404);
+      }
+    }
     return detail(tx, actor, reference);
   });
 }

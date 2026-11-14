@@ -31,7 +31,8 @@ function localMidnight(parts, zone) {
 }
 
 function resolveDeadline(claim, now, timeZone) {
-  const timeWord = claim.match(/\bby midnight(?:\s+(?:\((EST|EDT|ET|UTC)\)|(EST|EDT|ET|UTC)))?$/i);
+  const sentence = claim.replace(/[?!.]+$/, '').trimEnd();
+  const timeWord = sentence.match(/\bby midnight(?:\s+(?:\((EST|EDT|ET|UTC)\)|(EST|EDT|ET|UTC)))?$/i);
   if (timeWord) {
     const explicit = (timeWord[1] || timeWord[2] || '').toUpperCase();
     timeZone = { EST: 'Etc/GMT+5', EDT: 'Etc/GMT+4', ET: 'America/New_York', UTC: 'UTC' }[explicit] || timeZone;
@@ -39,8 +40,19 @@ function resolveDeadline(claim, now, timeZone) {
     const next = new Date(Date.UTC(p.year, p.month - 1, p.day + 1));
     return localMidnight({ year: next.getUTCFullYear(), month: next.getUTCMonth() + 1, day: next.getUTCDate() }, timeZone);
   }
-  const read = deadlineOf(claim, now);
+  const read = deadlineOf(sentence, now);
   if (!read.text || !read.at || !Number.isFinite(read.at.getTime())) return null;
+  // The forecast reader may return a date by itself when it cannot read the clock.
+  // A bet must never substitute end-of-day for a clock the bettor included.
+  const dateStart = sentence.indexOf(read.text);
+  const beforeDate = sentence.slice(0, dateStart);
+  const afterDate = sentence.slice(dateStart + read.text.length);
+  const clockBeforeDate = /\b(?:at|by|before)\s+(?:\d{1,2}:\d{2}|\d{1,2}\s*[ap]\.?m\.?|noon|midnight)(?:\s+[\w+:/-]+)?\s*$/i;
+  const clockAfterDate = /^\s+(?:at\s+(?:\d{1,2}:\d{2}|\d{1,2}\s*[ap]\.?m\.?|noon\b|midnight\b|\d{1,2}$)|\d{1,2}:\d{2}|[+-]\d)/i;
+  const zoneAfterDate = /^\s+\(?[A-Z]{2,5}\)?$/;
+  if (clockBeforeDate.test(beforeDate) || clockAfterDate.test(afterDate) || zoneAfterDate.test(afterDate)) {
+    throw new UserError('Use a date with a UTC clock, or a supported midnight deadline.');
+  }
   return read.at;
 }
 

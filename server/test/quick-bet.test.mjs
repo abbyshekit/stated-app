@@ -31,6 +31,17 @@ test('uses explicit US timezone abbreviations and validates supplied IANA zones'
   assert.throws(() => parseQuickBet('Will it happen by midnight, 0.25 NEAR on yes', { now, timeZone: 'Mars/Olympus' }), UserError);
 });
 
+test('keeps a terminal question mark and refuses clock qualifiers it cannot parse', () => {
+  const result = parseQuickBet('Will it happen by midnight?, 0.25 NEAR on yes', { now });
+  assert.equal(result.claim, 'Will it happen by midnight?');
+  assert.equal(result.resolveAt, '2026-11-15T00:00:00.000Z');
+  for (const deadline of ['by 20 Nov 2026 at 12:00 EST', 'by tomorrow at noon', 'at 12:00 EST on 20 Nov 2026']) {
+    assert.throws(() => parseQuickBet(`Will it happen ${deadline}, 0.25 NEAR on yes`, { now }), UserError);
+  }
+  const utc = parseQuickBet('Will it happen by 20 Nov 2026 at 12:00 UTC, 0.25 NEAR on yes', { now });
+  assert.equal(utc.resolveAt, '2026-11-20T12:00:00.000Z');
+});
+
 test('returns null for unrecognized shapes and rejects invalid values', () => {
   assert.equal(parseQuickBet('Will Acme ship by Friday?'), null);
   assert.throws(() => parseQuickBet('Will Acme ship by midnight, 0 NEAR on yes', { now }), UserError);

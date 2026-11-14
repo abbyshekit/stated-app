@@ -70,6 +70,7 @@ async function rejectLegacyStake(stakeNear, reason) {
     if (/insert into bilateral_near_requests/.test(sql)) reserved++;
   }, one: async (sql) => {
     if (/method = 'create_bet'/.test(sql)) return { user_id: '1', wallet_account: 'maker.near' };
+    if (/from bet_commands/.test(sql)) return { allowed: true };
     if (/bilateral_bets/.test(sql)) return row;
     if (/bilateral_near_requests/.test(sql)) { reserved++; return null; }
     throw new Error(`Unexpected SQL: ${sql}`);

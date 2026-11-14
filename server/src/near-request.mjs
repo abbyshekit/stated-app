@@ -8,7 +8,7 @@ import { UserError } from './store.mjs';
 const METHODS = new Set(['create_bet', 'accept_bet', 'cancel_bet', 'expire_bet',
   'propose_outcome', 'confirm_outcome', 'dispute_outcome', 'finalize_unanswered', 'refund_unresolved', 'withdraw', 'submit_evidence']);
 const BINDING_METHODS = new Set(['create_bet', 'accept_bet']);
-const RESERVED_METADATA = new Set(['contract', 'depositYocto', 'requestState']);
+const RESERVED_METADATA = new Set(['contract', 'depositYocto', 'requestState', 'publishAfterFunding']);
 const sameId = (a, b) => String(a) === String(b);
 
 function stateOf(bet) {
@@ -75,6 +75,8 @@ function validateAction(bet, input) {
  * request arguments, not signed transaction nonces or NEAR execution. */
 export async function reserveNearRequest(db, input) {
   const { bet, user, account, method, args, metadata = {}, depositYocto, contract } = input;
+  const publication = method === 'create_bet' && typeof metadata.publishAfterFunding === 'boolean'
+    ? { publishAfterFunding: metadata.publishAfterFunding } : {};
   if (!bet?.id || !user?.id || !METHODS.has(method) || !args || Array.isArray(args)
     || typeof account !== 'string' || !account || typeof contract !== 'string' || !contract
     || typeof depositYocto !== 'string' || !/^(0|[1-9][0-9]*)$/.test(depositYocto)
@@ -138,7 +140,14 @@ export async function reserveNearRequest(db, input) {
       if (pending.some((request) => !matches(request, intent))) {
         throw new UserError('An earlier wallet request is still unresolved for this action. Verify the escrow before changing its wallet or transaction details.', 409);
       }
-      return { request: pending[0], reused: true };
+      const request = pending[0];
+      if (publication.publishAfterFunding === undefined || request.metadata.publishAfterFunding === publication.publishAfterFunding) {
+        return { request, reused: true };
+      }
+      // Reconciliation takes the same bet lock before reading this consent.
+      const updated = await tx.one(`update bilateral_near_requests set metadata=metadata || $2::jsonb
+        where id=$1 returning *`, [request.id, publication]);
+      return { request: updated, reused: true };
     }
 
     const count = await tx.one(`select count(*)::int as n from bilateral_near_requests
@@ -155,7 +164,7 @@ export async function reserveNearRequest(db, input) {
       values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning *`,
     [requestId, bet.id, user.id, account, method, requestArgs,
       BINDING_METHODS.has(method) ? args.binding_hash : null,
-      { ...semanticMetadata(metadata), contract, depositYocto, requestState: expectedState }, at]);
+      { ...semanticMetadata(metadata), ...publication, contract, depositYocto, requestState: expectedState }, at]);
     return { request, reused: false };
   });
 }
