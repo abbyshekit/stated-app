@@ -15,6 +15,12 @@ export const BET_STATUS = {
 };
 export const betTime = utcTime;
 
+// DESIGN.md: keep the agreed proposition above the action and its full criteria in Rules.
+export function betProposition(bet) {
+  const suffix = `\n\nCounts as yes:\n${bet.criteria}`;
+  return (bet.outlayer_material || bet.outlayer_bound) && bet.criteria && bet.claim.endsWith(suffix)
+    ? bet.claim.slice(0, -suffix.length) : bet.claim;
+}
 
 // DESIGN.md: the Result marks the words, on both the Bet and its ruling page.
 export function markedClaim(claim, outcome) {
@@ -60,7 +66,7 @@ export function betStubs(bet, { joinHref = null, viewer = null, faces = null } =
 
 // No longer the main presentation: the wording, then the lead and the seats.
 export function betCertificate(bet, { joinHref = null, viewer = null, faces = null } = {}) {
-  return html`<p class="prop">${bet.claim}</p>${betBlock(bet, { viewer, faces, joinHref })}`;
+  return html`<p class="prop">${betProposition(bet)}</p>${betBlock(bet, { viewer, faces, joinHref })}`;
 }
 
 // Stated Court is a Sputnik DAO; the server's own referee account is not.
@@ -156,11 +162,11 @@ export function betList(rows, { viewer = null, faces = null, hall = false } = {}
           : ['accepted', 'proposed', 'disputed'].includes(bet.status) ? 'Both sides are in'
             : bet.status === 'settled' && bet.outcome === 'void' ? 'Called off'
             : BET_STATUS[bet.status];
-      return html`<li class="prow note"><p class="said"><a href="/bets/${bet.id}">${markedClaim(bet.claim, mark)}</a></p><p class="meta">${phrase}</p></li>`;
+      return html`<li class="prow note"><p class="said"><a href="/bets/${bet.id}">${markedClaim(betProposition(bet), mark)}</a></p><p class="meta">${phrase}</p></li>`;
     }
     const draft = network().real && viewer && String(viewer.id) === String(bet.creator_user_id)
       && bet.status === 'offered' && !bet.chain_state;
-    return html`<li class="prow note"><p class="said"><a href="/bets/${bet.id}${draft ? '?review=1' : ''}">${markedClaim(bet.claim, mark)}</a></p>
+    return html`<li class="prow note"><p class="said"><a href="/bets/${bet.id}${draft ? '?review=1' : ''}">${markedClaim(betProposition(bet), mark)}</a></p>
       <p class="meta">${people.length ? html`<span class="stack">${people.map(pic)}</span>` : ''}<b>${status === 'Not funded' ? status : lead}</b><span>${formatTestNear(bet.stake_yocto)} ${unit()} each</span></p>
     </li>`;
   })}</ul>`;

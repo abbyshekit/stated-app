@@ -16,7 +16,7 @@ import { createReadLimiter } from './public-read-limits.mjs';
 import { modelFace, modelName } from './jury-models.mjs';
 import { courtLine } from './court-pages.mjs';
 import { juryLogos, settlementMarkup, settlementSentence } from './settlement-view.mjs';
-import { betBlock, betList, betShareLink, betTerms, betTime, committedEvidence, displayBetStatus, markedClaim, nextBetTime } from './bet-view.mjs';
+import { betBlock, betList, betProposition, betShareLink, betTerms, betTime, committedEvidence, displayBetStatus, markedClaim, nextBetTime } from './bet-view.mjs';
 import { facesByUsername } from './certificate.mjs';
 import { betLead, betState, dayMonth } from './marked.mjs';
 import { formatTestNear, STORAGE_FEE_YOCTO } from './near-escrow.mjs';
@@ -48,7 +48,7 @@ export const enclaveRecipe = `Run node scripts/verify-enclave-ruling.mjs <baseUr
 // mark as the post: highlighted if it came true, struck through if it did not. A Bet two people settled
 // between themselves never does; their agreement is not a finding of fact.
 const refereeRuling = (bet) => (bet.status === 'settled' && (bet.settled_by || bet.chain_state?.resolution?.method) === 'referee' ? bet.outcome : null);
-const claimWords = (bet, ruling = refereeRuling(bet)) => markedClaim(bet.claim, ruling);
+const claimWords = (bet, ruling = refereeRuling(bet)) => markedClaim(betProposition(bet), ruling);
 const claimClass = (claim) => `prop bet-claim${claim.length > 200 ? ' long' : claim.length > 120 ? ' mid' : ''}`;
 
 export function registerBetRoutes({ route, db, config, layout, needUser, needAdmin, isAdmin, needPost, csrfField, send, json, redirect, notFound, fetchImpl, walletVersion, payVersion, botUsername, chain, quotes = null, allowHeavyRead = null, publicRuling = createPublicRulingReader({ recipe: enclaveRecipe }) }) {
@@ -328,7 +328,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
     send(ctx.res, 200, await layout(ctx, bet.claim.slice(0, 80), html`
       <h1 class="visually-hidden" data-bet-outcome="${bet.outcome || (bet.status === 'refunded' ? 'void' : 'pending')}" data-bet-claim="${bet.claim}" data-bet-deadline="${bet.resolve_at}" data-bet-terms-hash="${bet.terms_hash}">Bet: ${bet.claim}</h1>
       <div class="pri">${await sourceHeader(null, bet)}
-      <p class="${claimClass(bet.claim)}">${claimWords(bet, recordedRuling(bet))}</p>${await betSourceHeader(db, null, bet, config.x.simulatedOrigin, { timestamp: true })}</div>
+      <p class="${claimClass(betProposition(bet))}">${claimWords(bet, recordedRuling(bet))}</p>${await betSourceHeader(db, null, bet, config.x.simulatedOrigin, { timestamp: true })}</div>
       ${betBlock(bet, { heading: phaseHeading(bet, ctx.user), ruling: pendingRuling(bet), cameTrue: recordedRuling(bet) === 'yes', viewer: ctx.user, faces: await faces(ctx, bet), joinHref: open && eligible && !limited ? join : null })}
       ${proof}
       ${evidence ? html`<p class="gut">${evidence.note}</p><p class="proof"><a class="tl" href="${evidence.url}" rel="noopener noreferrer">Result source</a></p>` : ''}
@@ -349,7 +349,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
       where bet_id=$1 and kind='attested_check' limit 1`, [bet.id]);
     await show(ctx, 'Public Result evidence', html`
       <div class="hero"><h1>Public Result evidence</h1></div>
-      <p class="prop">${bet.claim}</p>
+      <p class="prop">${betProposition(bet)}</p>
       <p class="gut">Stated settled this Bet ${bet.outcome === 'yes' ? 'Yes' : 'No'}; recorded ${time(bet.settled_at)}.</p>
       ${error ? html`<p class="err" role="alert">${error.message}</p>` : ''}
       ${evidence ? html`<p class="gut">Evidence already published. This record cannot be replaced.</p><p class="gut">${evidence.note}</p><p class="proof"><a class="tl" href="${evidence.url}" rel="noopener noreferrer">Evidence</a></p><p class="gut">Outcome known ${time(evidence.knownAt)}. Explanation published ${time(evidence.publishedAt)}.</p>` : html`
@@ -638,7 +638,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
       && (creator || managedOffer(bet, ctx.user, play));
     // The stored claim includes the jury's exact criteria after this marker.
     // Show those criteria separately in Rules, keeping the proposition readable.
-    const claim = bet.outlayer_material ? bet.claim.split('\n\nCounts as yes:\n', 1)[0] : bet.claim;
+    const claim = betProposition(bet);
     const evidence = bet.outlayer_material?.evidence;
     await show(ctx, 'Review bet', html`
       <div class="hero"><h1>Review bet</h1></div>
@@ -864,7 +864,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
     await show(ctx, bet.claim.slice(0, 80), html`
       <h1 class="visually-hidden">Bet: ${bet.claim}</h1>
       ${await sourceHeader(ctx.user, bet)}
-      <p class="${claimClass(bet.claim)}">${claimWords(presentation, recordedRuling(presentation))}</p>
+      <p class="${claimClass(betProposition(bet))}">${claimWords(presentation, recordedRuling(presentation))}</p>
       ${await betSourceHeader(db, ctx.user, bet, config.x.simulatedOrigin, { timestamp: true })}
       ${betBlock(bet, { heading: phaseHeading(presentation, ctx.user), ruling: pendingRuling(presentation), cameTrue: recordedRuling(presentation) === 'yes', viewer: ctx.user, faces: await faces(ctx, bet), joinHref: eligible && bet.status === 'offered' && bet.chain_state && !creator && !limited ? '#accept' : null })}
       ${await enclaveDetail(published || bet, { links: Boolean(published) })}

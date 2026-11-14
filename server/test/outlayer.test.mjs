@@ -129,6 +129,28 @@ test('creation overrides court/server referee and stores a stable reveal before 
     { source: 'coinbase-candles', product: 'NEAR-USD', kind: 'moment', at: priceInput.resolveAt });
 });
 
+test('private and public Bet pages separate the proposition while retaining committed criteria in Rules', async () => {
+  const input = terms();
+  let bet = await createBet(s.db, alice, input, options());
+  const canonical = bet.claim;
+  const hash = bet.terms_hash;
+  const browser = await s.signIn(s.fakeX.users.get(alice.x_user_id));
+  const assertPage = page => {
+    assert.equal(page.status, 200);
+    const visible = page.text.match(/<p class="prop bet-claim[^\"]*">([\s\S]*?)<\/p>/)?.[1];
+    assert.equal(visible, input.claim);
+    assert(page.text.includes(`<dt>Counts as yes</dt><dd>${input.criteria}</dd>`));
+  };
+  assertPage(await browser.get(`/bets/${bet.id}`));
+  ({ bet } = await playAction(s.db, s.config, near.chain, alice, bet.id, { action: 'fund' }, { fetchImpl }));
+  await publishBet(s.db, alice, bet.id);
+  assertPage(await s.browser().get(`/bets/${bet.id}`));
+  const stored = await s.db.one('select claim,terms_hash,outlayer_material from bilateral_bets where id=$1', [bet.id]);
+  assert.equal(stored.claim, canonical);
+  assert.equal(stored.terms_hash, hash);
+  assert.equal(stored.outlayer_material.claim, canonical);
+});
+
 test('acceptance registers treasury-paid material once, including concurrent retry', async () => {
   const bet = await funded();
   await Promise.all([ensureOutlayerRegistration(s.db, s.config, near.chain, bet, { fetchImpl }),
