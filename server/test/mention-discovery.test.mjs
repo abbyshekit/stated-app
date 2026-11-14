@@ -138,3 +138,22 @@ test('explicit all mode discovers recent posts older than the ordinary mention w
   assert.deepEqual(seen, ['150']);
   assert.equal((await state()).sinceId, '150');
 });
+
+test('invalid search pages cannot reach intake or advance the discovery cursor', async () => {
+  for (const page of [
+    { data: [{ id: 'not-a-post-id' }] },
+    { data: Array.from({ length: 11 }, (_, index) => ({ id: String(1001 + index) })) },
+    { data: [{ id: '1001' }], meta: { next_token: 'x'.repeat(2049) } },
+  ]) {
+    await reset();
+    let processed = 0;
+    let calls = 0;
+    const x = { async searchMentions() { calls += 1; return page; } };
+    const options = { baselineId: '1000', processMention: async () => { processed += 1; }, now: 8_000_000 };
+    assert.deepEqual(await pollMentionDiscovery(db, x, options), { status: 'invalid_page' });
+    assert.equal(processed, 0);
+    assert.deepEqual(await state(), { sinceId: '1000', lastAttempt: 8_000_000 });
+    assert.equal((await pollMentionDiscovery(db, x, { ...options, now: 8_000_001 })).status, 'throttled');
+    assert.equal(calls, 1);
+  }
+});
