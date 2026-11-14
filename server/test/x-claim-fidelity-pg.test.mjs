@@ -45,6 +45,7 @@ test('the controlled IANA X reply retains domain and evidence URL through intake
   assert.equal(queued.words, expectedClaim);
   assert.equal(processed.source.text, '', 'private intake still stores no raw or expanded post text');
   assert.equal(processed.statement.span, 'X post ' + prediction.id);
+  assert.equal((await stack.db.one("select count(*)::int as n from revisions where after::text like '%example.com%' or after::text like '%iana.org%'")).n, 0);
   const result = await runBetCommands(stack.db, stack.config, near.chain, { botUsername: bot.username, fetchImpl });
   const command = await stack.db.one('select bet_id,status,detail,words from bet_commands where event_id=$1', [mention.id]);
   assert.deepEqual(result, { done: 1, refused: 0, retry: 0, failed: 0 }, command.detail);
@@ -58,6 +59,64 @@ test('the controlled IANA X reply retains domain and evidence URL through intake
   assert.equal((await stack.db.one('select count(*)::int as n from play_account_grants')).n, 0);
   const source = await stack.db.one('select src.text,st.span from sources src join statements st on st.source_id=src.id where src.platform_id=$1', [prediction.id]);
   assert.deepEqual(source, { text: '', span: 'X post ' + prediction.id });
+});
+
+test('a sentence period after the source entity stays in the claim but outside the evidence URL', async t => {
+  const { stack, near, fetchImpl, bot, author, prediction, mention } = await controlledStack(t);
+  prediction.text += '.';
+  const processed = await processMention(stack.db, stack.config, { mention,
+    includes: { users: [author, bot], tweets: [prediction] }, bot: { userId: bot.id, username: bot.username } });
+  assert.equal(processed.outcome, 'saved');
+  const queued = await stack.db.one('select words from bet_commands where event_id=$1', [mention.id]);
+  assert.deepEqual(JSON.parse(queued.words), {
+    format: 'x-source-entity-v1', claim: expectedClaim + '.', evidenceSourceUrl: sourceUrl,
+  });
+  const result = await runBetCommands(stack.db, stack.config, near.chain, { botUsername: bot.username, fetchImpl });
+  assert.deepEqual(result, { done: 1, refused: 0, retry: 0, failed: 0 });
+  const command = await stack.db.one('select bet_id from bet_commands where event_id=$1', [mention.id]);
+  const draft = await stack.db.one('select claim,evidence_source_url from bilateral_bets where id=$1', [command.bet_id]);
+  assert(draft.claim.startsWith(expectedClaim + '.\n\nCounts as yes:\n'));
+  assert.equal(draft.evidence_source_url, sourceUrl);
+});
+
+async function assertRefusedWithoutBet(stack, near, mention, reason) {
+  const command = await stack.db.one('select status,detail,words,bet_id from bet_commands where event_id=$1', [mention.id]);
+  assert.deepEqual(command, { status: 'refused', detail: reason, words: null, bet_id: null });
+  assert.equal((await stack.db.one('select count(*)::int as n from bilateral_bets')).n, 0);
+  assert.equal((await stack.db.one('select count(*)::int as n from bilateral_near_requests')).n, 0);
+  assert.equal((await stack.db.one('select count(*)::int as n from play_account_grants')).n, 0);
+  assert.equal(near.bets.size, 0);
+  const reply = await stack.db.one('select body from bot_outbox where dedupe_key=$1', [`refused:${mention.id}`]);
+  assert.equal(reply.body, reason === 'claim_too_long'
+    ? 'That post is too long for a bet. Make a shorter post, then reply to it with your bet.'
+    : 'This bet request could not be read. Reply to the post with your bet again.');
+}
+
+test('oversized entity source claims refuse without queuing truncated words or creating a bet', async t => {
+  const { stack, near, fetchImpl, bot, author, prediction, mention } = await controlledStack(t);
+  prediction.entities.urls[1].expanded_url = 'https://example.com/' + 'a'.repeat(1000);
+  prediction.text += '.';
+  const processed = await processMention(stack.db, stack.config, { mention,
+    includes: { users: [author, bot], tweets: [prediction] }, bot: { userId: bot.id, username: bot.username } });
+  assert.equal(processed.outcome, 'saved');
+  const queued = await stack.db.one('select detail,words from bet_commands where event_id=$1', [mention.id]);
+  assert.deepEqual(queued, { detail: 'claim_too_long', words: null });
+  assert.deepEqual(await runBetCommands(stack.db, stack.config, near.chain, { botUsername: bot.username, fetchImpl }),
+    { done: 0, refused: 1, retry: 0, failed: 0 });
+  await assertRefusedWithoutBet(stack, near, mention, 'claim_too_long');
+});
+
+test('a malformed entity source envelope refuses before draft or funding side effects', async t => {
+  const { stack, near, fetchImpl, bot, author, prediction, mention } = await controlledStack(t);
+  prediction.text += '.';
+  const processed = await processMention(stack.db, stack.config, { mention,
+    includes: { users: [author, bot], tweets: [prediction] }, bot: { userId: bot.id, username: bot.username } });
+  assert.equal(processed.outcome, 'saved');
+  await stack.db.query('update bet_commands set words=$2 where event_id=$1',
+    [mention.id, '{"format":"x-source-entity-v1","claim":']);
+  assert.deepEqual(await runBetCommands(stack.db, stack.config, near.chain, { botUsername: bot.username, fetchImpl }),
+    { done: 0, refused: 1, retry: 0, failed: 0 });
+  await assertRefusedWithoutBet(stack, near, mention, 'invalid_claim');
 });
 
 test('entity enrichment preserves raw source comparison, while real edits retain links without rewriting bet terms', async t => {

@@ -6,7 +6,7 @@ import { inPilot } from './near-network.mjs';
 import { replyFor } from './replies.mjs';
 import { addInbox, restoreCommitment, UserError, userByXId } from './store.mjs';
 import { explicitlyMentions, postText, postUrl } from './xapi.mjs';
-import { placeholderSpan, readTerms, storeXText, storesAllXText, xClaimText } from './xtext.mjs';
+import { placeholderSpan, readTerms, storeXText, storesAllXText, xClaimSourceUrl, xClaimText } from './xtext.mjs';
 import { parseQuickBet } from './quick-bet.mjs';
 
 const STATUS_URL = /^https?:\/\/(?:www\.|mobile\.)?(?:x|twitter)\.com\/(\w{1,15}|i\/web)\/status\/(\d+)/i;
@@ -543,9 +543,11 @@ export async function processMention(db, config, { mention, includes = {}, bot, 
       // The play worker replies with a mainnet draft or a funded testnet bet.
       // It retains the words only until the bet has been created.
       if (offering) {
+        const entitySourceUrl = quickBet ? null : xClaimSourceUrl(claim, { post: target, text: targetText });
         await queueBetCommand(tx, { eventId: mention.id, xUserId: mention.author_id, username: requester.username,
           command: bet.error ? { ...bet, stake: null } : bet, saveId: save.id, words: quickBet ? quickBet.claim : claim,
           ...(quickBet ? { structuredTerms: quickBet } : {}),
+          ...(entitySourceUrl && entitySourceUrl !== xClaimSourceUrl(claim) ? { evidenceSourceUrl: entitySourceUrl } : {}),
           exclude: replyExclusions(mention, mention.author_id, bot.userId, target.author_id) });
         if (bet.error) await tx.query('update bet_commands set detail = $2 where event_id = $1', [mention.id, bet.error]);
       }

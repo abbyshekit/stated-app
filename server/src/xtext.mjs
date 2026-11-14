@@ -63,7 +63,18 @@ export function xClaimText(text, botUsername, { post } = {}) {
     (_, index) => index === undefined ? '\uE000' : literals[Number(index)]);
 }
 
-export function xClaimSourceUrl(claim) {
+export function xClaimSourceUrl(claim, { post, text } = {}) {
+  // The shortened token has an entity boundary that survives sentence punctuation.
+  // Once expanded into claim text, a final period is indistinguishable from a
+  // period that belongs to the URL path.
+  const raw = String(text ?? post?.note_tweet?.text ?? post?.text ?? '');
+  const token = raw.match(/(?:^|\s)Source:\s*(https:\/\/t\.co\/[A-Za-z0-9]+)[.!?]*\s*$/i)?.[1];
+  if (token) {
+    const urls = post?.note_tweet?.entities?.urls || post?.entities?.urls;
+    const entity = Array.isArray(urls) ? urls.slice(0, 100).find(link => link?.url === token) : null;
+    const expanded = safeEntityUrl(entity?.expanded_url) || safeEntityUrl(entity?.unwound_url);
+    if (expanded && /^https:\/\//i.test(expanded)) return expanded;
+  }
   const source = String(claim || '').match(/(?:^|\s)Source:\s*(https:\/\/\S+)\s*$/i)?.[1];
   return safeEntityUrl(source);
 }
