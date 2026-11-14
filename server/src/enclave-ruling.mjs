@@ -421,7 +421,7 @@ export function verifyRulingGpu(call, { jwks } = {}) {
   if (checkedAt < isoField(call.startedAt, 'startedAt') || checkedAt > isoField(call.completedAt, 'completedAt')) {
     fail('gpu.checkedAt must be within the call');
   }
-  const verified = verifyGpuJwt(gpu.jwt, { jwks });
+  const verified = verifyGpuJwt(gpu.jwt, { jwks, stored: true });
   if (verified.claims.eat_nonce.toLowerCase() !== call.nonce.toLowerCase()) fail('GPU JWT nonce does not match call nonce');
   return { checked: true, ...verified };
 }

@@ -2,7 +2,7 @@
 
 Stated can settle a bet without a Stated-controlled key. A keyless NEAR contract (the **referee**) is named as the referee in the escrow. To rule, it asks [OutLayer](https://app.outlayer.ai) to run a pinned WebAssembly program (the **jury**). The jury fetches the committed evidence, asks three NEAR AI Cloud models, and returns a result. The referee checks the result's internal consistency and tells the escrow to pay Yes, No or Void. If no ruling happens, anyone can refund both stakes seven days after the deadline.
 
-**Status, 14 November 2026.** The mainnet referee is deployed with zero access keys. Two operator-controlled bets completed the OutLayer jury, one Yes and one No, and each winner withdrew 0.2 NEAR. The [public demo](https://stated-mainnet-production.up.railway.app/demo) shows the outcomes and withdrawal links. `node scripts/verify-mainnet-demo.mjs` passed 15 public-data checks; [saved evidence](../evidence/mainnet-demo-20261114.json) records the run. It does not independently verify model attestation. [Remaining limits](#not-yet-proven) distinguish these completed trials from untested cases.
+**Status, 14 November 2026.** The mainnet referee is deployed with zero access keys. Two bets between our own accounts completed the OutLayer jury, one Yes and one No, and each winner withdrew 0.2 NEAR. The [public demo](https://stated-mainnet-production.up.railway.app/demo) shows the outcomes and withdrawal links. `node scripts/verify-mainnet-demo.mjs` passed 15 public-data checks; [saved evidence](../evidence/mainnet-demo-20261114.json) records the run. It does not independently verify model attestation. [Remaining limits](#not-yet-proven) distinguish these completed trials from untested cases.
 
 Source: referee [contracts/outlayer-referee/src/lib.rs](../contracts/outlayer-referee/src/lib.rs), jury [outlayer/stated-jury/src](../outlayer/stated-jury/src), server [server/src/outlayer.mjs](../server/src/outlayer.mjs).
 
@@ -271,7 +271,7 @@ The unoptimized referee is 366,450 bytes (`060afd90241448ac48fa6f55cc0c0e1f28a9a
 
 **What ran on testnet.** OutLayer testnet downloaded, checked, compiled and ran this jury build (`85198c7a…`) on 13 November (transaction `DXqcAog1Fu3VghLzPokvQmP5FwH2o8yJLDXVf4EPDGXZ`). The earlier build `3db75833…` differed only in the HTML extractor and is the one the full testnet referee chain used (deploy transaction `gLr8ByF2M2g55hC5rgePNfS9ePc2g5rvA56T5R2R5kF`); the referee fingerprint is the same in both. Records: [evidence/outlayer-testnet-probe-20261113.json](../evidence/outlayer-testnet-probe-20261113.json), [evidence/outlayer-testnet-referee-20261113.json](../evidence/outlayer-testnet-referee-20261113.json).
 
-**The full local gate.** `node scripts/verify-outlayer-local.mjs` runs locked offline tests, strict clippy and formatting for both crates, the lean-core checks, WASI clippy, the JavaScript parity harness and the escrow-window check; builds both artifacts from two copied checkouts with different path lengths, Cargo homes and target directories; and requires byte-identical raw and final files, valid WASM, no builder paths, and the NEAR host imports. The recorded run passed 69 jury tests, 78 referee tests and 6 lean-core tests; its parity harness covered 162 decision cases, 15 complete verdict inputs and 30 extraction cases (24 shared with the server extractor, 6 deliberate differences), all against mock transports. The escrow check shows the real escrow source paying selected Yes and No outcomes after seven days in accepted, proposed and disputed states.
+**The full local gate.** `node scripts/verify-outlayer-local.mjs` runs locked offline tests, strict clippy and formatting for both crates, the lean-core checks, WASI clippy, the JavaScript parity harness and the escrow-window check; builds both artifacts from two copied checkouts with different path lengths, Cargo homes and target directories; and requires byte-identical raw and final files, valid WASM, no builder paths, and the NEAR host imports. The [historical local run](../evidence/outlayer-local-validation.json) recorded 69 jury tests (the current source contains 70 `#[test]` cases), 78 referee tests and 6 lean-core tests; its parity harness covered 162 decision cases, 15 complete verdict inputs and 30 extraction cases (24 shared with the server extractor, 6 deliberate differences), all against mock transports. The escrow check shows the real escrow source paying selected Yes and No outcomes after seven days in accepted, proposed and disputed states.
 
 ## Deployment
 
@@ -322,7 +322,7 @@ To audit one ruling by hand: read `get_ruling(bet_id)` for the registered materi
 
 ## Live evidence so far
 
-The [mainnet verifier](../scripts/verify-mainnet-demo.mjs) rechecks both controlled trials through two public RPC providers, including committed terms, jury material, settlement receipt chains and exact native-token withdrawals. It needs no key.
+The [mainnet verifier](../scripts/verify-mainnet-demo.mjs) rechecks both controlled trials through two public RPC providers, including committed terms, jury material, settlement receipt chains and exact native-token withdrawals. Both sides of both trials are our own accounts. It needs no key.
 
 | Mainnet trial | Result | Withdrawal |
 | --- | --- | --- |

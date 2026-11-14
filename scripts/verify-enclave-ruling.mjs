@@ -193,7 +193,7 @@ function pageMaterial(page) {
   return { outcome, claim, deadline, termsHash: attributes.get('data-bet-terms-hash') };
 }
 
-export async function verifyRulingAttestations(record, add, { fetchImpl = fetch, jwks, offline = false, dstackVerifierUrl = process.env.DSTACK_VERIFIER_URL || DEFAULT_DSTACK_VERIFIER, networkOptions = {} } = {}) {
+export async function verifyRulingAttestations(record, add, { fetchImpl = fetch, jwks, gpuResults = new Map(), offline = false, dstackVerifierUrl = process.env.DSTACK_VERIFIER_URL || DEFAULT_DSTACK_VERIFIER, networkOptions = {} } = {}) {
   if (!offline) fetchImpl = verificationFetch(fetchImpl, networkOptions);
   const failures = [];
   const unavailable = [];
@@ -203,9 +203,9 @@ export async function verifyRulingAttestations(record, add, { fetchImpl = fetch,
     const matches = call.attestation.model_attestations.filter(candidate =>
       candidate.signing_algo === call.signature.signing_algo &&
       normalize(candidate.signing_address) === normalize(call.signature.signing_address));
-    if (matches.length !== 1) {
-      add('FAIL', 'Quote measurements', `${name}: signing report is not unique`);
-      failures.push(`${name}: signing report is not unique`);
+    if (!matches.length) {
+      add('FAIL', 'Quote measurements', `${name}: signing report is missing`);
+      failures.push(`${name}: signing report is missing`);
       continue;
     }
     const reports = [['gateway', call.attestation.gateway_attestation], ['model', matches[0]]];
@@ -245,7 +245,15 @@ export async function verifyRulingAttestations(record, add, { fetchImpl = fetch,
       || (!Object.hasOwn(call, 'gpu') && Object.hasOwn(matches[0], 'nvidia_payload')))) {
       add('NOT CHECKED', 'GPU attestation', `${name}; ${Object.hasOwn(call, 'gpu')
         ? 'NVIDIA signing keys are not supplied' : 'Stored raw evidence requires NVIDIA NRAS and signing keys'} ${OFFLINE_REASON}`);
-    } else if (call.gpu) add('PASS', 'GPU attestation', `NVIDIA NRAS verdict true, signed token verified; ${name}`);
+    } else if (call.gpu) {
+      try {
+        const result = gpuResults.get(call) ?? engine.verifyRulingGpu(call, { jwks });
+        if (result.code === 'NVIDIA_KEY_RETIRED') add('NOT CHECKED', 'GPU attestation', `${name}; ${result.message}`);
+        else add('PASS', 'GPU attestation', `NVIDIA NRAS verdict true, signed token verified; ${name}; NVIDIA key source: ${result.keySource}`);
+      } catch (error) {
+        add(error.code === 'NVIDIA_KEY_RETIRED' ? 'NOT CHECKED' : 'FAIL', 'GPU attestation', `${name}; ${error.message}`);
+      }
+    }
     else if (Object.hasOwn(matches[0], 'nvidia_payload')) {
       try {
         await verifyGpuPayload(matches[0].nvidia_payload, call.nonce, { fetchImpl, timeoutMs: null });
@@ -306,6 +314,7 @@ export async function verifyHostedEnclaveRuling(base = DEFAULT_BASE, betId, { fe
   }
 
   let record;
+  const gpuResults = new Map();
   try {
     if (offline && suppliedDocument === undefined) throw new Error('Offline verification requires a saved document');
     const document = offline || suppliedDocument !== undefined ? suppliedDocument
@@ -320,28 +329,29 @@ export async function verifyHostedEnclaveRuling(base = DEFAULT_BASE, betId, { fe
     if (!offline && jwks === undefined && calls.some(call => call && Object.hasOwn(call, 'gpu'))) {
       jwks = await getGpuJwks({ fetchImpl, timeoutMs: null });
     }
-    // GPU tokens are unsigned supplemental attachments, not part of the model's
-    // signed bytes. Without independently supplied NVIDIA keys, defer only that
-    // attachment check; retain the original record for explicit NOT CHECKED rows.
+    // GPU tokens are supplemental attachments outside the model's signed bytes.
+    // Validate each separately; only an unavailable signing key may be deferred.
+    // Keep the original record intact for the Court hash and explicit status rows.
     const withoutGpu = call => {
       if (!call || typeof call !== 'object') return call;
       if (Object.hasOwn(call, 'gpu')) {
         try {
           // An explicit null bypasses the process-wide key cache. Reuse the
           // metadata/JWT shape checks, deferring only the missing-key boundary.
-          engine.verifyRulingGpu(call, { jwks: null });
+          gpuResults.set(call, engine.verifyRulingGpu(call, { jwks: offline && jwks === undefined ? null : jwks }));
         } catch (error) {
-          if (error.message !== 'NVIDIA JWKS must contain keys') throw error;
+          if (error.code === 'NVIDIA_KEY_RETIRED') gpuResults.set(call, error);
+          else if (!(offline && jwks === undefined && error.message === 'NVIDIA JWKS must contain keys')) throw error;
         }
       }
       const signedCall = { ...call };
       delete signedCall.gpu;
       return signedCall;
     };
-    const coreRecord = offline && jwks === undefined ? { ...document.record,
+    const coreRecord = { ...document.record,
       plan: withoutGpu(document.record.plan),
       verdicts: Array.isArray(document.record.verdicts) ? document.record.verdicts.map(withoutGpu) : document.record.verdicts,
-    } : document.record;
+    };
     engine.verifyEnclaveRecord(coreRecord, { roots: [INTEL_SGX_ROOT_CA_PEM], jwks });
     record = document.record;
     add('PASS', 'Signed ruling', `Verified ${record.mode} outcome ${record.outcome}`);
@@ -358,7 +368,7 @@ export async function verifyHostedEnclaveRuling(base = DEFAULT_BASE, betId, { fe
   }
   add('PASS', 'Bet coverage', `Signed material lists Bet ${betId}; signed terms hash ${coveredBet.termsHash}`);
   await verifyCourtProposal(record, betId, add, { fetchImpl, offline });
-  try { await verifyRulingAttestations(record, add, { fetchImpl, jwks, dstackVerifierUrl, offline }); }
+  try { await verifyRulingAttestations(record, add, { fetchImpl, jwks, gpuResults, dstackVerifierUrl, offline }); }
   catch (error) { add('FAIL', 'Quote measurements', error.message); }
 
   add('PASS', 'Jury policy', `Models ${record.jury.models.map(model => JSON.stringify(model)).join(', ')}; minimum confidence ${record.jury.minConfidence}; every model must agree for Yes or No`);

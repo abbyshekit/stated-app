@@ -1,8 +1,16 @@
 // INTEGRATION: NVIDIA NRAS verdicts and offline ES384 authentication of stored GPU evidence.
-import { createPublicKey, verify } from 'node:crypto';
+import { createPublicKey, verify, X509Certificate } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 const NRAS = 'https://nras.attestation.nvidia.com';
 const JWKS_URL = `${NRAS}/.well-known/jwks.json`;
+// NVIDIA source: https://prod.vault.nvidia.com/v1/dgxc-attestation/pki/nras-prod/ca_chain
+// Re-fetch that chain, extract its self-signed CA 001 root, and compare
+// new X509Certificate(rootPem).fingerprint256 with this pin before replacing the PEM.
+const NVIDIA_ROOT_FINGERPRINT = 'CD:E2:69:E3:F7:2C:66:7A:EC:C2:D8:C1:AB:32:C4:E4:2A:AF:55:07:37:9F:15:F2:21:C7:7C:55:18:10:1A:1E';
+const SNAPSHOT_URL = new URL('../../evidence/nvidia-jwks-snapshot-20261114.json', import.meta.url);
+const ROOT_URL = new URL('../../evidence/nvidia-attestation-root-ca-001.pem', import.meta.url);
+const SNAPSHOT_SOURCE = `snapshot of 2026-11-14, certificate chain checked to NVIDIA Attestation Service CA 001 (${NVIDIA_ROOT_FINGERPRINT})`;
 const MAX_BYTES = 1_000_000;
 const JWKS_TTL_MS = 3_600_000;
 // Isolate injected test transports from NVIDIA's production key cache.
@@ -82,8 +90,43 @@ function jwtPart(value, name) {
   return bytes;
 }
 
+function snapshotKey(kid, iat, { snapshot, rootPem }) {
+  snapshot ??= JSON.parse(readFileSync(SNAPSHOT_URL, 'utf8'));
+  if (!Array.isArray(snapshot?.keys)) throw new Error('NVIDIA snapshot must contain keys');
+  const matches = snapshot.keys.filter(key => key?.kid === kid);
+  if (!matches.length) throw Object.assign(new Error('NVIDIA has retired this signing key'), { code: 'NVIDIA_KEY_RETIRED' });
+  if (matches.length !== 1) throw new Error('GPU JWT key id not found uniquely in NVIDIA snapshot');
+  const key = matches[0];
+  const root = new X509Certificate(rootPem ?? readFileSync(ROOT_URL));
+  if (root.fingerprint256 !== NVIDIA_ROOT_FINGERPRINT) throw new Error('NVIDIA root fingerprint differs from the pin');
+  if (!Array.isArray(key.x5c) || key.x5c.length !== 2) throw new Error('NVIDIA snapshot requires a leaf and intermediate certificate');
+  const [leaf, intermediate] = key.x5c.map(value => {
+    if (typeof value !== 'string') throw new Error('NVIDIA snapshot certificate must be canonical base64 DER');
+    const cert = new X509Certificate(Buffer.from(value, 'base64'));
+    if (cert.raw.toString('base64') !== value) throw new Error('NVIDIA snapshot certificate must be canonical base64 DER');
+    return cert;
+  });
+  const leafKey = leaf.publicKey.export({ format: 'jwk' });
+  if (['kty', 'crv', 'x', 'y'].some(field => leafKey[field] !== key[field])) {
+    throw new Error('NVIDIA leaf public key differs from the snapshot JWK');
+  }
+  if (leaf.ca || !leaf.checkIssued(intermediate) || !leaf.verify(intermediate.publicKey)) {
+    throw new Error('NVIDIA leaf is not signed by its intermediate');
+  }
+  if (!intermediate.ca || !intermediate.checkIssued(root) || !intermediate.verify(root.publicKey)
+      || !root.ca || !root.checkIssued(root) || !root.verify(root.publicKey)) {
+    throw new Error('NVIDIA intermediate does not chain to the pinned root CA');
+  }
+  const issuedAt = typeof iat === 'number' ? iat * 1000 : NaN;
+  if (!Number.isFinite(issuedAt) || [leaf, intermediate, root].some(cert =>
+    !(issuedAt >= Date.parse(cert.validFrom) && issuedAt <= Date.parse(cert.validTo)))) {
+    throw new Error('NVIDIA certificate chain was not valid at token iat');
+  }
+  return key;
+}
+
 /** Authenticate a historical token; current expiration is not a test of its recorded verdict. */
-export function verifyGpuJwt(jwt, { jwks = cachedGpuJwks() } = {}) {
+export function verifyGpuJwt(jwt, { jwks = cachedGpuJwks(), stored = false, snapshot, rootPem } = {}) {
   if (typeof jwt !== 'string' || Buffer.byteLength(jwt) > MAX_BYTES) throw new Error('GPU JWT must be a string of at most 1 MB');
   const parts = jwt.split('.');
   if (parts.length !== 3) throw new Error('GPU JWT must contain three parts');
@@ -94,8 +137,9 @@ export function verifyGpuJwt(jwt, { jwks = cachedGpuJwks() } = {}) {
       || 'crit' in header || 'b64' in header || signature.length !== 96) throw new Error('GPU JWT requires ES384 and a key id');
   if (!Array.isArray(jwks?.keys)) throw new Error('NVIDIA JWKS must contain keys');
   const matches = jwks.keys.filter(key => key?.kid === header.kid);
-  if (matches.length !== 1) throw new Error('GPU JWT key id not found uniquely in NVIDIA JWKS');
-  const key = matches[0];
+  const useSnapshot = !matches.length && stored === true;
+  if (!useSnapshot && matches.length !== 1) throw new Error('GPU JWT key id not found uniquely in NVIDIA JWKS');
+  const key = useSnapshot ? snapshotKey(header.kid, claims.iat, { snapshot, rootPem }) : matches[0];
   if (key.kty !== 'EC' || key.crv !== 'P-384' || (key.alg !== undefined && key.alg !== 'ES384')
       || (key.use !== undefined && key.use !== 'sig')
       || (key.key_ops !== undefined && (!Array.isArray(key.key_ops) || !key.key_ops.includes('verify')))) {
@@ -108,7 +152,7 @@ export function verifyGpuJwt(jwt, { jwks = cachedGpuJwks() } = {}) {
   if (claims.iss !== NRAS) throw new Error('GPU JWT issuer must be NVIDIA NRAS');
   nonce(claims.eat_nonce, 'GPU JWT eat_nonce');
   if (claims['x-nvidia-overall-att-result'] !== true) throw new Error('NVIDIA GPU attestation verdict is not true');
-  return { verdict: true, jwt, claims };
+  return { verdict: true, jwt, claims, keySource: useSnapshot ? SNAPSHOT_SOURCE : 'live JWKS' };
 }
 
 /** Submit the decoded payload unchanged, after checking its request nonce. */

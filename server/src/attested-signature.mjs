@@ -125,8 +125,8 @@ function timestamp(value, name) {
 
 /**
  * Before a completion: the report must answer this nonce, the gateway's quote must
- * verify, and every model candidate's quote must verify (the one whose key
- * signs the response is checked again, by name, in verifyAttestedRecord).
+ * verify, and every model candidate's quote must verify (those whose key
+ * signs the response are checked again, by name, in verifyAttestedRecord).
  */
 export function validatePreflight(evidence, nonceHex, { roots, now = new Date() } = {}) {
   const nonce = hex(nonceHex, 'nonce', 32, false);
@@ -144,7 +144,7 @@ export function validatePreflight(evidence, nonceHex, { roots, now = new Date() 
 
 /**
  * Verify exact-byte SHA-256 and the Ed25519 response signature, and authenticate
- * the Intel TDX quotes of the gateway report and of the model report whose key
+ * the Intel TDX quotes of the gateway report and of every model report whose key
  * signed the response: the quote signature, the QE report and its binding, the
  * certificate chain to the trusted Intel SGX root (valid at the record's
  * attestedAt), and report_data = signing key || nonce.
@@ -207,18 +207,18 @@ export function verifyAttestedRecord(record, { checkContent = verdict, roots } =
   if (!Array.isArray(evidence.model_attestations) || !evidence.model_attestations.length) {
     throw new Error('attestation.model_attestations must contain model evidence');
   }
-  let matches = 0;
-  let signerReport = null;
+  const matches = [];
   for (const [index, candidate] of evidence.model_attestations.entries()) {
     if (equal(report(candidate, `attestation.model_attestations[${index}]`, nonce), signer)) {
-      matches += 1;
-      signerReport = candidate;
+      matches.push(candidate);
     }
   }
-  if (matches !== 1) throw new Error('signature must match exactly one model-attestation signer');
+  if (!matches.length) throw new Error('signature must match a model-attestation signer');
   const at = new Date(attested);
   authenticate(evidence.gateway_attestation, 'attestation.gateway_attestation', record.nonce, roots, at);
-  authenticate(signerReport, 'signing model attestation', record.nonce, roots, at);
+  for (const candidate of matches) {
+    authenticate(candidate, 'signing model attestation', record.nonce, roots, at);
+  }
   const publicKey = createPublicKey({ key: Buffer.concat([ED25519_SPKI_PREFIX, signer]), format: 'der', type: 'spki' });
   if (!verify(null, Buffer.from(expectedText, 'utf8'), publicKey, signatureBytes)) {
     throw new Error('Ed25519 signature verification failed');
@@ -229,7 +229,7 @@ export function verifyAttestedRecord(record, { checkContent = verdict, roots } =
 }
 
 export const verificationRecipe = Object.freeze({
-  scope: 'This helper verifies exact signed bytes, signer consistency, and the Intel TDX quotes of the gateway and the signing model: quote and QE signatures, the certificate chain to the pinned Intel SGX root, report_data = signing key || nonce, and event-log replay against RTMR3 when a log is present. Ruling verification also checks stored NVIDIA GPU tokens when present. Not verified: TCB level and revocation collateral or measurement allowlists.',
+  scope: 'This helper verifies exact signed bytes, signer consistency, and the Intel TDX quotes of the gateway and the signing model: quote and QE signatures, the certificate chain to the pinned Intel SGX root, report_data = signing key || nonce, and event-log replay against RTMR3 when a log is present. Several replicas may attest the same signing key; every matching quote is verified. Ruling verification also checks stored NVIDIA GPU tokens when present. Not verified: TCB level and revocation collateral or measurement allowlists.',
   preflight: 'Generate and retain a fresh 32-byte nonce. Before completion, request /v1/attestation/report with canonical model, provider=near, signing_algo=ed25519, nonce, and x-no-aliasing:true. Retain every returned model candidate and the gateway report.',
   exactBytes: 'Send the canonical request model with x-no-aliasing:true and Accept-Encoding:identity. Preserve exact request and decompressed response bytes. Request the response signature with signing_algo=ed25519.',
   hardware: 'Use the official Verification Center or a DCAP quote verifier on the gateway and every model candidate. Apply explicit TCB/advisory and measurement/provenance policy; reject debug mode. Read signer and nonce binding from the verified quote report data and compare echoed fields.',

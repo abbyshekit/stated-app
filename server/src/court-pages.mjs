@@ -12,9 +12,10 @@ import { markedClaim } from './bet-view.mjs';
 import { juryLogos } from './settlement-view.mjs';
 import { outlayerModels } from './outlayer.mjs';
 import { baseDecode } from 'near-api-js';
+import { demoReady } from './demo-page.mjs';
 
 // DESIGN.md: the mainnet referee uses ordinary public rows and a collapsed configuration fold.
-async function outlayerCourt({ ctx, db, config, layout, send, chain }) {
+async function outlayerCourt({ ctx, db, config, layout, send, chain, demoEvidence }) {
   const referee = config.outlayer?.referee;
   if (!referee) return send(ctx.res, 503, await layout(ctx, 'OutLayer referee', html`<h1 class="court-title">OutLayer referee</h1><p class="gut">The referee is not configured. New bets are paused.</p>`, { flush: true }));
   let view; let keys;
@@ -57,7 +58,7 @@ async function outlayerCourt({ ctx, db, config, layout, send, chain }) {
       <p><a class="tl" href="/bets/${bet.id}/ruling">${bet.claim}</a></p>
       <p>${outcome(bet.outlayer.ruling.outcome || bet.outlayer.result?.outcome)}${bet.settled_at ? `, ${dayMonth(bet.settled_at, { year: true })}` : ''}.</p>
       <p>${bet.settlement_transaction_hash ? html`<a class="tl" href="${transactionLink(bet.settlement_transaction_hash)}" rel="noopener noreferrer">${bet.settlement_transaction_attribution === 'latest_verified_request' ? 'Ruling request' : 'Settlement transaction'}</a>` : 'Settlement transaction not confirmed.'}</p>
-    </div></li>`)}</ul>` : html`<p class="empty quiet">No public rulings yet.</p>`}
+    </div></li>`)}</ul>` : html`<p class="empty quiet">${demoReady(demoEvidence) ? html`<a class="tl" href="/demo">Mainnet rulings are shown in the demo.</a>` : 'No public rulings yet.'}</p>`}
     ${candidates.next ? html`<p class="gut"><a class="tl" rel="next" href="/court?before=${candidates.next}">More rulings</a></p>` : ''}
     <div class="folds"><details class="fold"><summary>Referee configuration</summary>
       <p>Escrow: <a class="tl" href="${accountLink(view.escrow)}">${view.escrow}</a></p>
@@ -141,9 +142,9 @@ function proposalDate(submissionTime, filedAt) {
 const councilAction = (status) => ({ Approved: 'Let it stand', Rejected: 'Voted it down', InProgress: 'Waiting',
   Removed: 'Removed', Expired: 'Expired', Failed: 'Failed', Moved: 'Moved' })[status] || 'Unavailable';
 
-export function registerCourtRoutes({ route, db, config, layout, send, notFound, chain }) {
+export function registerCourtRoutes({ route, db, config, layout, send, notFound, chain, demoEvidence = null }) {
   route('GET', /^\/court$/, async (ctx) => {
-    if (config.near?.real) return outlayerCourt({ ctx, db, config, layout, send, chain });
+    if (config.near?.real) return outlayerCourt({ ctx, db, config, layout, send, chain, demoEvidence });
     const dao = courtDao(config);
     if (!dao) return notFound(ctx);
     let policy; let proposals;

@@ -1,8 +1,57 @@
 # Judge path
 
+## Start here
+
+Use Node 22.9 or later and outbound HTTPS. From the repository root, install dependencies:
+
+```sh
+npm ci
+```
+
+Then run these read-only checks in order. No wallet, API key or transaction is needed.
+
+1. Mainnet ruled-and-paid trials between our own accounts:
+
+   ```sh
+   node scripts/verify-mainnet-demo.mjs
+   ```
+
+   Exact last line: `PASS mainnet demo: 2/2 cases; 15/15 checks`.
+
+2. Escrow, relay, Court policy and historical testnet bet:
+
+   ```sh
+   npm run judge
+   ```
+
+   Exact last line: `judge-chain: PASS (5 of 5 checks)`.
+
+3. Mainnet OutLayer deployment and pinned jury artifact, without a bet settlement check:
+
+   ```sh
+   npm run judge -- --outlayer --network mainnet \
+     --referee referee.statedforecast.near \
+     --referee-sha256 1f6b35b9fce99165af5090ff04d4ff6493933ec90ab3c0a37a532255bf46ed83 \
+     --jury-sha256 85198c7afbfca6ad6cb42c76fe064abdf480d18f4db4955b90ce205d768d9791 \
+     --wasm-url https://stated-production.up.railway.app/static/outlayer/stated-jury-85198c7afbfca6ad6cb42c76fe064abdf480d18f4db4955b90ce205d768d9791.wasm \
+     --secrets-owner statedforecast.near
+   ```
+
+   Exact last line: `judge-chain: PASS (9 of 9 checks)`. This does not check model attestation or a wallet withdrawal.
+
+4. Testnet signed enclave ruling and Court payout:
+
+   ```sh
+   npm run verify
+   ```
+
+   The payout step checks earlier bet `3668aa04`; the live ruling step selects `0bf4f3a7-8dfc-44e2-a139-1e33ce844178` and ends `37 checks passed, 0 failed, 0 not checked`. The runner’s exact last line is `final: PASS (3 verification steps)`. If NVIDIA has rotated a GPU token’s signing key out of its live set, the verifier checks that key’s certificate chain and retries against `evidence/nvidia-jwks-snapshot-20261114.json`, printing which source matched.
+
+Without network access, `npm run verify:offline` ends `final: PASS (1 verification step)`; this is a saved-record replay with network checks explicitly incomplete.
+
 ## Verify the mainnet demo
 
-Open the [public demo](https://stated-mainnet-production.up.railway.app/demo). It shows operator-controlled Yes and No bets, their jury verdicts and their 0.2 NEAR withdrawals. No sign-in is required. The X thread linked there demonstrates draft creation separately; its FAA draft expired unfunded.
+Open the [public demo](https://stated-mainnet-production.up.railway.app/demo). It shows Yes and No bets between our own accounts, their jury verdicts and their 0.2 NEAR withdrawals. No sign-in is required. The X thread linked there demonstrates draft creation separately; its FAA draft expired unfunded.
 
 The [56-second narrated walkthrough](docs/stated-demo-mainnet.mp4) shows the live sentence-to-review flow and the completed controlled payouts.
 
@@ -12,6 +61,10 @@ After `npm ci`, run:
 node scripts/verify-mainnet-demo.mjs
 ```
 
+Exact last line: `PASS mainnet demo: 2/2 cases; 15/15 checks`.
+
+Both sides of both bets are team-held: `abhishekesq.play.statedforecast.near` and `statedforecast.play.statedforecast.near`. Both payouts went to `abhishekesq.play.statedforecast.near`. These are controlled IANA documentation-domain claims, not evidence of outside participation. The [mainnet Court](https://stated-mainnet-production.up.railway.app/court) currently lists no public rulings; these trials are shown separately on the demo.
+
 The command reads public data, needs no key and exits nonzero on a failed check. The [saved run](evidence/mainnet-demo-20261114.json) passed 15 checks: the referee deployment, exact bet terms and material commitments, unanimous model verdicts, settlement receipt chains, and exact native-token withdrawals to the winning account. Both configured RPC providers must agree. Wrong amounts are explicitly rejected. This verifies the on-chain result and payout; it does not independently verify model attestation.
 
 - Yes withdrawal: [Cd1bvxP9…](https://nearblocks.io/txns/Cd1bvxP93A8DEmF4mU27tjMvDXiQkYSyt44NrzbhRiQm).
@@ -19,16 +72,89 @@ The command reads public data, needs no key and exits nonzero on a failed check.
 
 ## Verify the demo bet
 
-The earlier [testnet video](docs/stated-demo-live-testnet.mp4) shows the [ruling on bet 0bf4f3a7](https://stated-production.up.railway.app/bets/0bf4f3a7-8dfc-44e2-a139-1e33ce844178/ruling) and its 0.2 test NEAR withdrawal. Run these after `npm ci`. They use public data and need no wallet or API key.
+The earlier [testnet video](docs/stated-demo-live-testnet.mp4) shows the [ruling on bet 0bf4f3a7](https://stated-production.up.railway.app/bets/0bf4f3a7-8dfc-44e2-a139-1e33ce844178/ruling) and its 0.2 test NEAR withdrawal. Run this public-data check after `npm ci`; it needs no wallet or API key.
 
 ```sh
 node scripts/verify-enclave-ruling.mjs https://stated-production.up.railway.app 0bf4f3a7-8dfc-44e2-a139-1e33ce844178
-node scripts/verify-hosted-payout.mjs evidence/hosted-demo-payout-testnet-20261113.json
 ```
 
-The first command checks the signed ruling and its link to Stated Court proposal 5. The second checks the approved proposal and the exact withdrawal, including the transfer to the winning account and its successful escrow callback.
+The command ends `37 checks passed, 0 failed, 0 not checked` and checks the signed ruling’s link to Stated Court proposal 5. The separate [payout evidence](evidence/hosted-demo-payout-testnet-20261113.json) records this bet’s withdrawal; the aggregate `npm run verify` checks the earlier `3668aa04` Court payout. Payout verification requires both archival providers; an unavailable provider leaves it incomplete.
 
-## Check it yourself
+## Testnet Court reference
+
+- Stated lets two people bet on a post on X. Three models from three makers, each in its own NEAR AI enclave, must all agree on the outcome (80% confidence or more) or both stakes go back. A NEAR escrow contract pays the winner.
+- The testnet app uses test NEAR. The first jury payout, `3668aa04`, involved two operator accounts. The later `0bf4f3a7` payout verifier establishes the recipient account, without establishing who controls the X handles. Mainnet proof is the two ruled-and-paid trials between our own accounts above.
+- The home page’s “outside the team” counter classifies accounts, not people. The evidence files do not establish outside participation; no adoption count is claimed here.
+
+## 1. See the ruling (30 seconds, browser)
+
+Open https://stated-production.up.railway.app/bets/3668aa04-7009-4b85-b19d-debfabebbf96/ruling
+
+You see: the claim ("NEAR/USD will be above US$3.30 at 19:15 UTC on 12 November 2026"), three verdicts, Qwen3.8 27B yes at 100%, DeepSeek V4.1 yes at 98%, GLM-5.3 Flash yes at 98%, the Coinbase price US$3.4206, the line "@ChainAbstracted won the 0.02 test NEAR pot", each model's reason, and a "Check it yourself" section ending in the command in step 3. The same figures are in [enclave-ruling-3668aa04.json](evidence/enclave-ruling-3668aa04.json) and [hosted-court-payout-testnet-20261112.json](evidence/hosted-court-payout-testnet-20261112.json) (`stakeYoctoEach` 10000000000000000000000 per side, `payout.amountYocto` 20000000000000000000000).
+
+## 2. See the Court (30 seconds, browser)
+
+Open https://stated-production.up.railway.app/court
+
+You see: "Every ruling waits ten minutes on NEAR. The council can vote it down before anyone is paid." A list of rulings, each marked "Let it stand" or "Voted it down" with its vote count, then "How the court is set up": the DAO `stated-court.sputnik-v2.testnet`, a jury that is only `jury.stated-court-relay.testnet`, and a council `stated-court-18ecdebd.testnet`. The list is read live, so it can hold more rulings than were there when this file was written; the `3668aa04` ruling is listed as "The models said yes. @ChainAbstracted was paid 0.02 test NEAR."
+
+## 3. Re-check the ruling from outside (about 2 minutes)
+
+```sh
+npm run verify
+```
+
+You see three steps and a last line `final: PASS (3 verification steps)`:
+
+- the offline replay of the saved ruling, ending `EXPECTED INCOMPLETE` (it cannot check the network parts offline; `17 checks passed, 0 failed, 21 not checked`);
+- the live ruling check of `0bf4f3a7-8dfc-44e2-a139-1e33ce844178`, ending `37 checks passed, 0 failed, 0 not checked`: Intel TDX quotes to Intel's root, Ed25519 signatures, NVIDIA GPU attestation, boot measurements against the published dstack 0.5.12 image, the Coinbase candle fetched again, and the Court proposal that settled the bet;
+- the earlier `3668aa04` Court payout check, ending `live hosted payout: PASS (exit 0)`.
+
+The live check uses NVIDIA’s live keys first, then the certificate-checked snapshot `evidence/nvidia-jwks-snapshot-20261114.json` for a rotated signing key, printing the matched source. Without network access, `npm run verify:offline` runs only the first step, ending `final: PASS (1 verification step)`.
+
+## 4. Check the chain (10 seconds)
+
+```sh
+npm run judge
+```
+
+You see five `PASS` lines and `judge-chain: PASS (5 of 5 checks)`. The command asks public NEAR RPC (`test.rpc.fastnear.com` and `free.rpc.fastnear.com`, each with a second endpoint and at most three tries per call) and prints `FAIL` and exits 1 on any difference. The five checks:
+
+| Check | Expected | Where the expected value is recorded |
+| --- | --- | --- |
+| Testnet escrow `stated-escrow-52081551be.testnet` | 0 access keys, `version()` = `"2"`, code hash `Bqr2TsgyFRNDw2GZ6q9aT7cMAnjZNERKdzaBstRgKaAg` | [reply-bets-testnet-live.json](evidence/reply-bets-testnet-live.json), `contractDeployment.wasmSha256` `a1182e5c…a2d5` in hex; the script converts it to base58 |
+| Mainnet escrow `escrow.statedforecast.near` | 0 access keys, `version()` = `"2"`, code hash `6vSbm6dg1F6gyEggDNtd5t3MrDmGZBgSgE4NjHwEmS33` | [escrow-deploy-mainnet-20261111.json](evidence/escrow-deploy-mainnet-20261111.json), `wasmSha256` `57fb29aa…3d6a` |
+| Relay `jury.stated-court-relay.testnet` | 0 access keys | [jury-relay-deploy-testnet-20261112.json](evidence/jury-relay-deploy-testnet-20261112.json) |
+| Court DAO `stated-court.sputnik-v2.testnet` | the relay is the only jury member; the council holds only `call:VoteReject` and `call:VoteRemove`; two roles, no role-specific voting rule | [court-harden-testnet-20261112.json](evidence/court-harden-testnet-20261112.json); the rule is the one the server enforces in [court-dao.mjs](server/src/court-dao.mjs) |
+| Bet `3668aa04-7009-4b85-b19d-debfabebbf96` on the testnet escrow | `status` `settled`, `resolution.outcome` `yes` | [hosted-court-payout-testnet-20261112.json](evidence/hosted-court-payout-testnet-20261112.json) |
+
+The mainnet line checks only the escrow deployment; use the mainnet demo verifier for the two ruled-and-paid trials between our own accounts.
+
+## 5. Look at the chain without our code (optional, 1 minute)
+
+The same facts by hand, with `curl` and a public RPC, are in [README, "Check the chain yourself"](README.md#check-the-chain-yourself). Or open the accounts in an explorer: [testnet escrow](https://testnet.nearblocks.io/address/stated-escrow-52081551be.testnet), [relay](https://testnet.nearblocks.io/address/jury.stated-court-relay.testnet), [mainnet escrow](https://nearblocks.io/address/escrow.statedforecast.near). You see the contract accounts with no access keys.
+
+## 6. Run the tests (optional)
+
+```sh
+npm test
+```
+
+Runs the whole suite when PostgreSQL 15+ (`initdb`, `pg_ctl`) is on PATH, otherwise the files that need no database and a note saying which it skipped. Setting `STATED_TEST_REQUIRE_PG=1` makes unavailable PostgreSQL a failure instead of a skip.
+
+## 7. How the jury did on hard cases
+
+[results-three-makers.json](evidence/jury-eval-20261112/results-three-makers.json), `summary.tally`: 116 cases, 116 correct, 0 wrong winner, 0 paid instead of a refund. The cases are written text, not real disputes, and the drill does not test the enclave ([README](README.md) says so as well).
+
+## 8. Read what is open
+
+[docs/SECURITY.md](docs/SECURITY.md) lists each finding, its fix and its test, and ends with what is still open, including that the council is one operator account.
+
+## 9. Make a bet yourself (needs an X account)
+
+Follow [README, Try it](README.md#try-it) on the [mainnet app](https://stated-mainnet-production.up.railway.app/). New bets use real NEAR, up to 1 NEAR per bet, subject to its terms. The X bot now belongs to the mainnet path; the historical testnet reply walkthrough does not establish current testnet intake.
+
+## OutLayer reference
 
 **Mainnet OutLayer deployment: 9 of 9 checks passed.** [Saved verification](evidence/judge-outlayer-mainnet.json)
 
@@ -43,14 +169,19 @@ npm run judge -- --outlayer --network mainnet \
   --secrets-owner statedforecast.near
 ```
 
-The deployment check covers the first three items below. The [mainnet demo verifier](#verify-the-mainnet-demo) also checks the two completed controlled settlements and their withdrawals.
+The deployment check covers the following items. The [mainnet demo verifier](#verify-the-mainnet-demo) also checks both completed settlements between our own accounts and their withdrawals.
 
 - Referee: no access keys; code hash matches the approved referee build.
 - Config: expected escrow, OutLayer contract, jury URL/hash, secrets owner and profile.
 - Jury: downloaded bytes match the pinned SHA-256.
-- Bet: named referee, ruling stage/outcome, successful archival settlement and credits to the correct side.
 
-Settlement credits remain in escrow until withdrawal; this command checks those credits through public RPC, needs no key and exits nonzero on a failed or pending bet check. Saved JSON records observed values and check time, excluding local paths and environment contents.
+With `--bet-id`, additional checks cover the named referee, ruling stage/outcome, successful archival settlement and credits to the correct side.
+
+Settlement credits remain in escrow until withdrawal. Only a run with `--bet-id` checks those credits through public RPC and exits nonzero on a failed or pending bet check; the deployment-only command above does not. Saved JSON records observed values and check time, excluding local paths and environment contents.
+
+### Artifact availability
+
+The deployed referee pins the jury URL on the testnet Railway host even for mainnet. The exact WASM is tracked under `server/public/outlayer/` and included by the Dockerfile’s `COPY . .`; its hash is checked on download. Both hosted services must remain available through judging (16–18 November 2026); the [hackathon rules](https://nearhackathon.com/HACKATHON.md) prefer availability through 25 November. This document does not establish a hosting guarantee.
 
 ### OutLayer options
 
@@ -85,82 +216,13 @@ The referee is keyless; the original signer is a caller or OutLayer worker. If t
 
 At both historical boundaries, the referee must have the approved code and no keys; the escrow must have its recorded code and no keys (using the same build records as the legacy judge checks). The reads also check the bet transition and both participants' net credit changes: both stakes to the Yes/No winner, or one stake each for Void.
 
+The archival endpoint returned HTTP 429 for both bet-specific mainnet commands and their retries on 14 November 2026, so those commands are omitted. The mainnet demo verifier above passed through its configured public RPC providers for both trials between our own accounts.
+
 Other credit activity in that block can prevent the comparison from passing. A selected bet that has not settled fails; a run without `--bet-id` checks deployment only and labels that limit in its JSON. Neither mode verifies model attestations or a later withdrawal to a wallet.
 
 [Judge CI](.github/workflows/judge.yml) runs `npm ci`, `npm run verify:offline`, `npm run test:judge` and both OutLayer Rust test suites on pushes and pull requests. The daily mainnet job skips until repository variables for the referee, both hashes, jury URL and secrets owner are set. Set `JUDGE_BET_ID` to include settlement checks. Its `judge-outlayer-mainnet` artifact contains the JSON result even on a check failure. The saved deployment result covers the referee and its jury artifact.
 
-Five minutes, nine steps. Each is a command or a link, then exactly what you should see. Steps 1 to 3 and 5 need only a browser or Node 22.9 or later; none needs an X account, wallet or API key, and every command is read-only (no transaction is sent, no key is read). Every number below comes from a file in [evidence/](evidence/) or from a command you can run.
 
-## Current testnet path
+## Hackathon disclosure
 
-- Stated lets two people bet on a post on X. Three models from three makers, each in its own NEAR AI enclave, must all agree on the outcome (80% confidence or more) or both stakes go back. A NEAR escrow contract pays the winner.
-- The testnet app uses test NEAR. The first jury payout, `3668aa04`, involved two operator accounts. The demo shows a later bet between two X handles, and the payout verifier establishes the account that received the transfer. On mainnet, the escrow settled one pilot bet by agreement. The OutLayer referee is deployed there ([saved verification](evidence/judge-outlayer-mainnet.json)).
-- The home page shows "N bets taken by people outside the team" only when N is at least 1, counting public bets whose taker is not an operator account.
-
-## 1. See the ruling (30 seconds, browser)
-
-Open https://stated-production.up.railway.app/bets/3668aa04-7009-4b85-b19d-debfabebbf96/ruling
-
-You see: the claim ("NEAR/USD will be above US$3.30 at 19:15 UTC on 12 November 2026"), three verdicts, Qwen3.8 27B yes at 100%, DeepSeek V4.1 yes at 98%, GLM-5.3 Flash yes at 98%, the Coinbase price US$3.4206, the line "@ChainAbstracted won the 0.02 test NEAR pot", each model's reason, and a "Check it yourself" section ending in the command in step 3. The same figures are in [enclave-ruling-3668aa04.json](evidence/enclave-ruling-3668aa04.json) and [hosted-court-payout-testnet-20261112.json](evidence/hosted-court-payout-testnet-20261112.json) (`stakeYoctoEach` 10000000000000000000000 per side, `payout.amountYocto` 20000000000000000000000).
-
-## 2. See the Court (30 seconds, browser)
-
-Open https://stated-production.up.railway.app/court
-
-You see: "Every ruling waits ten minutes on NEAR. The council can vote it down before anyone is paid." A list of rulings, each marked "Let it stand" or "Voted it down" with its vote count, then "How the court is set up": the DAO `stated-court.sputnik-v2.testnet`, a jury that is only `jury.stated-court-relay.testnet`, and a council `stated-court-18ecdebd.testnet`. The list is read live, so it can hold more rulings than were there when this file was written; the `3668aa04` ruling is listed as "The models said yes. @ChainAbstracted was paid 0.02 test NEAR."
-
-## 3. Re-check the ruling from outside (about 2 minutes)
-
-```sh
-npm ci && npm run verify
-```
-
-You see three steps and a last line `final: PASS (3 verification steps)`:
-
-- the offline replay of the saved ruling, ending `EXPECTED INCOMPLETE` (it cannot check the network parts offline; `17 checks passed, 0 failed, 21 not checked`);
-- the live ruling check, ending `37 checks passed, 0 failed, 0 not checked` ([saved output](evidence/verify-enclave-ruling-3668aa04-20261112.txt)): Intel TDX quotes to Intel's root, Ed25519 signatures, NVIDIA GPU attestation, boot measurements against the published dstack 0.5.12 image, the Coinbase candle fetched again, and the Court proposal that settled the bet;
-- the live Court payout check, ending `live hosted payout: PASS (exit 0)`.
-
-Without network access, `npm run verify:offline` runs only the first step.
-
-## 4. Check the chain (10 seconds)
-
-```sh
-npm run judge
-```
-
-You see five `PASS` lines and `judge-chain: PASS (5 of 5 checks)`. The command asks public NEAR RPC (`test.rpc.fastnear.com` and `free.rpc.fastnear.com`, each with a second endpoint and at most three tries per call) and prints `FAIL` and exits 1 on any difference. The five checks:
-
-| Check | Expected | Where the expected value is recorded |
-| --- | --- | --- |
-| Testnet escrow `stated-escrow-52081551be.testnet` | 0 access keys, `version()` = `"2"`, code hash `Bqr2TsgyFRNDw2GZ6q9aT7cMAnjZNERKdzaBstRgKaAg` | [reply-bets-testnet-live.json](evidence/reply-bets-testnet-live.json), `contractDeployment.wasmSha256` `a1182e5c…a2d5` in hex; the script converts it to base58 |
-| Mainnet escrow `escrow.statedforecast.near` | 0 access keys, `version()` = `"2"`, code hash `6vSbm6dg1F6gyEggDNtd5t3MrDmGZBgSgE4NjHwEmS33` | [escrow-deploy-mainnet-20261111.json](evidence/escrow-deploy-mainnet-20261111.json), `wasmSha256` `57fb29aa…3d6a` |
-| Relay `jury.stated-court-relay.testnet` | 0 access keys | [jury-relay-deploy-testnet-20261112.json](evidence/jury-relay-deploy-testnet-20261112.json) |
-| Court DAO `stated-court.sputnik-v2.testnet` | the relay is the only jury member; the council holds only `call:VoteReject` and `call:VoteRemove`; two roles, no role-specific voting rule | [court-harden-testnet-20261112.json](evidence/court-harden-testnet-20261112.json); the rule is the one the server enforces in [court-dao.mjs](server/src/court-dao.mjs) |
-| Bet `3668aa04-7009-4b85-b19d-debfabebbf96` on the testnet escrow | `status` `settled`, `resolution.outcome` `yes` | [hosted-court-payout-testnet-20261112.json](evidence/hosted-court-payout-testnet-20261112.json) |
-
-The mainnet line checks the escrow deployment. The pilot round settled by agreement and is outside the scope of this command.
-
-## 5. Look at the chain without our code (optional, 1 minute)
-
-The same facts by hand, with `curl` and a public RPC, are in [README, "Check the chain yourself"](README.md#check-the-chain-yourself). Or open the accounts in an explorer: [testnet escrow](https://testnet.nearblocks.io/address/stated-escrow-52081551be.testnet), [relay](https://testnet.nearblocks.io/address/jury.stated-court-relay.testnet), [mainnet escrow](https://nearblocks.io/address/escrow.statedforecast.near). You see the contract accounts with no access keys.
-
-## 6. Run the tests (optional)
-
-```sh
-npm test
-```
-
-Runs the whole suite when PostgreSQL 15+ (`initdb`, `pg_ctl`) is on PATH, otherwise the files that need no database and a note saying which it skipped. `STATED_TEST_REQUIRE_PG=1 npm test` fails instead of skipping.
-
-## 7. How the jury did on hard cases
-
-[results-three-makers.json](evidence/jury-eval-20261112/results-three-makers.json), `summary.tally`: 116 cases, 116 correct, 0 wrong winner, 0 paid instead of a refund. The cases are written text, not real disputes, and the drill does not test the enclave ([README](README.md) says so as well).
-
-## 8. Read what is open
-
-[docs/SECURITY.md](docs/SECURITY.md) lists each finding, its fix and its test, and ends with what is still open, including that the council is one operator account.
-
-## 9. Make a bet yourself (needs an X account)
-
-Reply to any post on X with `@statedforecast bet 0.1 no` (the amount is test NEAR). The [home page](https://stated-production.up.railway.app) says which bot account is live. Nothing here is required to judge the entry; if you do take a bet and you are not on the team, the home page will show it in its "bets taken by people outside the team" line.
+[README disclosure](README.md#built-during-near-hackathon) records the author’s account of the project’s start and baseline. No pre-hackathon project code is declared. The public history begins on 11 November 2026; the earlier working-folder date is author-reported, not established by Git. Pre-existing libraries and services are listed in the README, including the NEAR JavaScript SDKs, Meteor Wallet SDK, PostgreSQL driver, decimal.js, Rust near-sdk, Sputnik DAO v2, NEAR AI Cloud and the attestation services. Codex and Claude Code assisted under the author’s direction.

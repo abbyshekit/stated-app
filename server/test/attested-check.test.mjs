@@ -310,6 +310,32 @@ test('the standalone verifier accepts signed bytes and rejects a changed respons
   assert.throws(() => verifyAttestedRecord(record), /responseHash/);
 });
 
+test('the standalone verifier accepts several replicas attesting the signing key', () => {
+  const record = standaloneRecord();
+  const candidate = record.attestation.model_attestations[0];
+  record.attestation.model_attestations.push(structuredClone(candidate), structuredClone(candidate));
+  assert.equal(verifyAttestedRecord(record).quote, 'tdx_chain_verified');
+});
+
+test('the standalone verifier authenticates every matching replica quote', () => {
+  for (const invalidIndex of [0, 1]) {
+    const record = standaloneRecord();
+    const candidates = record.attestation.model_attestations;
+    candidates.push(structuredClone(candidates[0]));
+    // Keep the echoed nonce correct, but supply a valid quote bound to another nonce.
+    candidates[invalidIndex].intel_quote = report('cd'.repeat(32), record.signature.signing_address).intel_quote;
+    assert.throws(() => verifyAttestedRecord(record), /signing model attestation quote does not verify/);
+  }
+});
+
+test('the standalone verifier rejects a signer absent from the model attestations', () => {
+  const record = standaloneRecord();
+  record.attestation.model_attestations = [report(record.nonce, keys().address)];
+  assert.throws(() => verifyAttestedRecord(record), {
+    message: 'signature must match a model-attestation signer',
+  });
+});
+
 async function cli(base) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [CLI, base, BET], { stdio: ['ignore', 'pipe', 'pipe'] });

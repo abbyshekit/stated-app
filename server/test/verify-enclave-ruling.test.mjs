@@ -69,6 +69,16 @@ test('live measurements cover gateway and signing model of the plan and every ve
   assert.equal(checks.some(row => row.check === 'Attestation limits'), false);
 });
 
+test('live measurements accept replica reports sharing the signing key', async () => {
+  const record = fixture();
+  for (const call of [record.plan, ...record.verdicts]) {
+    call.attestation.model_attestations.push(structuredClone(call.attestation.model_attestations[1]));
+  }
+  const checks = await run(record);
+  assert.equal(checks.some(row => row.status === 'FAIL'), false);
+  assert.equal(checks.filter(row => row.check === 'Quote measurements' && row.status === 'PASS').length, 6);
+});
+
 test('prints stored results separately, then checks the same reports live', async () => {
   const record = fixture();
   record.plan.dstack = { gateway: { verifier, checkedAt: '2026-11-12T00:00:00.000Z', error: 'previous timeout' },
@@ -389,4 +399,22 @@ test('offline argument and file errors are clear, nonzero, and independent of ve
   const missingFile = offlineCli(join(tmpdir(), `stated-missing-${process.pid}`, 'missing.json'));
   assert.equal(missingFile.status, 1);
   assert.match(missingFile.stdout, /FAIL Offline file: Cannot verify .*ENOENT/);
+});
+
+test('retired keys outside the snapshot stay NOT CHECKED while snapshot keys disclose their chain', async () => {
+  const document = JSON.parse(await readFile(new URL('../../evidence/enclave-ruling-3668aa04.json', import.meta.url), 'utf8'));
+  const call = document.record.plan;
+  const header = JSON.parse(Buffer.from(call.gpu.jwt.split('.')[0], 'base64url'));
+  assert.equal(header.x5c, undefined, 'the retired real token has no embedded signing certificate');
+  const result = await offlineDocument(document, { jwks: { keys: [] } });
+  assert.equal(result.exitCode, 2);
+  assert.equal(result.checks.some(c => c.status === 'FAIL'), false);
+  assert.equal(result.checks.find(c => c.check === 'Signed ruling').status, 'PASS');
+  assert.ok(result.checks.some(c => c.check === 'GPU attestation' && c.status === 'NOT CHECKED'
+    && c.detail.includes('NVIDIA has retired this signing key')));
+  const checked = result.checks.filter(c => c.check === 'GPU attestation' && c.status === 'PASS');
+  assert.equal(checked.length, 2);
+  assert.ok(checked.every(c => c.detail.includes('snapshot of 2026-11-14, certificate chain checked to NVIDIA Attestation Service CA 001 (CD:E2:69:E3:')));
+  assert.ok(checked.every(c => !c.detail.includes('live JWKS')));
+  assert.equal(result.checks.filter(c => c.check === 'GPU attestation' && c.status === 'NOT CHECKED').length, 2);
 });

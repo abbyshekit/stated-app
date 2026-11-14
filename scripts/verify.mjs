@@ -7,8 +7,8 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 export const verificationSteps = Object.freeze([
   { name: 'offline enclave ruling', script: 'scripts/verify-enclave-ruling.mjs', args: ['--offline', 'evidence/enclave-ruling-3668aa04.json'], offline: true },
-  { name: 'live enclave ruling', script: 'scripts/verify-enclave-ruling.mjs', args: [] },
-  { name: 'live hosted payout', script: 'scripts/verify-hosted-payout.mjs', args: ['evidence/hosted-court-payout-testnet-20261112.json'] },
+  { name: 'live enclave ruling', script: 'scripts/verify-enclave-ruling.mjs', args: ['https://stated-production.up.railway.app', '0bf4f3a7-8dfc-44e2-a139-1e33ce844178'] },
+  { name: 'live hosted payout', script: 'scripts/verify-hosted-payout.mjs', args: ['evidence/hosted-demo-payout-testnet-20261113.json'] },
 ]);
 
 function resultFor(step, child) {
