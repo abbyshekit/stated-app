@@ -16,8 +16,11 @@ import { runOutlayerKeeper } from '../src/outlayer.mjs';
 import { assertNetworkConfig, loadConfig } from '../src/config.mjs';
 import { refreshOpenDeposits } from '../src/funding.mjs';
 import { isAccount, network } from '../src/near-network.mjs';
-import { assertDatabaseNetwork, claimPlayAccount, ensureFunds, playAccountFor, referee, shortfall, topUpReferee, yocto } from '../src/play.mjs';
+import { assertDatabaseNetwork, claimPlayAccount, ensureFunds, ensurePlayAccount, playAccountFor, playAction, referee, shortfall, topUpReferee, yocto } from '../src/play.mjs';
 import { prepareNearAction } from '../src/near-bets.mjs';
+import { publishBet, consentToPublicBet } from '../src/bet-public.mjs';
+import { userByXId } from '../src/store.mjs';
+import { processMention } from '../src/intake.mjs';
 import { runBetCommands, settleReplyBets } from '../src/reply-bets.mjs';
 import { createApp } from '../src/web.mjs';
 import { tick } from '../src/worker.mjs';
@@ -72,6 +75,7 @@ const MAINNET = {
   STATED_NEAR_NETWORK: 'mainnet', STATED_MAINNET: 'real-funds', STATED_TOKEN_KEY: 'k'.repeat(44),
   STATED_NEAR_CONTRACT: 'escrow.stated.near', STATED_PLAY: '1', STATED_PLAY_TREASURY: TREASURY, STATED_PLAY_TREASURY_KEY: 'ed25519:test-treasury-secret',
   STATED_PILOT_X_IDS: '7001,7002,7004', STATED_INTENTS_QUOTES: '1', STATED_INTENTS_DEPOSITS: '1', STATED_PLAY_SETTLE_DELAY_SECONDS: '0',
+  STATED_REPLY_LINKS: '1',
 };
 
 before(async () => {
@@ -136,6 +140,40 @@ test('a database belongs to one network', async () => {
 
 let post; let firstTry;
 
+test('an explicit natural X mention queues a structured UTC draft; the same text without the bot mention does not', async () => {
+  const createdAt = new Date(Date.now());
+  createdAt.setUTCDate(createdAt.getUTCDate() + 1);
+  createdAt.setUTCHours(12, 0, 0, 0);
+  const bot = { userId: '500', username: 'statedbot' };
+  const mention = s.fakeX.post(X.oskar.id, '@statedbot FAA lifts restrictions by midnight, 0.25 NEAR on yes', { at: createdAt });
+  const processed = await processMention(s.db, s.config, { mention, includes: { users: [X.oskar] }, bot });
+  assert.equal(processed.outcome, 'saved');
+  const queued = await one('select * from bet_commands where event_id=$1', [mention.id]);
+  assert.equal(queued.status, 'queued');
+  const terms = JSON.parse(queued.words);
+  assert.equal(terms.format, 'quick-x-v1');
+  assert.equal(terms.claim, 'FAA lifts restrictions by midnight');
+  assert.equal(terms.creatorSide, 'yes');
+  assert.equal(terms.stakeNear, '0.25');
+  assert.equal(terms.resolveAt, new Date(Date.UTC(createdAt.getUTCFullYear(), createdAt.getUTCMonth(), createdAt.getUTCDate() + 1)).toISOString());
+  assert.equal(queued.save_id != null, true, 'the X mention URL is retained through its source save');
+  const source = await one('select src.url from saves s join statements st on st.id=s.statement_id join sources src on src.id=st.source_id where s.id=$1', [queued.save_id]);
+  assert.equal(source.url, `https://x.com/oskar/status/${mention.id}`);
+
+  const unmentioned = s.fakeX.post(X.oskar.id, 'FAA lifts restrictions by midnight, 0.25 NEAR on yes', { at: createdAt });
+  await processMention(s.db, s.config, { mention: unmentioned, includes: { users: [X.oskar] }, bot });
+  assert.equal(await one('select 1 as found from bet_commands where event_id=$1', [unmentioned.id]), null);
+  assert.deepEqual(await run(), { done: 1, refused: 0, retry: 0, failed: 0 });
+  const done = await one('select bet_id, status, words from bet_commands where event_id=$1', [mention.id]);
+  assert.equal(done.status, 'done');
+  assert.equal(done.words, null, 'retry payloads are cleared after the idempotent draft is created');
+  assert.ok(done.bet_id);
+  assert.equal(await playAccountFor(s.db, X.oskar.id), null);
+  assert.equal(near.bets.has(done.bet_id), false);
+  await tick(s.db, s.config, s.x);
+  assert.deepEqual(repliesTo(mention.id), [`Your bet draft is ready for wallet review: ${s.config.baseUrl}/bets/${done.bet_id}?review=1`]);
+});
+
 test('someone who is not on the list gets no account and one plain answer', async () => {
   post = s.fakeX.post(X.priya.id, `Nightjar 2.0 ships a stable release before March 1, ${NEXT}.`);
   const cmd = tag(X.walkin, '@statedbot bet 0.2 no', post);
@@ -152,21 +190,31 @@ test('someone who is not on the list gets no account and one plain answer', asyn
   assert.doesNotMatch(wallet.text, /Open my account/);
 });
 
-test('a listed person gets an account with network fees only, and a stake they have not paid in is refused with the way to add it', async () => {
+test('a listed X offer creates a private wallet-review draft without opening an account or moving NEAR', async () => {
   const before = held(TREASURY);
   firstTry = tag(X.oskar, '@statedbot bet 0.2 no', post);
   await tick(s.db, s.config, s.x);
-  assert.deepEqual(await run(), { done: 0, refused: 1, retry: 0, failed: 0 });
-  const id = await accountOf(X.oskar);
-  assert.equal(id, 'oskar.stated.near');
-  assert.equal(held(id), NEAR('0.05'), 'enough for fees, not for a stake');
-  assert.equal(near.accounts.has('referee.stated.near'), false, 'new mainnet bets never allocate a direct signing referee');
-  assert.equal(before - held(TREASURY), NEAR('0.05'), 'and that is all the treasury paid toward the person');
+  assert.deepEqual(await run(), { done: 1, refused: 0, retry: 0, failed: 0 });
+  const draftId = (await one('select bet_id from bet_commands where event_id=$1', [firstTry.id])).bet_id;
+  assert.ok(draftId);
+  assert.equal(await playAccountFor(s.db, X.oskar.id), null, 'the bot does not provision a wallet');
+  assert.equal(held(TREASURY), before, 'the bot does not spend treasury NEAR');
+  assert.equal(near.bets.has(draftId), false, 'the bot does not create an escrow position');
+  assert.equal(near.accounts.has('referee.stated.near'), false);
   await tick(s.db, s.config, s.x);
-  assert.deepEqual(repliesTo(firstTry.id), [`Your account does not hold enough NEAR for that stake yet. Send NEAR from any exchange or wallet: ${s.config.baseUrl}/me/wallet?need=${yocto('0.21')}`]);
-  assert.equal(near.bets.size, 0, 'nothing reached the escrow');
-  const offer = await one(`select status from bilateral_bets order by created_at desc limit 1`);
-  assert.equal(offer.status, 'cancelled', 'the unfunded offer does not linger');
+  assert.deepEqual(repliesTo(firstTry.id), [`Your bet draft is ready for wallet review: ${s.config.baseUrl}/bets/${draftId}?review=1`]);
+  const maker = await s.signIn(X.oskar);
+  const review = await maker.get(`/bets/${draftId}?review=1`);
+  assert.equal(review.status, 200);
+  assert.match(review.text, /<dt>Claim deadline<\/dt><dd><time datetime="[^"]+" data-bet-local-time>23:59 UTC 28 Feb/);
+  assert.match(review.text, /name="action" value="fund"/);
+  assert.match(review.text, /Pay from another chain/);
+  const crossChain = await maker.get(`/me/wallet?bet=${draftId}&add`);
+  assert.match(crossChain.text, /name="add" value="1"/);
+  const opened = await maker.submit('/me/wallet/open', { bet: draftId, add: '1' });
+  assert.match(opened.url, new RegExp(`/me/wallet\\?bet=${draftId}&add`));
+  assert.match(opened.text, /name="near"[^>]*value="0\.28"/);
+  assert.equal(near.bets.has(draftId), false, 'opening cross-chain funding does not deposit the stake');
 });
 
 let oskarB; let firstPayment;
@@ -376,18 +424,31 @@ test('an expired partial payment hides instructions and preserves the exact amou
 
 let offerCmd; let betId;
 
-test('with their own NEAR in the account, the same reply funds the bet, and the treasury pays nothing', async () => {
+test('the creator reviews and funds the X draft before publishing it', async () => {
   const treasuryBefore = held(TREASURY);
   const mine = held('oskar.stated.near');
   offerCmd = tag(X.oskar, '@statedbot bet 0.2 no', post);
   await tick(s.db, s.config, s.x);
   assert.deepEqual(await run(), { done: 1, refused: 0, retry: 0, failed: 0 });
   betId = (await one('select bet_id from bet_commands where event_id = $1', [offerCmd.id])).bet_id;
-  assert.equal(near.bets.get(betId).creator, 'oskar.stated.near');
-  assert.equal(mine - held('oskar.stated.near'), NEAR('0.21'), 'the stake and the storage fee came out of the person’s own NEAR');
+  assert.equal(near.bets.has(betId), false, 'the bot leaves the bet unfunded');
+  assert.equal(mine, held('oskar.stated.near'), 'the bot leaves the creator wallet untouched');
   assert.equal(held(TREASURY), treasuryBefore);
+  const draftLink = `${s.config.baseUrl}/bets/${betId}?review=1`;
   await tick(s.db, s.config, s.x);
-  assert.deepEqual(repliesTo(offerCmd.id), [`0.2 NEAR says this does not happen by 28 Feb ${NEXT}. To take the other side, reply here with "@statedbot take".`]);
+  assert.deepEqual(repliesTo(offerCmd.id), [`Your bet draft is ready for wallet review: ${draftLink}`]);
+  const maker = await userByXId(s.db, X.oskar.id);
+  const review = await oskarB.get(`/bets/${betId}?review=1`);
+  assert.match(review.text, /<dt>Claim deadline<\/dt><dd><time datetime="[^"]+" data-bet-local-time>23:59 UTC 28 Feb/);
+  assert.match(review.text, /Publish the bet with my X name and wallet after funding\./);
+  await ensurePlayAccount(s.db, s.config, near.chain, { xUserId: maker.x_user_id, username: maker.x_username });
+  near.deliver('oskar.stated.near', yocto('0.21'), { wrapped: false });
+  await playAction(s.db, s.config, near.chain, maker, betId, { action: 'fund' }, { fetchImpl });
+  await publishBet(s.db, maker, betId);
+  assert.equal(near.bets.get(betId).creator, 'oskar.stated.near');
+  assert.equal(held(TREASURY), treasuryBefore, 'the creator funds from their own wallet');
+  const publicBet = await s.browser().get(`/bets/${betId}`);
+  assert.match(publicBet.text, new RegExp(`https://x\\.com/priya/status/${post.id}`), 'publication retains the X source permalink');
 });
 
 test('the other side opens an account on the site, sends NEAR straight to it, takes the bet and receives the OutLayer payout', async (t) => {
@@ -401,16 +462,21 @@ test('the other side opens an account on the site, sends NEAR straight to it, ta
   assert.match(opened.text, /Add NEAR from a NEAR wallet/);
   const id = await accountOf(X.priya);
   assert.equal(id, 'priya.stated.near');
-  const join = await priyaB.get('/bets/' + betId + '?join=1');
-  assert.ok(join.text.includes('Add 0.27 NEAR'), 'the stake also needs a gas reserve and funding overhead');
   near.deliver(id, yocto('0.3'), { wrapped: false });
 
-  const offerPost = botPosts().find((p) => p.text.includes('To take the other side'));
+  const offerPost = botPosts().find((p) => p.text.includes(`/bets/${betId}?review=1`));
   const takeCmd = tag(X.priya, '@statedbot take', offerPost);
   await tick(s.db, s.config, s.x);
   assert.deepEqual(await run(), { done: 1, refused: 0, retry: 0, failed: 0 });
   await tick(s.db, s.config, s.x);
-  assert.deepEqual(repliesTo(takeCmd.id), [`It’s on. 0.4 NEAR is held on NEAR until 28 Feb ${NEXT}. @oskar says no; @priya says yes.`]);
+  assert.deepEqual(repliesTo(takeCmd.id), [`Open the bet to review it with your wallet: ${s.config.baseUrl}/bets/${betId}?review=1`]);
+  assert.equal(near.bets.get(betId).status, 'offered', 'the bot does not accept or stake for the taker');
+  const taker = await userByXId(s.db, X.priya.id);
+  const takerReview = await priyaB.get(`/bets/${betId}?review=1`);
+  assert.match(takerReview.text, /name="action" value="accept"/);
+  await consentToPublicBet(s.db, taker, betId);
+  await playAction(s.db, s.config, near.chain, taker, betId,
+    { action: 'accept', termsHash: (await one('select terms_hash from bilateral_bets where id=$1', [betId])).terms_hash }, { fetchImpl });
 
   const bet = await s.browser().get(`/bets/${betId}`);
   assert.equal(bet.status, 200);
@@ -479,64 +545,27 @@ test('with Stated Court the referee is kept able to reserve a 300-Tgas filing or
   assert.equal(await topUpReferee(s.db, court, near.chain), false);
 });
 
-test('a Bet link carries a new user through wallet setup and sufficient funding back to the exact offer', async () => {
+test('a public mainnet offer sends a new taker to wallet review without opening a managed account', async () => {
   const source = s.fakeX.post(X.priya.id, 'Peregrine 3.0 ships a stable release before March 1, ' + NEXT + '.');
   const offer = tag(X.oskar, '@statedbot bet 0.1 no', source);
   await tick(s.db, s.config, s.x);
   assert.deepEqual(await run(), { done: 1, refused: 0, retry: 0, failed: 0 });
   const { bet_id: ref } = await one('select bet_id from bet_commands where event_id = $1', [offer.id]);
   const path = '/bets/' + ref;
-  const take = path + '?join=1';
-  const opening = '/me/wallet?bet=' + ref;
+  const creator = await userByXId(s.db, X.oskar.id);
+  await ensurePlayAccount(s.db, s.config, near.chain, { xUserId: creator.x_user_id, username: creator.x_username });
+  near.deliver('oskar.stated.near', yocto('0.11'), { wrapped: false });
+  await playAction(s.db, s.config, near.chain, creator, ref, { action: 'fund' }, { fetchImpl });
+  await publishBet(s.db, creator, ref);
+  const publicOffer = await s.browser().get(path);
+  assert.match(publicOffer.text, new RegExp(`href="${path}\\?review=1&amp;join=1"`));
+
   const lenaB = await s.signIn(X.lena);
   await lenaB.submit('/setup', { profile: 'private', defaults: 'private' });
-  assert.ok((await lenaB.get(take)).text.includes(opening));
-  assert.equal(await playAccountFor(s.db, X.lena.id), null, 'opening the offer does not create a wallet');
-  const opened = await lenaB.submit('/me/wallet/open', { bet: ref }, { from: opening });
-  assert.equal(new URL(opened.url).pathname, path);
-  assert.match(opened.text, /Add 0[.]17 NEAR/);
-  const fund = opening + '&add=0.17#add';
-  const wallet = await lenaB.get(fund);
-  assert.match(wallet.text, /name="near"[^>]+value="0[.]17"/);
-  assert.ok(wallet.text.includes('name="bet" value="' + ref + '"'));
-  const payment = await lenaB.submit('/me/wallet/pay', {
-    near: '0.17', pay: 'nep141:base-usdc.omft.near',
-    refundTo: '0x1111111111111111111111111111111111111111', bet: ref,
-  }, { from: fund });
-  const paymentUrl = new URL(payment.url);
-  assert.equal(paymentUrl.searchParams.get('bet'), ref);
-  const paymentId = paymentUrl.pathname.split('/').at(-1);
-  const row = await one('select * from play_deposits where id = $1', [paymentId]);
-  const account = await accountOf(X.lena);
-  const destinationTx = '8'.repeat(44);
-  assert.equal(row.near_yocto, yocto('0.17'));
-  pay.states.set(row.deposit_address, { state: 'SUCCESS', deliveredYocto: row.near_yocto, destinationTx });
-  deliveries.set(destinationTx, { final: true, kind: 'wrapped', accountId: account, deliveredYocto: row.near_yocto });
-  near.deliver(account, row.near_yocto);
-  await due(paymentId);
-  const received = await lenaB.get(paymentUrl.pathname + paymentUrl.search);
-  assert.ok(received.text.includes('href="' + take + '#accept">Back to bet'));
-  const ready = await lenaB.get(take);
-  assert.ok(ready.text.includes('action="' + path + '/take"'));
-  assert.doesNotMatch(ready.text, /Add 0[.]17 NEAR/);
-  const termsHash = (await one('select terms_hash from bilateral_bets where id = $1', [ref])).terms_hash;
-  assert.equal((await lenaB.request('POST', path + '/take', { form: { termsHash, publicConsent: '1', csrf: 'wrong' } })).status, 403);
-  assert.equal((await lenaB.submit(path + '/take', { termsHash }, { from: take })).status, 400);
-  assert.equal(near.bets.get(ref).status, 'offered');
-  assert.equal((await lenaB.submit(path + '/take', { termsHash: 'wrong', publicConsent: '1' }, { from: take })).status, 409);
-  assert.equal(near.bets.get(ref).status, 'offered');
-  const treasuryBefore = held(TREASURY);
-  const sentBefore = near.sent.length;
-  const accepted = await lenaB.submit(path + '/take', { termsHash, publicConsent: '1' }, { from: take });
-  assert.match(accepted.text, /Both sides are in/);
-  assert.equal(near.bets.get(ref).acceptor, account);
-  // The treasury pays the referee's registration of the claim, never any part of the stake.
-  const fromTreasury = near.sent.slice(sentBefore).filter((request) => request.signerId === TREASURY);
-  assert.deepEqual(fromTreasury.map((request) => request.method), ['register_material']);
-  const spent = treasuryBefore - held(TREASURY);
-  assert.ok(spent > 0n && spent <= BigInt(fromTreasury[0].depositYocto), 'the treasury paid for registration storage only');
-  const requests = near.sent.filter((request) => request.method === 'accept_bet' && request.args.id === ref);
-  assert.equal(requests.length, 1);
-  await lenaB.submit(path + '/take', { termsHash, publicConsent: '1' }, { from: take });
-  assert.equal(near.sent.filter((request) => request.method === 'accept_bet' && request.args.id === ref).length, 1);
+  const take = path + '?review=1&join=1#accept';
+  const review = await lenaB.get(take);
+  assert.match(review.text, /<h1>Review bet<\/h1>/);
+  assert.match(review.text, /name="action" value="accept"/);
+  assert.match(review.text, /name="publicConsent" value="1" required/);
+  assert.equal(await playAccountFor(s.db, X.lena.id), null, 'review does not provision a managed wallet');
 });

@@ -6,7 +6,9 @@ import { FakeNear } from './support/fake-near.mjs';
 import { FakeOutLayerNear } from './support/fake-outlayer.mjs';
 import { enclaveEnv, fakeNearAi } from './support/enclave.mjs';
 import { outlayerTestFetch } from './support/outlayer-fetch.mjs';
-import { ensurePlayAccount, playAccountFor, yocto } from '../src/play.mjs';
+import { ensurePlayAccount, playAccountFor, playAction, yocto } from '../src/play.mjs';
+import { publishBet } from '../src/bet-public.mjs';
+import { userByXId } from '../src/store.mjs';
 import { queueWebMatchNotice, runBetCommands } from '../src/reply-bets.mjs';
 import { reserveNearRequest } from '../src/near-request.mjs';
 import { tick } from '../src/worker.mjs';
@@ -52,6 +54,11 @@ for (const network of ['testnet', 'mainnet']) {
         assert.deepEqual(ran, { done: 1, refused: 0, retry: 0, failed: 0 },
           JSON.stringify(await s.db.one('select detail from bet_commands where event_id=$1', [command.id])));
         const bet = await s.db.one('select b.* from bilateral_bets b join bet_commands c on c.bet_id=b.id where c.event_id=$1', [command.id]);
+        if (real) {
+          const user = await userByXId(s.db, creator.id);
+          await playAction(s.db, s.config, near.chain, user, bet.id, { action: 'fund' }, { fetchImpl });
+          await publishBet(s.db, user, bet.id);
+        }
         return { ...bet, command, path: `/bets/${bet.id}` };
       };
       const take = (bet, browser = b, fields = {}) => browser.submit(`${bet.path}/take`, { termsHash: bet.terms_hash, publicConsent: '1', ...fields }, { from: `${bet.path}?join=1` });
@@ -177,14 +184,29 @@ for (const network of ['testnet', 'mainnet']) {
         const command = s.fakeX.post(taker.id, '@statedbot take', { replyTo: bet.command.id });
         await tick(s.db, s.config, s.x);
         assert.deepEqual(await run(), { done: 1, refused: 0, retry: 0, failed: 0 });
-        const [original] = await notices(bet);
-        assert.match(original.body, /@notice_maker/);
-        await take(bet);
-        const rows = await notices(bet);
-        assert.equal(rows.length, 1);
-        assert.equal(rows[0].id, original.id);
-        assert.equal(rows[0].body, original.body, 'existing explicit X take copy remains unchanged');
-        assert.equal(acceptTransactions(bet).length, 1);
+        if (real) {
+          assert.equal((await notices(bet)).length, 0, 'an X take queues wallet review without a match notice');
+          assert.equal(acceptTransactions(bet).length, 0, 'the bot does not sign the taker stake');
+          const review = await s.db.one('select body from bot_outbox where dedupe_key=$1', [`take-review:${command.id}`]);
+          assert.equal(review.body, 'Open the offer on Stated to review and stake.', 'default reply policy omits links');
+          await take(bet);
+          const [afterWebAcceptance] = await notices(bet);
+          assert.ok(afterWebAcceptance, 'explicit web acceptance queues the match notice');
+          await take(bet);
+          const rows = await notices(bet);
+          assert.equal(rows.length, 1);
+          assert.equal(rows[0].id, afterWebAcceptance.id);
+          assert.equal(acceptTransactions(bet).length, 1);
+        } else {
+          const [original] = await notices(bet);
+          assert.match(original.body, /@notice_maker/);
+          await take(bet);
+          const rows = await notices(bet);
+          assert.equal(rows.length, 1);
+          assert.equal(rows[0].id, original.id);
+          assert.equal(rows[0].body, original.body, 'existing explicit X take copy remains unchanged');
+          assert.equal(acceptTransactions(bet).length, 1);
+        }
       });
 
       await t.test('concurrent wallet reservation and notice use users before bet for either participant', async () => {

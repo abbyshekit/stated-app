@@ -5,6 +5,7 @@ import { html, raw } from './html.mjs';
 import { UserError } from './store.mjs';
 import { betFor, betsFor, createBet, sourceForBet } from './bets.mjs';
 import { betDraft } from './bet-draft.mjs';
+import { parseQuickBet } from './quick-bet.mjs';
 import { betDateFields, readBetDate } from './bet-date-fields.mjs';
 import { betSourceHeader, predictionSourceHeader } from './bet-source-view.mjs';
 import { consentToPublicBet, followPublicBet, followsFor, nextOpenPublicBet, publicBet, publishBet, readPublicBet, withdrawBetPublication } from './bet-public.mjs';
@@ -26,12 +27,12 @@ import { readOutlayerRuling } from './outlayer.mjs';
 import { outlayerDetail } from './outlayer-pages.mjs';
 import { ensurePlayAccount, playAccountFor, playAction, shortfall, yocto } from './play.mjs';
 import { queueWebMatchNotice } from './reply-bets.mjs';
-import { MAX_DEPOSIT_NEAR, MIN_DEPOSIT_NEAR } from './funding.mjs';
+import { fundingOn, MAX_DEPOSIT_NEAR, MIN_DEPOSIT_NEAR } from './funding.mjs';
 import { tokenChoices } from './play-pages.mjs';
 import { nearUp, shortAmount } from './intents.mjs';
 import { accountLink, inPilot, network, networkName, transactionLink, unit } from './near-network.mjs';
 import { X_MARK } from './bet-view.mjs';
-import { aboveLimit, limitFor, limitHint, recordFor, stakeCap, stakeCapReply } from './reputation.mjs';
+import { aboveLimit, assertStakeLimit, limitFor, limitHint, recordFor, stakeCap, stakeCapReply } from './reputation.mjs';
 import { fundingPanel, fundingStatus } from './funding-view.mjs';
 
 const ID = '([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})';
@@ -50,7 +51,7 @@ const refereeRuling = (bet) => (bet.status === 'settled' && (bet.settled_by || b
 const claimWords = (bet, ruling = refereeRuling(bet)) => markedClaim(bet.claim, ruling);
 const claimClass = (claim) => `prop bet-claim${claim.length > 200 ? ' long' : claim.length > 120 ? ' mid' : ''}`;
 
-export function registerBetRoutes({ route, db, config, layout, needUser, needAdmin, isAdmin, needPost, csrfField, send, redirect, notFound, fetchImpl, walletVersion, payVersion, botUsername, chain, quotes = null, allowHeavyRead = null, publicRuling = createPublicRulingReader({ recipe: enclaveRecipe }) }) {
+export function registerBetRoutes({ route, db, config, layout, needUser, needAdmin, isAdmin, needPost, csrfField, send, json, redirect, notFound, fetchImpl, walletVersion, payVersion, botUsername, chain, quotes = null, allowHeavyRead = null, publicRuling = createPublicRulingReader({ recipe: enclaveRecipe }) }) {
   // Standalone route registrars retain a budget; createApp supplies its shared export/ruling budget.
   const fallbackBudget = createReadLimiter({ railway: config.hosted && Boolean(process.env.RAILWAY_ENVIRONMENT) });
   // DESIGN.md: only the proposer name is bold in the source attribution.
@@ -267,8 +268,13 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
     catch { return html`<p class="stakes" role="alert">NEAR balance could not be checked. <a class="tl" href="${wallet}">Check wallet balance</a></p>`; }
     if (funds.missingNear !== '0') return html`${fundingPanel(funds, { payVersion })}<p class="gut"><a class="tl" href="${wallet}">Open wallet</a></p>`;
     return html`<p class="stakes">Deposit ${formatTestNear(needed)} NEAR from ${account.account_id}, including storage.</p>
-      <div class="acts"><form method="post" action="${pathFor(bet.id)}/fund">${csrfField(ctx)}<input type="hidden" name="managed" value="1"><button class="primary big" type="submit">Deposit stake</button></form></div>`;
+      <div class="acts"><form method="post" action="${pathFor(bet.id)}/fund">${csrfField(ctx)}<input type="hidden" name="managed" value="1">
+        ${ctx.url.searchParams.get('join') === '1' ? publishConsent() : ''}
+        <button class="primary big" type="submit">Deposit stake</button></form></div>`;
   }
+
+  const publishConsent = (checked = false) => html`<label class="check gut"><input type="checkbox" name="publishAfterFunding" value="1"${checked ? ' checked' : ''}><span>Publish the bet with my X name and wallet after funding.</span></label>`;
+  const reviewTime = (date) => html`<time datetime="${new Date(date).toISOString()}" data-bet-local-time>${betTime(date)}</time>`;
 
   async function takeLimit(ctx, bet) {
     if (config.near?.real && aboveLimit(formatTestNear(bet.stake_yocto), stakeCap(config))) return stakeCapReply(config);
@@ -280,7 +286,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
   }
 
   async function publicPage(ctx, bet) {
-    const join = `${pathFor(bet.id)}?join=1#accept`;
+    const join = config.near?.real ? `${pathFor(bet.id)}?review=1&join=1` : `${pathFor(bet.id)}?join=1#accept`;
     const { open, expired } = betState(bet);
     const take = otherSide(bet);
     const eligible = !ctx.user || inPilot(config, ctx.user.x_user_id);
@@ -518,7 +524,54 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
       </form>
     `, { status: error?.status || 200, back: save ? `/me/s/${save.save_id}` : '/me' });
   }
-  route('GET', /^\/me\/bets\/new$/, (ctx) => newBetPage(ctx));
+  async function quickBetPage(ctx, { sentence = '', requestId = randomUUID(), error = null } = {}) {
+    if (!(await ready(ctx))) return;
+    await show(ctx, 'Make a bet', html`
+      <div class="hero"><h1>Make a bet</h1></div>
+      ${error ? html`<p class="notice" role="alert">${error.message}</p>` : ''}
+      <form method="post" action="/me/bets/quick" data-bet-sentence>
+        ${csrfField(ctx)}
+        <input type="hidden" name="requestId" value="${requestId}">
+        <input type="hidden" name="draftedAt" value="${new Date().toISOString()}">
+        <input type="hidden" name="timeZone" value="UTC">
+        <label for="bet-sentence">Your bet</label>
+        <textarea id="bet-sentence" name="sentence" rows="3" maxlength="1100" required aria-describedby="bet-example">${sentence}</textarea>
+        <p class="quiet" id="bet-example">“FAA lifts the ground stop by midnight, 0.25 NEAR on yes”</p>
+        <div class="acts"><button class="primary big" type="submit">Review bet</button></div>
+      </form>
+      <p class="gut"><a class="tl" href="/me/bets/new?details=1">Set terms manually</a></p>
+      <script src="/static/wallet.js?v=${walletVersion}" defer></script>
+    `, { status: error?.status || 200 });
+  }
+
+  route('GET', /^\/me\/bets\/new$/, (ctx) => config.near?.real && !ctx.url.searchParams.has('save')
+    && ctx.url.searchParams.get('details') !== '1' ? quickBetPage(ctx) : newBetPage(ctx));
+
+  route('POST', /^\/me\/bets\/quick$/, async (ctx) => {
+    const form = await needPost(ctx);
+    if (!form || !(await ready(ctx))) return;
+    if (!config.near?.real) return notFound(ctx);
+    const sentence = String(form.get('sentence') || '').slice(0, 1101);
+    const requestId = form.get('requestId');
+    try {
+      if (!inPilot(config, ctx.user.x_user_id)) throw new UserError('Bets with real NEAR are invite-only for now.', 403);
+      const draftedAt = new Date(form.get('draftedAt') || '');
+      if (!Number.isFinite(draftedAt.getTime()) || draftedAt.getTime() > Date.now() || Date.now() - draftedAt.getTime() > 86400000) {
+        throw new UserError('This form expired. Review your bet again.', 409);
+      }
+      const terms = parseQuickBet(sentence, { now: draftedAt, timeZone: form.get('timeZone') || 'UTC' });
+      if (!terms) throw new UserError('Include a claim, deadline, stake and Yes or No in your sentence.');
+      await assertStakeLimit(db, config, ctx.user.id, terms.stakeNear);
+      const evidenceSourceUrl = terms.evidenceSourceUrl || (config.baseUrl.startsWith('https:')
+        ? config.baseUrl : `https://x.com/${await botUsername()}`);
+      const bet = await createBet(db, ctx.user, { ...terms, requestId, evidenceSourceUrl },
+        { config, chain, fetchImpl, openEvidence: !terms.evidenceSourceUrl });
+      redirect(ctx.res, `${pathFor(bet.id)}?review=1`);
+    } catch (error) {
+      if (!(error instanceof UserError)) throw error;
+      await quickBetPage(ctx, { sentence: sentence.slice(0, 1100), error });
+    }
+  });
 
   route('POST', /^\/me\/bets$/, async (ctx) => {
     const form = await needPost(ctx);
@@ -549,6 +602,91 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
   // A failed deposit or reply comes back here, on the Bet, with the reason above
   // the action it belongs to. Missing pages and sign-in errors keep their own page.
   const recoverable = (error) => error instanceof UserError && ![401, 403, 404].includes(error.status);
+
+  async function reviewBet(ctx) {
+    if (!ctx.user && ctx.url.searchParams.get('join') !== '1') {
+      const published = await publicBet(db, ctx.params[0], config.play);
+      if (published) return publicPage(ctx, published);
+    }
+    if (!(await ready(ctx))) return;
+    const bet = await betFor(db, ctx.user, ctx.params[0]);
+    const creator = String(bet.creator_user_id) === String(ctx.user.id);
+    if (bet.status !== 'offered' || bet.expired || (creator && bet.chain_state)) return redirect(ctx.res, pathFor(bet.id));
+    const published = creator ? null : await publicBet(db, bet.id);
+    if (!creator && !published?.funded) return show(ctx, 'Waiting for the proposer', html`
+      <div class="hero"><h1>Waiting for the proposer</h1></div>
+      <p class="gut">The other side opens when the proposer funds and publishes the bet.</p>
+      <div class="acts"><a class="pill solid big" href="${pathFor(bet.id)}?review=1">Check again</a></div>`);
+    const limit = !inPilot(config, ctx.user.x_user_id)
+      ? 'Bets with real NEAR are invite-only for now.' : await takeLimit(ctx, bet);
+    const side = creator ? bet.creator_side : otherSide(bet);
+    const stake = formatTestNear(bet.stake_yocto);
+    const deposit = creator ? formatTestNear((BigInt(bet.stake_yocto) + BigInt(STORAGE_FEE_YOCTO)).toString()) : stake;
+    const previous = creator && await db.one(`select metadata from bilateral_near_requests
+      where bet_id=$1 and user_id=$2 and method='create_bet' order by created_at limit 1`, [bet.id, ctx.user.id]);
+    const canPayFromAnotherChain = quotes && fundingOn(config) && !previous
+      && !(await playAccountFor(db, ctx.user.x_user_id))?.claimed_at;
+    // The stored claim includes the jury's exact criteria after this marker.
+    // Show those criteria separately in Rules, keeping the proposition readable.
+    const claim = bet.outlayer_material ? bet.claim.split('\n\nCounts as yes:\n', 1)[0] : bet.claim;
+    const evidence = bet.outlayer_material?.evidence;
+    await show(ctx, 'Review bet', html`
+      <div class="hero"><h1>Review bet</h1></div>
+      <p class="${claimClass(claim)}">${claim}</p>
+      <dl class="bet-terms gut">
+        <dt>Your side</dt><dd>${side === 'yes' ? 'Yes' : 'No'}</dd>
+        <dt>Stake each</dt><dd>${stake} ${unit()}</dd>
+        <dt>Accept before</dt><dd>${reviewTime(bet.accept_by)}</dd>
+        <dt>Claim deadline</dt><dd>${reviewTime(bet.resolve_at)}</dd>
+        ${evidence?.kind === 'open' ? html`<dt>Evidence closes</dt><dd>${reviewTime(Date.parse(bet.resolve_at) + evidence.window_seconds * 1000)}</dd>` : ''}
+      </dl>
+      <div class="gut">${evidence?.kind === 'open' ? html`<p class="quiet">The OutLayer jury reads links either side submits after the claim deadline.</p>` : committedEvidence(bet)}</div>
+      ${limit ? html`<p class="notice" role="alert">${limit}</p>` : html`
+        <form method="post" action="${pathFor(bet.id)}/transactions" data-stated-review
+          data-near-network="${network().id}" data-prepare="/api${pathFor(bet.id)}/prepare-wallet">
+          ${csrfField(ctx)}
+          <input type="hidden" name="requestId" value="">
+          <input type="hidden" name="walletPayload" value="">
+          <input type="hidden" name="transactionHash" value="">
+          <input type="hidden" name="termsHash" value="${bet.terms_hash}">
+          <input type="hidden" name="action" value="${creator ? 'fund' : 'accept'}">
+          <p class="wallet-debit">${deposit} ${unit()} plus network gas${creator ? html` <small>(includes ${formatTestNear(STORAGE_FEE_YOCTO)} ${unit()} for storage)</small>` : ''}</p>
+          ${creator ? publishConsent(previous?.metadata?.publishAfterFunding === true) : html`
+            <label class="check gut"><input type="checkbox" name="publicConsent" value="1" required><span>Show my X name and wallet on this public bet.</span></label>`}
+          <div class="acts">
+            <button class="primary big" type="button" data-connect-wallet>Connect wallet</button>
+            <button class="primary big" type="button" data-sign-wallet hidden>Sign stake</button>
+            <p role="status" data-wallet-status></p>
+          </div>
+        </form>
+        <noscript><p class="notice">Enable JavaScript to connect Meteor Wallet.</p></noscript>
+        ${canPayFromAnotherChain ? html`<p class="gut"><a class="tl" href="/me/wallet?bet=${bet.id}&amp;add#add">Pay from another chain</a></p>` : ''}
+        <script src="/static/wallet.js?v=${walletVersion}" defer></script>`}
+      <div class="folds">${betTerms(bet)}</div>
+    `, { back: creator ? '/me/bets/new' : pathFor(bet.id) });
+  }
+
+  route('POST', new RegExp(`^/api/bets/${ID}/prepare-wallet$`), async (ctx) => {
+    const form = await needPost(ctx);
+    if (!form) return;
+    if (!config.near?.real) return notFound(ctx);
+    const id = ctx.params[0];
+    const action = form.get('action');
+    const bet = await betFor(db, ctx.user, id);
+    if (form.get('termsHash') !== bet.terms_hash) throw new UserError('Review the current terms before signing.', 409);
+    if (!inPilot(config, ctx.user.x_user_id)) throw new UserError('Bets with real NEAR are invite-only for now.', 403);
+    if (action === 'accept') {
+      const published = await publicBet(db, id);
+      if (!published?.funded || form.get('publicConsent') !== '1') {
+        throw new UserError('Review and consent to this public bet before staking.', 409);
+      }
+      await consentToPublicBet(db, ctx.user, id);
+    } else if (action !== 'fund') throw new UserError('Choose a stake to sign.');
+    const prepared = await prepareNearAction(db, config, ctx.user, id,
+      { action, accountId: form.get('accountId'), termsHash: bet.terms_hash, publishAfterFunding: form.get('publishAfterFunding') === '1' },
+      { fetchImpl, chain: chain?.() });
+    json(ctx.res, 200, prepared.payload, 'private');
+  });
 
   async function betPage(ctx, { failed = null, typed = null } = {}) {
     const published = await publicBet(db, ctx.params[0], config.play);
@@ -770,7 +908,8 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
       </div>
     `, { status: failed?.status || 200 });
   }
-  route('GET', new RegExp(`^/bets/${ID}$`), (ctx) => betPage(ctx));
+  route('GET', new RegExp(`^/bets/${ID}$`), (ctx) => config.near?.real && ctx.url.searchParams.get('review') === '1'
+    ? reviewBet(ctx) : betPage(ctx));
 
   route('GET', new RegExp(`^/bets/${ID}/publication$`), async (ctx) => {
     if (!(await ready(ctx))) return;
@@ -893,7 +1032,8 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
         if (!config.near?.real || !config.play?.enabled || String(before.creator_user_id) !== String(ctx.user.id)) {
           throw new UserError('This bet cannot be funded from your Stated account.', 403);
         }
-        await playAction(db, config, chain(), ctx.user, id, { action: 'fund' }, { fetchImpl });
+        await playAction(db, config, chain(), ctx.user, id,
+          { action: 'fund', publishAfterFunding: form.get('publishAfterFunding') === '1' }, { fetchImpl });
         return redirect(ctx.res, pathFor(id));
       }
       const input = Object.fromEntries(['accountId', 'termsHash', 'proposalId', 'proposalRevision', 'proposalOutcome', 'outcome', 'evidenceUrl', 'note'].map((key) => [key, form.get(key)]));

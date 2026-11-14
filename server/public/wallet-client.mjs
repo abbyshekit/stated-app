@@ -43,7 +43,19 @@ function readPayload(form, networkId) {
   return payload;
 }
 
-for (const form of document.querySelectorAll('form[data-stated-wallet]')) {
+for (const sentence of document.querySelectorAll('form[data-bet-sentence]')) {
+  sentence.elements.namedItem('timeZone').value = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+}
+
+const localTimes = document.querySelectorAll('[data-bet-local-time]');
+if (localTimes.length) {
+  const clock = new Intl.DateTimeFormat(undefined, {
+    day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
+  });
+  for (const time of localTimes) time.textContent = clock.format(new Date(time.dateTime));
+}
+
+for (const form of document.querySelectorAll('form[data-stated-wallet], form[data-stated-review]')) {
   const connect = form.querySelector('[data-connect-wallet]');
   const sign = form.querySelector('[data-sign-wallet]');
   const status = form.querySelector('[data-wallet-status]');
@@ -66,9 +78,31 @@ for (const form of document.querySelectorAll('form[data-stated-wallet]')) {
     sign.hidden = true;
     busy(true);
     try {
-      payload = readPayload(form, networkId);
+      const prepare = form.dataset.prepare;
+      if (!prepare) payload = readPayload(form, networkId);
+      if (!form.reportValidity()) return;
       const connected = await walletFor(networkId).requestSignIn({});
-      if (!connected.success || connected.payload?.accountId !== payload.accountId) {
+      const accountId = connected.payload?.accountId;
+      if (!connected.success || !validAccount(networkId, accountId)) {
+        status.textContent = `Connect a ${networkId} NEAR wallet and try again.`;
+        return;
+      }
+      if (prepare) {
+        const data = new URLSearchParams(new FormData(form));
+        data.set('accountId', accountId);
+        const response = await fetch(prepare, { method: 'POST', body: data, redirect: 'error' });
+        const result = await response.json();
+        if (!response.ok) {
+          status.textContent = typeof result.error === 'string' ? result.error : failure;
+          return;
+        }
+        form.elements.namedItem('requestId').value = result.requestId;
+        form.elements.namedItem('walletPayload').value = JSON.stringify(result);
+        payload = readPayload(form, networkId);
+        const publication = form.elements.namedItem('publishAfterFunding');
+        if (publication) publication.disabled = true;
+      }
+      if (accountId !== payload.accountId) {
         status.textContent = `Connect the ${networkId} wallet ${payload.accountId} and try again.`;
         return;
       }
@@ -78,7 +112,7 @@ for (const form of document.querySelectorAll('form[data-stated-wallet]')) {
         publicKeys: [], connection: { executionTarget: 'v1_web' } };
       connect.hidden = true;
       sign.hidden = false;
-      status.textContent = 'Wallet connected. Review the request and sign.';
+      status.textContent = `Connected wallet ${accountId}.`;
     } catch {
       status.textContent = failure;
     } finally {
@@ -87,7 +121,7 @@ for (const form of document.querySelectorAll('form[data-stated-wallet]')) {
   });
 
   sign.addEventListener('click', async () => {
-    if (!account || !payload) return;
+    if (!account || !payload || !form.reportValidity()) return;
     busy(true);
     try {
       const current = readPayload(form, networkId);
@@ -101,9 +135,11 @@ for (const form of document.querySelectorAll('form[data-stated-wallet]')) {
       return;
     } catch (error) {
       if (submitHash(error?.transactionHash)) return;
-      account = undefined;
-      connect.hidden = false;
-      sign.hidden = true;
+      if (!form.dataset.prepare) {
+        account = undefined;
+        connect.hidden = false;
+        sign.hidden = true;
+      }
       status.textContent = failure;
     } finally {
       busy(false);

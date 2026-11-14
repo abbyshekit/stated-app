@@ -152,6 +152,12 @@ export async function syncNearBet(db, config, user, id, options = {}) {
     [bet.id, chain.creator, chain.acceptor || null, taker?.user_id || null, chain, chain.status,
       proposal?.id || null, chain.status === 'settled' ? (chain.resolution?.outcome || proposal?.outcome || null) : null,
       snapshot.blockHeight, proposal?.revision || null]);
+    // Publication consent belongs to the exact request that funded this escrow.
+    // Reconciliation can honor it even if the wallet callback never returns.
+    if (!bet.chain_state && chain.status === 'offered' && creation.metadata?.publishAfterFunding === true) {
+      await tx.query(`insert into bilateral_bet_publications (bet_id,creator_user_id,published_at)
+        values ($1,$2,clock_timestamp()) on conflict (bet_id) do nothing`, [bet.id, bet.creator_user_id]);
+    }
     if (currentFingerprint !== previous) {
       await tx.query(`insert into bilateral_bet_events (bet_id,actor_user_id,kind,detail)
         values ($1,$2,'chain_verified',$3)`, [bet.id, user.id, { status: chain.status, proposalId: proposal?.id || null }]);
@@ -196,6 +202,7 @@ export async function prepareNearAction(db, config, user, id, input, options = {
       args.referee = bet.referee_wallet;
     }
     deposit = (BigInt(bet.stake_yocto) + BigInt(STORAGE_FEE_YOCTO)).toString();
+    if (input.publishAfterFunding === true) metadata.publishAfterFunding = true;
   } else if (action === 'accept') {
     if (creator || bet.status !== 'offered' || !chain || bet.expired || input.termsHash !== bet.terms_hash
       || (bet.invited_user_id && !same(bet.invited_user_id, user.id))) throw new UserError('Review the funded offer before accepting it.', 409);

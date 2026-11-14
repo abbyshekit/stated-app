@@ -102,8 +102,8 @@ async function setAside(bet, outcome) {
   await s.db.query(`update bilateral_bet_publications set withdrawn_at = now() where bet_id in
     (select b.id from bilateral_bets b join saves sv on sv.id = b.source_save_id where sv.statement_id = $1)`, [bet.statementId]);
 }
-const human = (statementId, outcome) => resolveStatement(s.db, { statementId, outcome, note: 'Recorded by a reviewer.',
-  url: 'https://example.org/reviewed', reviewer: admin, outcomeAt: new Date().toISOString() });
+const human = (statementId, outcome, outcomeAt = new Date()) => resolveStatement(s.db, { statementId, outcome, note: 'Recorded by a reviewer.',
+  url: 'https://example.org/reviewed', reviewer: admin, outcomeAt: outcomeAt.toISOString() });
 
 before(async () => {
   near = new FakeNear();
@@ -731,9 +731,8 @@ test('a candle plan whose window has not closed waits, with no attempt and no in
   assert.deepEqual(await reasons('statement_id', bet.statementId), ['planned', 'decided']);
 
   // For the review test: a post a human ruled on before any plan was made.
-  future = await acceptedBet(`DOGE trades above $1 before March 1, ${NEXT}.`);
-  await human(future.statementId, 'yes');
-  await due(future, pastHour());
+  future = await due(await acceptedBet(`DOGE trades above $1 before March 1, ${NEXT}.`), pastHour());
+  await human(future.statementId, 'yes', future.deadline);
   await human(forged.statementId, 'no');
 });
 
@@ -741,7 +740,7 @@ test('a human Result recorded first means nothing is stored', async () => {
   first = await due(await acceptedBet(`XRP trades above $5 before March 1, ${NEXT}.`), pastHour());
   ai.respond = async ({ kind }) => {
     if (kind === 'plan') return candlePlan('XRP-USD', first.deadline);
-    if ((await statement(first.statementId)).status === 'open') await human(first.statementId, 'yes');
+    if ((await statement(first.statementId)).status === 'open') await human(first.statementId, 'yes', first.deadline);
     return verdict('no');
   };
   assert.deepEqual(await rule(), { ...zero, planned: 1 });

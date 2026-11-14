@@ -59,9 +59,12 @@ test('mainnet creation form submits to a registered POST handler', async () => {
   const app = boundary();
   const page = await app.get('/me/bets/new');
   const action = /<form method="post" action="([^"]+)"/.exec(page)?.[1];
-  assert.equal(action, '/me/bets');
+  assert.equal(action, '/me/bets/quick');
   assert.ok(app.routes.some(route => route.method === 'POST' && route.pattern.test(action)));
-  assert.match(page, /name="stakeNear" value="0\.1" checked/);
+  assert.match(page, /name="sentence"/);
+  assert.doesNotMatch(page, /name="stakeNear"|name="criteria"/);
+  const details = await app.get('/me/bets/new?details=1');
+  assert.match(details, /name="stakeNear" value="0\.1" checked/);
 });
 
 test('mainnet wallet renders the selected payment token chain logo', async () => {

@@ -11,9 +11,11 @@ import { createDb } from '../src/db.mjs';
 import { createApp } from '../src/web.mjs';
 import { primaryRpc } from '../src/near-escrow.mjs';
 import { prepareNearAction } from '../src/near-bets.mjs';
-import { ensurePlayAccount, playAccountFor, yocto } from '../src/play.mjs';
+import { publishBet } from '../src/bet-public.mjs';
+import { ensurePlayAccount, playAccountFor, playAction, yocto } from '../src/play.mjs';
 import { runBetCommands } from '../src/reply-bets.mjs';
 import { tick } from '../src/worker.mjs';
+import { userByXId } from '../src/store.mjs';
 
 const deferred = () => {
   let resolve;
@@ -103,6 +105,12 @@ for (const network of ['testnet', 'mainnet']) {
         const command = s.fakeX.post(maker.id, '@statedbot bet 0.1 no', { replyTo: source.id });
         await tick(s.db, s.config, s.x);
         assert.equal((await runBetCommands(s.db, s.config, near.chain, { fetchImpl, botUsername: 'statedbot' })).done, 1);
+        if (real) {
+          const row = await s.db.one('select bet_id from bet_commands where event_id=$1', [command.id]);
+          const user = await userByXId(s.db, maker.id);
+          await playAction(s.db, s.config, near.chain, user, row.bet_id, { action: 'fund' }, { fetchImpl });
+          await publishBet(s.db, user, row.bet_id);
+        }
         return s.db.one('select b.* from bilateral_bets b join bet_commands c on c.bet_id=b.id where c.event_id=$1', [command.id]);
       };
       const send = async (browser, bet) => {

@@ -51,11 +51,12 @@ export function registerBetStartRoutes({ route, db, config, layout, send, redire
   const where = config.x.simulatedOrigin ? 'simulated X' : 'X';
 
   route('GET', /^\/bets\/new$/, async (ctx) => {
+    const q = ctx.url.searchParams;
+    if (config.near?.real && !q.get('link') && q.get('go') !== '1') return redirect(ctx.res, '/me/bets/new');
     const bot = config.play?.enabled ? await botUsername() : null;
     // Without bets from replies the only way to offer one is the wallet form.
     if (!/^\w{1,15}$/.test(bot || '') || (ctx.user && !inPilot(config, ctx.user.x_user_id))) return redirect(ctx.res, '/me/bets/new');
 
-    const q = ctx.url.searchParams;
     const cap = stakeCap(config);
     const stakes = config.near?.real ? [...new Set([...STAKES.filter((value) => !aboveLimit(value, cap)), cap])] : STAKES;
     const from = UUID.test(q.get('from') || '') ? q.get('from').toLowerCase() : null;

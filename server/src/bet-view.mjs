@@ -158,7 +158,9 @@ export function betList(rows, { viewer = null, faces = null, hall = false } = {}
             : BET_STATUS[bet.status];
       return html`<li class="prow note"><p class="said"><a href="/bets/${bet.id}">${markedClaim(bet.claim, mark)}</a></p><p class="meta">${phrase}</p></li>`;
     }
-    return html`<li class="prow note"><p class="said"><a href="/bets/${bet.id}">${markedClaim(bet.claim, mark)}</a></p>
+    const draft = network().real && viewer && String(viewer.id) === String(bet.creator_user_id)
+      && bet.status === 'offered' && !bet.chain_state;
+    return html`<li class="prow note"><p class="said"><a href="/bets/${bet.id}${draft ? '?review=1' : ''}">${markedClaim(bet.claim, mark)}</a></p>
       <p class="meta">${people.length ? html`<span class="stack">${people.map(pic)}</span>` : ''}<b>${status === 'Not funded' ? status : lead}</b><span>${formatTestNear(bet.stake_yocto)} ${unit()} each</span></p>
     </li>`;
   })}</ul>`;

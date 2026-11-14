@@ -98,14 +98,16 @@ export function registerPlayRoutes({ botUsername, route, db, config, layout, nee
   }
 
   // Paying in from another chain: the form.
-  async function payIn(ctx, account, { error = null, typed = {}, bet = '' } = {}) {
+  async function payIn(ctx, account, { error = null, typed = {}, bet = '', missing = null } = {}) {
     if (!funding() || account.claimed_at || !(await adding(ctx, { error }))) return '';
     const list = await quotes.tokens();
     if (!list.length) return html`<details class="fold" id="add"><summary>Add NEAR from another chain</summary><p class="quiet">NEAR Intents cannot be reached right now. Try again shortly.</p></details>`;
     const asked = typed.assetId || ctx.url.searchParams.get('pay');
     const chosen = list.find((t) => t.assetId === asked) || list.find((t) => t.symbol === 'USDC' && t.chain === 'base') || list[0];
     // What the amount and token the form opens with would cost. A dry quote; absent when there is none.
-    const opening = typed.near || ctx.url.searchParams.get('add') || '0.5';
+    const suggested = bet && ctx.url.searchParams.has('add') && missing != null
+      ? Decimal.max(MIN_DEPOSIT_NEAR, new Decimal(missing).plus('0.01')).toDecimalPlaces(2, Decimal.ROUND_UP).toFixed() : '0.5';
+    const opening = typed.near || ctx.url.searchParams.get('add') || suggested;
     let cost = null;
     if (/^\d{1,2}(\.\d{1,4})?$/.test(opening) && new Decimal(opening).gte(MIN_DEPOSIT_NEAR) && new Decimal(opening).lte(MAX_DEPOSIT_NEAR)) {
       try { const q = await quotes.quote(chosen.assetId, yocto(opening)); if (q.ok) cost = q.amount; } catch { cost = null; }
@@ -134,7 +136,7 @@ export function registerPlayRoutes({ botUsername, route, db, config, layout, nee
     </details>`;
   }
 
-  async function page(ctx, { error = null, status = 200, typed = '', payError = null, payTyped = {}, bet = betReference(ctx.url.searchParams.get('bet')) } = {}) {
+  async function page(ctx, { error = null, status = 200, typed = '', payError = null, payTyped = {}, bet = betReference(ctx.url.searchParams.get('bet')), add = ctx.url.searchParams.has('add') } = {}) {
     const account = await playAccountFor(db, ctx.user.x_user_id);
     let balance = null;
     if (account?.ready) {
@@ -158,14 +160,14 @@ export function registerPlayRoutes({ botUsername, route, db, config, layout, nee
     }
     const about = !account?.ready ? '' : real()
       ? html`<p class="quiet">A real account on NEAR, named after your handle: <span class="acct">${account.account_id}</span>. <a href="${accountLink(account.account_id)}" rel="noopener noreferrer">See it on NEAR</a>.</p>
-          <p class="quiet">It holds real NEAR. ${account.claimed_at ? '' : 'Stated holds the key until you take the account, so a reply on X can place your bets. Taking it puts your key on and removes Stated’s in one transaction. '}Stated paid to open it.</p>`
+          <p class="quiet">It holds real NEAR. ${account.claimed_at ? '' : 'Stated holds the key until you take the account. You approve stakes on Stated. Taking the account installs your key and removes Stated’s in one transaction. '}Stated paid to open it.</p>`
       : html`<p class="quiet">A real account on NEAR testnet, named after your handle: <span class="acct">${account.account_id}</span>. <a href="${accountLink(account.account_id)}" rel="noopener noreferrer">See it on NEAR</a>.</p>
           <p class="quiet">Test NEAR has no monetary value. ${account.claimed_at ? '' : 'Stated holds the key until you take the account, so a reply on X can place your bets. Taking it puts your key on and removes Stated’s in one transaction.'} It is topped up from Stated’s testnet treasury, up to a limit per account.</p>`;
     // With real NEAR a person opens the account themselves, having seen the name it will have and that it holds real money.
     const opening = real() && invited && !account?.ready
       ? html`<p class="say">${accountNameFor(ctx.user.x_username, ctx.user.x_user_id, config.play.treasury)}</p>
           <p class="stakes left">It holds real NEAR: your stakes and what you win.</p>
-          <form class="acts" method="post" action="/me/wallet/open">${csrfField(ctx)}${bet ? html`<input type="hidden" name="bet" value="${bet}">` : ''}${needed !== '0' ? html`<input type="hidden" name="need" value="${needed}">` : ''}<button class="primary big" type="submit">Open my account</button></form>
+          <form class="acts" method="post" action="/me/wallet/open">${csrfField(ctx)}${bet ? html`<input type="hidden" name="bet" value="${bet}">` : ''}${needed !== '0' ? html`<input type="hidden" name="need" value="${needed}">` : ''}${add ? html`<input type="hidden" name="add" value="1">` : ''}<button class="primary big" type="submit">Open my account</button></form>
           ${error ? html`<p class="err" role="alert"><b>That didn’t go through.</b> ${error.message}</p>` : ''}`
       : '';
     send(ctx.res, status, await layout(ctx, 'Wallet', html`
@@ -184,7 +186,7 @@ export function registerPlayRoutes({ botUsername, route, db, config, layout, nee
           <p class="stakes left">You hold the only key. Bets from this account are signed in your own wallet, on the site.</p>`
         : ''}
         ${payError && account.claimed_at ? html`<p class="err gut" role="alert">${payError.message}</p>` : ''}
-        <div class="folds">${await payIn(ctx, account, { error: payError, typed: payTyped, bet })}${await pastPayments(ctx, account)}${real() ? html`<details class="fold"><summary>Add NEAR from a NEAR wallet</summary>
+        <div class="folds">${await payIn(ctx, account, { error: payError, typed: payTyped, bet, missing: funds?.missingNear })}${await pastPayments(ctx, account)}${real() ? html`<details class="fold"><summary>Add NEAR from a NEAR wallet</summary>
           <p class="quiet">It is an ordinary NEAR account. NEAR sent to <span class="acct">${account.account_id}</span> from any wallet or exchange can be staked as soon as it arrives.</p></details>` : ''}${account.claimed_at ? '' : html`<details class="fold"${error ? ' open' : ''}><summary>Use your own NEAR wallet</summary>
           <form class="takekey" method="post" action="/me/wallet/claim">
             ${csrfField(ctx)}
@@ -237,14 +239,15 @@ export function registerPlayRoutes({ botUsername, route, db, config, layout, nee
     if (!form) return;
     if (!real()) return redirect(ctx.res, '/me/wallet');
     const bet = betReference(form.get('bet'));
+    const add = form.get('add') === '1' && fundingOn(config);
     try {
       await ensurePlayAccount(db, config, chain(), { xUserId: ctx.user.x_user_id, username: ctx.user.x_username });
     } catch (error) {
-      if (error.status && error.status < 500) return page(ctx, { error, status: error.status, bet });
+      if (error.status && error.status < 500) return page(ctx, { error, status: error.status, bet, add });
       throw error;
     }
     const need = fundingNeed(form.get('need'));
-    redirect(ctx.res, bet ? returnToBet(bet) : `/me/wallet?add${need !== '0' ? `&need=${need}` : ''}`);
+    redirect(ctx.res, bet ? (add ? `/me/wallet?bet=${bet}&add#add` : returnToBet(bet)) : `/me/wallet?add${need !== '0' ? `&need=${need}` : ''}`);
   });
 
   route('POST', /^\/me\/wallet\/pay$/, async (ctx) => {

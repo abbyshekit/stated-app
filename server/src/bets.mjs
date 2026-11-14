@@ -196,14 +196,15 @@ function priceTimingError(kind) {
   return error;
 }
 
-export async function createBet(db, user, input, { config, chain, fetchImpl = fetch } = {}) {
+export async function createBet(db, user, input, { config, chain, fetchImpl = fetch, openEvidence = false } = {}) {
   const actor = person(user);
   requireCreationReferee(config);
+  if (openEvidence && !config?.outlayer?.referee) throw new UserError('The evidence jury is unavailable.', 503);
   if (config?.outlayer?.referee) input = { ...input, refereeAccount: config.outlayer.referee };
   const { requestId, terms, opponent, sourceSaveId } = creationInput(input);
   if (config) assertMainnetStakeCap(config, input.stakeNear);
   const source = sourceSaveId ? await sourceForBet(db, user, sourceSaveId) : null;
-  const requestFingerprint = digest({ version: 1, ...terms, opponent, sourceSaveId });
+  const requestFingerprint = digest({ version: 1, ...terms, opponent, sourceSaveId, ...(openEvidence ? { openEvidence } : {}) });
   let refereeConfig;
   let refereeChain;
   if (config?.outlayer?.referee) {
@@ -284,8 +285,11 @@ export async function createBet(db, user, input, { config, chain, fetchImpl = fe
   }
   // X posts supply context whether an offer came from a save or the web form.
   const sourcePost = /(?:^|\.)(?:x|twitter)\.com$/i.test(new URL(terms.evidenceSourceUrl).hostname.replace(/\.+$/, ''));
+  if (openEvidence && !priceKind && refereeConfig.supports_open_evidence !== true) {
+    throw new UserError('This referee cannot accept evidence after the deadline.', 503);
+  }
   const material = refereeConfig ? makeOutlayerMaterial({ id, ...planInput, createdAt: at, plan: evidencePlan.verdict,
-    acceptBy: terms.acceptBy, evidenceSourceUrl: sourcePost ? null : terms.evidenceSourceUrl,
+    acceptBy: terms.acceptBy, evidenceSourceUrl: sourcePost || openEvidence ? null : terms.evidenceSourceUrl,
     creatorSide: terms.creatorSide }, config, refereeConfig) : null;
   const termsHash = material ? outlayerTermsHash(material, termsSalt)
     : digest({ version: 2, salt: termsSalt, creatorUserId: actor, invitedUserId: invitedId, ...terms });

@@ -4,9 +4,10 @@ import { interpret, looksLikePrediction, missingTerms } from './interpret.mjs';
 import { reserveIntake } from './limits.mjs';
 import { inPilot } from './near-network.mjs';
 import { replyFor } from './replies.mjs';
-import { addInbox, restoreCommitment, userByXId } from './store.mjs';
+import { addInbox, restoreCommitment, UserError, userByXId } from './store.mjs';
 import { explicitlyMentions, postText, postUrl } from './xapi.mjs';
 import { placeholderSpan, readTerms, storeXText, storesAllXText, xClaimText } from './xtext.mjs';
+import { parseQuickBet } from './quick-bet.mjs';
 
 const STATUS_URL = /^https?:\/\/(?:www\.|mobile\.)?(?:x|twitter)\.com\/(\w{1,15}|i\/web)\/status\/(\d+)/i;
 const DAY = 24 * 3600 * 1000;
@@ -315,12 +316,33 @@ export async function processMention(db, config, { mention, includes = {}, bot, 
       const link = urls.find((entry) => entry.url === word);
       return link?.unwound_url || link?.expanded_url || word;
     });
-    const bet = config.play?.enabled ? parseBetCommand(commandText, {
+    let bet = config.play?.enabled ? parseBetCommand(commandText, {
       defaultStake: config.play.defaultStakeNear,
       now: mention.created_at || new Date(),
       rulings: Boolean(config.nearai?.rulings || config.outlayer?.referee),
       outlayer: Boolean(config.outlayer?.referee),
     }) : null;
+    let quickBet = null;
+    if (config.play?.enabled && config.near?.real && !parent && !quoted
+      && !links.statusIds.length && /^\w{1,15}$/.test(bot.username || '') && explicitlyMentions(mention, bot.username)) {
+      try {
+        const botTag = new RegExp(`(^|\\s)@${bot.username}\\b`, 'ig');
+        quickBet = parseQuickBet(commandText.replace(botTag, '$1').replace(/\s+/g, ' ').trim(), {
+          now: mention.created_at || new Date(), timeZone: 'UTC',
+        });
+      } catch (error) {
+        if (!(error instanceof UserError)) throw error;
+        const replyText = `I couldn't create that bet draft: ${error.message}`;
+        const event = await recordEvent(db, config, mention, {
+          outcome: 'bet_invalid',
+          replyText,
+          command: 'bet',
+          exclude: replyExclusions(mention, mention.author_id, bot.userId, null),
+        });
+        return { outcome: 'bet_invalid', event };
+      }
+    }
+    if (quickBet) bet = { kind: 'bet', side: quickBet.creatorSide, stake: quickBet.stakeNear };
 
     // Replying inside a thread the bot is already in puts the bot's handle in
     // the hidden reply prefix. That is not a request, so nothing is saved or posted.
@@ -409,6 +431,10 @@ export async function processMention(db, config, { mention, includes = {}, bot, 
         return { outcome: 'ignored_bot_target', event: await recordEvent(db, config, mention, { outcome: 'ignored_bot_target' }) };
       }
       targetText = postText(target);
+    } else if (quickBet) {
+      target = mention;
+      targetAuthor = requester;
+      targetText = quickBet.claim;
     } else if (links.articles.length && !outside.length) {
       // A post that only links to Stated itself or its source, such as an announcement, is not a request to read an article.
       return { outcome: 'ignored_own_link', event: await recordEvent(db, config, mention, { outcome: 'ignored_own_link' }) };
@@ -454,7 +480,12 @@ export async function processMention(db, config, { mention, includes = {}, bot, 
         speakerXUserId: target.author_id,
         publishedAt: target.created_at ? new Date(target.created_at) : new Date(),
       });
-      const offering = bet?.kind === 'bet' && target.id !== mention.id;
+      if (quickBet && !statement.deadline_at && !statement.proposed_deadline_at) {
+        statement = await tx.one(`update statements set proposed_deadline_at = $2, deadline_text = 'UTC'
+          where id = $1 and deadline_at is null and proposed_deadline_at is null returning *`, [statement.id, quickBet.resolveAt])
+          || await tx.one('select * from statements where id = $1', [statement.id]);
+      }
+      const offering = bet?.kind === 'bet' && (target.id !== mention.id || Boolean(quickBet));
       if (offering && !bet.error && bet.deadline && !statement.deadline_at && !statement.proposed_deadline_at) {
         const due = new Date(bet.deadline).getTime();
         const now = Date.now();
@@ -509,12 +540,12 @@ export async function processMention(db, config, { mention, includes = {}, bot, 
           dedupeKey: `saved:${save.id}`,
         });
       }
-      // A Bet offered from this reply is carried out by the play worker, which
-      // answers once the stake is final on NEAR. The post's words ride along
-      // only until the Bet is made from them.
+      // The play worker replies with a mainnet draft or a funded testnet bet.
+      // It retains the words only until the bet has been created.
       if (offering) {
         await queueBetCommand(tx, { eventId: mention.id, xUserId: mention.author_id, username: requester.username,
-          command: bet.error ? { ...bet, stake: null } : bet, saveId: save.id, words: claim,
+          command: bet.error ? { ...bet, stake: null } : bet, saveId: save.id, words: quickBet ? quickBet.claim : claim,
+          ...(quickBet ? { structuredTerms: quickBet } : {}),
           exclude: replyExclusions(mention, mention.author_id, bot.userId, target.author_id) });
         if (bet.error) await tx.query('update bet_commands set detail = $2 where event_id = $1', [mention.id, bet.error]);
       }

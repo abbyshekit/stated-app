@@ -25,6 +25,8 @@ import { ensurePlayAccount, inPilot, nearChain, playAccountFor, playAction, refe
 import { completeSetup, signInFromX, UserError, userByXId } from './store.mjs';
 import { assertMainnetStakeCap, assertStakeLimit, limitReply, stakeCapReply } from './reputation.mjs';
 
+const QUICK_X_TERMS = 'quick-x-v1';
+
 const DAY = 86400000;
 const STAKE = /^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?$/;
 
@@ -58,17 +60,19 @@ export function parseBetCommand(text, { defaultStake = '0.1', now = new Date(), 
   return { kind: 'bet', side, stake, ...(deadline ? { deadline } : {}) };
 }
 
-export async function queueBetCommand(tx, { eventId, xUserId, username, command, saveId = null, targetRef = null, words = null, exclude = [], receivedAt = new Date() }) {
+export async function queueBetCommand(tx, { eventId, xUserId, username, command, saveId = null, targetRef = null, words = null, structuredTerms = null, exclude = [], receivedAt = new Date() }) {
   if (command.kind === 'evidence') {
     await tx.query(`insert into evidence_commands (event_id, x_user_id, x_username, side, url, target_ref, created_at)
       values ($1,$2,$3,$4,$5,$6,$7) on conflict (event_id) do nothing`,
     [eventId, String(xUserId), username || null, command.side, command.url, targetRef, receivedAt]);
     return;
   }
-  await tx.query(`insert into bet_commands (event_id, x_user_id, x_username, kind, side, stake_near, save_id, target_ref, words, exclude)
-    values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) on conflict (event_id) do nothing`,
+  const persistedWords = structuredTerms ? JSON.stringify({ format: QUICK_X_TERMS, claim: words, ...structuredTerms }) : words;
+  await tx.query(`insert into bet_commands (event_id, x_user_id, x_username, kind, side, stake_near, save_id, target_ref, words, exclude, detail)
+    values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) on conflict (event_id) do nothing`,
   [eventId, String(xUserId), username || null, command.kind, command.side || null, command.stake || null, saveId, targetRef,
-    words ? String(words).slice(0, 1000) : null, exclude]);
+    persistedWords ? String(persistedWords).slice(0, structuredTerms ? 4000 : 1000) : null, exclude,
+    structuredTerms ? QUICK_X_TERMS : null]);
 }
 
 // A stable request id per reply, so a retried command can never create a second Bet.
@@ -158,7 +162,7 @@ class Refused extends Error {
 async function ensureUser(db, { xUserId, username }) {
   let user = await userByXId(db, xUserId);
   if (!user) user = await signInFromX(db, { id: String(xUserId), username: username || `user${xUserId}`, name: username || '' });
-  // Betting from a reply is a public act, but it publishes the Bet only. The profile and saves stay private.
+  // X can create a draft before the user signs in. Use private defaults for the profile and saves.
   if (!user.setup_completed_at) user = await completeSetup(db, user, { profileVisibility: 'private', defaultSaveVisibility: 'private', publishIds: [] });
   // The handle on the mention is the person's handle now. A stored one may since belong to someone else,
   // and the bot's replies name people by it.
@@ -169,6 +173,7 @@ async function ensureUser(db, { xUserId, username }) {
 }
 
 const linkFor = (config, betId) => (config.x.replyLinks ? `${config.baseUrl}/bets/${betId}` : '');
+const reviewLinkFor = (config, betId) => config.x.replyLinks ? `${config.baseUrl}/bets/${betId}?review=1` : '';
 
 // Web consent permits naming on the Bet page, not an X mention. Tell only the
 // creator who explicitly summoned the bot, with no handles or claim text.
@@ -231,19 +236,31 @@ async function offer(db, config, chain, cmd, deps) {
     // Keep the existing refusal order, then check before either account can be funded.
     await assertStakeLimit(db, config, user.id, cmd.stake_near);
     const judge = config.outlayer?.referee ? { id: config.outlayer.referee } : await referee(db, config, chain);
+    let quick = null;
+    if (cmd.detail === QUICK_X_TERMS || String(cmd.words || '').startsWith('{')) {
+      try {
+        const saved = JSON.parse(cmd.words || '{}');
+        if (saved?.format === QUICK_X_TERMS && typeof saved.claim === 'string'
+          && typeof saved.criteria === 'string' && saved.creatorSide === cmd.side
+          && saved.stakeNear === cmd.stake_near && Number.isFinite(new Date(saved.acceptBy).getTime())
+          && Number.isFinite(new Date(saved.resolveAt).getTime())) quick = saved;
+      } catch { /* older plain-text commands continue through their original path */ }
+    }
     const bet = await createBet(db, user, {
       requestId: requestIdFor(cmd.event_id),
-      claim: cmd.words,
-      criteria: `Yes if what the post says has happened by ${replyDeadline(row.deadline)}. ` + (config.outlayer?.referee
+      claim: quick?.claim || cmd.words,
+      criteria: quick?.criteria || (`Yes if what the post says has happened by ${replyDeadline(row.deadline)}. ` + (config.outlayer?.referee
         ? 'An OutLayer enclave jury decides from the committed evidence plan. If it cannot decide within its retry policy, both stakes go back.'
         : config.nearai?.rulings
         ? 'Either side can post a link as evidence. A NEAR AI enclave jury rules on it: without credible evidence that it happened, it counts as not having happened. If the jury cannot decide, both stakes go back.'
-        : 'Stated’s recorded Result for this post, with its evidence link, decides.'),
-      evidenceSourceUrl: row.url,
+        : 'Stated’s recorded Result for this post, with its evidence link, decides.')),
+      // An explicit context URL may guide the evidence plan, while the linked
+      // source/save remains the original X mention and its permalink.
+      evidenceSourceUrl: quick?.evidenceSourceUrl || row.url,
       creatorSide: cmd.side,
       stakeNear: cmd.stake_near,
-      acceptBy: new Date(Math.min(due - 60000, Date.now() + 7 * DAY)).toISOString(),
-      resolveAt: new Date(due).toISOString(),
+      acceptBy: quick?.acceptBy || new Date(Math.min(due - 60000, Date.now() + 7 * DAY)).toISOString(),
+      resolveAt: quick?.resolveAt || new Date(due).toISOString(),
       sourceSaveId: String(cmd.save_id),
       // New bets prefer OutLayer, then a checked Court, then the server referee.
       refereeAccount: config.outlayer?.referee || (await usableCourt(config, chain, judge)) || judge.id,
@@ -251,6 +268,12 @@ async function offer(db, config, chain, cmd, deps) {
     betId = bet.id;
     // The post's words now live in the Bet's own terms; the queue keeps no copy.
     await db.query('update bet_commands set bet_id = $2, words = null, updated_at = clock_timestamp() where event_id = $1', [cmd.event_id, betId]);
+  }
+  if (network().real) {
+    const reviewUrl = reviewLinkFor(config, betId);
+    await say(db, config, { key: `offer:${betId}`, inReplyTo: cmd.event_id, betId,
+      body: reviewUrl ? `Your bet draft is ready for wallet review: ${reviewUrl}` : 'Your bet draft is ready to review under Bets on Stated.' });
+    return betId;
   }
   await ensurePlayAccount(db, config, chain, { xUserId: cmd.x_user_id, username: cmd.x_username });
   // An earlier attempt may have sent the deposit and stopped before recording it. The chain says whether it is funded.
@@ -285,6 +308,19 @@ async function take(db, config, chain, cmd, deps) {
       limit 1`, [ref]));
   if (!found) throw new Refused('no_offer');
   const betId = found.bet_id;
+  if (network().real) {
+    const owner = await db.one(`select u.x_user_id from bilateral_bets b
+      join users u on u.id=b.creator_user_id where b.id=$1`, [betId]);
+    if (!owner) throw new Refused('no_offer');
+    if (String(owner.x_user_id) === String(cmd.x_user_id)) throw new Refused('own');
+    const offered = await publicBet(db, betId);
+    if (!offered?.funded || offered.status !== 'offered' || offered.chain_freshness !== 'recent'
+      || new Date(offered.accept_by).getTime() <= Date.now()) throw new Refused('no_offer');
+    const reviewUrl = reviewLinkFor(config, betId);
+    await say(db, config, { key: `take-review:${cmd.event_id}`, inReplyTo: cmd.event_id, betId,
+      body: reviewUrl ? `Open the bet to review it with your wallet: ${reviewUrl}` : 'Open the offer on Stated to review and stake.' });
+    return betId;
+  }
   const read = () => db.one(`select b.*, c.x_user_id as creator_x_user_id, c.x_username as creator_username
     from bilateral_bets b join users c on c.id = b.creator_user_id where b.id = $1`, [betId]);
   let row = await read();
