@@ -24,8 +24,10 @@ import { verifyBetTransaction } from './near-execution-state.mjs';
 import { ensurePlayAccount, inPilot, nearChain, playAccountFor, playAction, referee, refereeId, refereeSettle, refillTreasury, topUpReferee } from './play.mjs';
 import { completeSetup, signInFromX, UserError, userByXId } from './store.mjs';
 import { assertMainnetStakeCap, assertStakeLimit, limitReply, stakeCapReply } from './reputation.mjs';
+import { xClaimSourceUrl } from './xtext.mjs';
 
 const QUICK_X_TERMS = 'quick-x-v1';
+const SOURCE_ENTITY_TERMS = 'x-source-entity-v1';
 
 const DAY = 86400000;
 const STAKE = /^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?$/;
@@ -60,19 +62,24 @@ export function parseBetCommand(text, { defaultStake = '0.1', now = new Date(), 
   return { kind: 'bet', side, stake, ...(deadline ? { deadline } : {}) };
 }
 
-export async function queueBetCommand(tx, { eventId, xUserId, username, command, saveId = null, targetRef = null, words = null, structuredTerms = null, exclude = [], receivedAt = new Date() }) {
+export async function queueBetCommand(tx, { eventId, xUserId, username, command, saveId = null, targetRef = null, words = null, structuredTerms = null, evidenceSourceUrl = null, exclude = [], receivedAt = new Date() }) {
   if (command.kind === 'evidence') {
     await tx.query(`insert into evidence_commands (event_id, x_user_id, x_username, side, url, target_ref, created_at)
       values ($1,$2,$3,$4,$5,$6,$7) on conflict (event_id) do nothing`,
     [eventId, String(xUserId), username || null, command.side, command.url, targetRef, receivedAt]);
     return;
   }
-  const persistedWords = structuredTerms ? JSON.stringify({ format: QUICK_X_TERMS, claim: words, ...structuredTerms }) : words;
+  const claimError = !structuredTerms && String(words || '').length > 1000 ? 'claim_too_long'
+    : evidenceSourceUrl && xClaimSourceUrl(`Source: ${evidenceSourceUrl}`) !== evidenceSourceUrl ? 'invalid_claim' : null;
+  const persistedWords = claimError ? null : structuredTerms ? JSON.stringify({ format: QUICK_X_TERMS, claim: words, ...structuredTerms })
+    : evidenceSourceUrl ? JSON.stringify({ format: SOURCE_ENTITY_TERMS, claim: words, evidenceSourceUrl }) : words;
+  const boundedWords = persistedWords && (evidenceSourceUrl && !structuredTerms
+    ? persistedWords : String(persistedWords).slice(0, structuredTerms ? 4000 : 1000));
   await tx.query(`insert into bet_commands (event_id, x_user_id, x_username, kind, side, stake_near, save_id, target_ref, words, exclude, detail)
     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) on conflict (event_id) do nothing`,
   [eventId, String(xUserId), username || null, command.kind, command.side || null, command.stake || null, saveId, targetRef,
-    persistedWords ? String(persistedWords).slice(0, structuredTerms ? 4000 : 1000) : null, exclude,
-    structuredTerms ? QUICK_X_TERMS : null]);
+    boundedWords || null, exclude,
+    claimError || (structuredTerms ? QUICK_X_TERMS : evidenceSourceUrl ? SOURCE_ENTITY_TERMS : null)]);
 }
 
 // A stable request id per reply, so a retried command can never create a second Bet.
@@ -95,6 +102,8 @@ const refusals = ({ walletUrl = null, config, limit } = {}) => ({
   too_far: 'That post is dated more than a year out. Bets here settle within a year.',
   resolved: 'That one already has a result.',
   no_offer: 'There is no open bet here to take.',
+  claim_too_long: 'That post is too long for a bet. Make a shorter post, then reply to it with your bet.',
+  invalid_claim: 'This bet request could not be read. Reply to the post with your bet again.',
   own: 'That is your own bet. Someone else has to take the other side.',
   taken: 'Someone took that bet first, or it has closed.',
   // With real NEAR the stake is the person's own money, so the answer says where to add it.
@@ -218,11 +227,34 @@ export async function queueWebMatchNotice(db, config, user, betId) {
 
 async function offer(db, config, chain, cmd, deps) {
   if (!inPilot(config, cmd.x_user_id)) throw new Refused('pilot');
-  if (['stake', 'too_soon', 'too_far'].includes(cmd.detail)) throw new Refused(cmd.detail);
+  if (['stake', 'too_soon', 'too_far', 'claim_too_long', 'invalid_claim'].includes(cmd.detail)) throw new Refused(cmd.detail);
+  let betId = cmd.bet_id;
+  const rawWords = String(cmd.words || '');
+  const sourceEnvelope = cmd.detail === SOURCE_ENTITY_TERMS || rawWords.startsWith(`{"format":"${SOURCE_ENTITY_TERMS}"`);
+  let quick = null;
+  let entitySource = null;
+  if (!betId && (sourceEnvelope || cmd.detail === QUICK_X_TERMS || rawWords.startsWith('{'))) {
+    let saved;
+    try { saved = JSON.parse(rawWords); }
+    catch { if (sourceEnvelope) throw new Refused('invalid_claim'); }
+    if (sourceEnvelope && saved?.format !== SOURCE_ENTITY_TERMS) throw new Refused('invalid_claim');
+    const claimedSource = saved?.claim?.match?.(/(?:^|\s)Source:\s*(https:\/\/\S+)\s*$/i)?.[1];
+    if (saved?.format === QUICK_X_TERMS && typeof saved.claim === 'string'
+      && typeof saved.criteria === 'string' && saved.creatorSide === cmd.side
+      && saved.stakeNear === cmd.stake_near && Number.isFinite(new Date(saved.acceptBy).getTime())
+      && Number.isFinite(new Date(saved.resolveAt).getTime())) quick = saved;
+    else if (saved?.format === SOURCE_ENTITY_TERMS) {
+      if (typeof saved.claim !== 'string' || !saved.claim || saved.claim.length > 1000
+        || typeof saved.evidenceSourceUrl !== 'string'
+        || xClaimSourceUrl(`Source: ${saved.evidenceSourceUrl}`) !== saved.evidenceSourceUrl
+        || !claimedSource?.startsWith(saved.evidenceSourceUrl)
+        || !/^[.!?]*$/.test(claimedSource.slice(saved.evidenceSourceUrl.length))) throw new Refused('invalid_claim');
+      entitySource = saved;
+    }
+  }
   assertMainnetStakeCap(config, cmd.stake_near);
   requireCreationReferee(config);
   const user = await ensureUser(db, { xUserId: cmd.x_user_id, username: cmd.x_username });
-  let betId = cmd.bet_id;
   if (!betId) {
     const row = await db.one(`select st.status, coalesce(st.deadline_at, st.proposed_deadline_at) as deadline, src.url
       from saves s join statements st on st.id = s.statement_id join sources src on src.id = st.source_id
@@ -236,19 +268,9 @@ async function offer(db, config, chain, cmd, deps) {
     // Keep the existing refusal order, then check before either account can be funded.
     await assertStakeLimit(db, config, user.id, cmd.stake_near);
     const judge = config.outlayer?.referee ? { id: config.outlayer.referee } : await referee(db, config, chain);
-    let quick = null;
-    if (cmd.detail === QUICK_X_TERMS || String(cmd.words || '').startsWith('{')) {
-      try {
-        const saved = JSON.parse(cmd.words || '{}');
-        if (saved?.format === QUICK_X_TERMS && typeof saved.claim === 'string'
-          && typeof saved.criteria === 'string' && saved.creatorSide === cmd.side
-          && saved.stakeNear === cmd.stake_near && Number.isFinite(new Date(saved.acceptBy).getTime())
-          && Number.isFinite(new Date(saved.resolveAt).getTime())) quick = saved;
-      } catch { /* older plain-text commands continue through their original path */ }
-    }
     const bet = await createBet(db, user, {
       requestId: requestIdFor(cmd.event_id),
-      claim: quick?.claim || cmd.words,
+      claim: quick?.claim || entitySource?.claim || cmd.words,
       criteria: quick?.criteria || (`Yes if what the post says has happened by ${replyDeadline(row.deadline)}. ` + (config.outlayer?.referee
         ? 'An OutLayer enclave jury decides from the committed evidence plan. If it cannot decide within its retry policy, both stakes go back.'
         : config.nearai?.rulings
@@ -256,7 +278,7 @@ async function offer(db, config, chain, cmd, deps) {
         : 'Stated’s recorded Result for this post, with its evidence link, decides.')),
       // An explicit context URL may guide the evidence plan, while the linked
       // source/save remains the original X mention and its permalink.
-      evidenceSourceUrl: quick?.evidenceSourceUrl || row.url,
+      evidenceSourceUrl: quick?.evidenceSourceUrl || entitySource?.evidenceSourceUrl || xClaimSourceUrl(cmd.words) || row.url,
       creatorSide: cmd.side,
       stakeNear: cmd.stake_near,
       acceptBy: quick?.acceptBy || new Date(Math.min(due - 60000, Date.now() + 7 * DAY)).toISOString(),

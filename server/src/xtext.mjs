@@ -32,11 +32,51 @@ export function isPlaceholder(row) {
 // One normalisation for every path, so the same post always yields the same
 // claim text: the reply prefix, the bot's handle and the #public/#private
 // commands are removed; no other word is.
-export function xClaimText(text, botUsername) {
-  let t = stripForClaim(String(text || ''));
+function safeEntityUrl(value) {
+  if (typeof value !== 'string' || value.length > 2048 || /[\u0000-\u0020\u007f\\]/.test(value)) return null;
+  try {
+    const url = new URL(value);
+    return /^https?:$/.test(url.protocol) && url.hostname && url.hostname.toLowerCase() !== 't.co'
+      && !url.username && !url.password ? value : null;
+  } catch { return null; }
+}
+
+export function xClaimText(text, botUsername, { post } = {}) {
+  const urls = post?.note_tweet?.entities?.urls || post?.entities?.urls;
+  const expanded = new Map((Array.isArray(urls) ? urls : []).slice(0, 100).filter(link => typeof link?.url === 'string')
+    .map(link => [link.url, safeEntityUrl(link.expanded_url) || safeEntityUrl(link.unwound_url)]));
+  // This is a literal entity substitution, never a redirect lookup. Keep source.text
+  // in its raw API form so entity metadata cannot look like an edit to the post.
+  // Restore URL literals after command cleanup, which must not remove a bot handle
+  // or a nested t.co reference inside a URL's own path or query.
+  const literals = [];
+  const words = String(text || '').replaceAll('\uE000', '\uE000\uE000').replace(/https?:\/\/t\.co\/[A-Za-z0-9]+/g, (token, offset, input) => {
+    if (/[A-Za-z0-9_/]/.test(input[offset - 1] || '') || /[A-Za-z0-9_/?#%=&-]/.test(input[offset + token.length] || '')) return token;
+    const url = expanded.get(token);
+    if (!url) return token;
+    return '\uE000' + (literals.push(url) - 1) + '\uE001';
+  });
+  let t = stripForClaim(words);
   if (botUsername) t = t.replace(new RegExp(`@${botUsername}\\b`, 'gi'), ' ');
   t = t.replace(/(^|\s)#(?:public|private)\b/gi, ' ');
-  return t.replace(/\s+/g, ' ').trim();
+  return t.replace(/\s+/g, ' ').trim().replace(/\uE000(?:\uE000|(\d+)\uE001)/g,
+    (_, index) => index === undefined ? '\uE000' : literals[Number(index)]);
+}
+
+export function xClaimSourceUrl(claim, { post, text } = {}) {
+  // The shortened token has an entity boundary that survives sentence punctuation.
+  // Once expanded into claim text, a final period is indistinguishable from a
+  // period that belongs to the URL path.
+  const raw = String(text ?? post?.note_tweet?.text ?? post?.text ?? '');
+  const token = raw.match(/(?:^|\s)Source:\s*(https:\/\/t\.co\/[A-Za-z0-9]+)[.!?]*\s*$/i)?.[1];
+  if (token) {
+    const urls = post?.note_tweet?.entities?.urls || post?.entities?.urls;
+    const entity = Array.isArray(urls) ? urls.slice(0, 100).find(link => link?.url === token) : null;
+    const expanded = safeEntityUrl(entity?.expanded_url) || safeEntityUrl(entity?.unwound_url);
+    if (expanded && /^https:\/\//i.test(expanded)) return expanded;
+  }
+  const source = String(claim || '').match(/(?:^|\s)Source:\s*(https:\/\/\S+)\s*$/i)?.[1];
+  return safeEntityUrl(source);
 }
 
 // The reading of a post's terms. Fragments of the post's words are kept only
@@ -139,8 +179,8 @@ async function publicSaveCount(db, sourceId) {
   return row.n;
 }
 
-export async function storeXText(db, source, statement, text, { botUsername } = {}) {
-  const claim = xClaimText(text, botUsername);
+export async function storeXText(db, source, statement, text, { botUsername, post } = {}) {
+  const claim = xClaimText(text, botUsername, { post });
   if (!claim) return;
   const terms = readTerms(claim, source.published_at || new Date(), { keepWords: true });
   await db.query('update sources set text = $2 where id = $1', [source.id, text]);
@@ -234,7 +274,7 @@ async function fillText(db, x, sources) {
         continue;
       }
       if ((await publicSaveCount(db, source.id)) < 1) continue;
-      await storeXText(db, source, statement, postText(post), { botUsername });
+      await storeXText(db, source, statement, postText(post), { botUsername, post });
       await db.query('update sources set checked_at = now() where id = $1', [source.id]);
       stored.push(String(source.id));
     }

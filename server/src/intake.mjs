@@ -6,7 +6,7 @@ import { inPilot } from './near-network.mjs';
 import { replyFor } from './replies.mjs';
 import { addInbox, restoreCommitment, UserError, userByXId } from './store.mjs';
 import { explicitlyMentions, postText, postUrl } from './xapi.mjs';
-import { placeholderSpan, readTerms, storeXText, storesAllXText, xClaimText } from './xtext.mjs';
+import { placeholderSpan, readTerms, storeXText, storesAllXText, xClaimSourceUrl, xClaimText } from './xtext.mjs';
 import { parseQuickBet } from './quick-bet.mjs';
 
 const STATUS_URL = /^https?:\/\/(?:www\.|mobile\.)?(?:x|twitter)\.com\/(\w{1,15}|i\/web)\/status\/(\d+)/i;
@@ -457,7 +457,7 @@ export async function processMention(db, config, { mention, includes = {}, bot, 
       });
       return { outcome: 'article', event, intakeId: intake.id };
     } else {
-      const own = xClaimText(text, bot.username);
+      const own = xClaimText(text, bot.username, { post: mention });
       if (own.length < 12 || !looksLikePrediction(own)) {
         return { outcome: 'no_target', event: await recordEvent(db, config, mention, { outcome: 'no_target' }) };
       }
@@ -470,7 +470,7 @@ export async function processMention(db, config, { mention, includes = {}, bot, 
       const owner = await tx.one(`select * from users where x_user_id = $1 and kind = 'person'`, [mention.author_id]);
       const relation = target.author_id === mention.author_id ? 'mine' : 'following';
       const visibility = initialVisibility(owner, flags, Boolean(targetAuthor?.protected));
-      const claim = xClaimText(targetText, bot.username);
+      const claim = xClaimText(targetText, bot.username, { post: quickBet ? null : target });
       const keepWords = storesAllXText(config) || visibility === 'public';
       const source = await upsertXSource(tx, target, targetAuthor, 'mention', { text: keepWords ? targetText : '' });
       let statement = await upsertXStatement(tx, source, {
@@ -511,7 +511,7 @@ export async function processMention(db, config, { mention, includes = {}, bot, 
         source,
       });
       if (keepWords && !source.text && save.visibility === 'public') {
-        await storeXText(tx, source, statement, targetText, { botUsername: bot.username });
+        await storeXText(tx, source, statement, targetText, { botUsername: bot.username, post: quickBet ? null : target });
         statement = await tx.one('select * from statements where id = $1', [statement.id]);
       }
       const outcome = created ? 'saved' : 'duplicate';
@@ -543,9 +543,11 @@ export async function processMention(db, config, { mention, includes = {}, bot, 
       // The play worker replies with a mainnet draft or a funded testnet bet.
       // It retains the words only until the bet has been created.
       if (offering) {
+        const entitySourceUrl = quickBet ? null : xClaimSourceUrl(claim, { post: target, text: targetText });
         await queueBetCommand(tx, { eventId: mention.id, xUserId: mention.author_id, username: requester.username,
           command: bet.error ? { ...bet, stake: null } : bet, saveId: save.id, words: quickBet ? quickBet.claim : claim,
           ...(quickBet ? { structuredTerms: quickBet } : {}),
+          ...(entitySourceUrl && entitySourceUrl !== xClaimSourceUrl(claim) ? { evidenceSourceUrl: entitySourceUrl } : {}),
           exclude: replyExclusions(mention, mention.author_id, bot.userId, target.author_id) });
         if (bet.error) await tx.query('update bet_commands set detail = $2 where event_id = $1', [mention.id, bet.error]);
       }

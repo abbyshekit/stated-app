@@ -1,0 +1,76 @@
+{
+  "data": [
+    {
+      "author_id": "1752816457639948288",
+      "created_at": "2026-11-14T18:55:48.000Z",
+      "edit_history_tweet_ids": [
+        "2121678500520136747"
+      ],
+      "entities": {
+        "urls": [
+          {
+            "description": "This domain is for use in documentation examples without needing permission. This is not a service; avoid relying on it for testing and monitoring purposes.",
+            "display_url": "example.com",
+            "end": 92,
+            "expanded_url": "https://example.com",
+            "start": 69,
+            "status": 200,
+            "title": "Example Domain",
+            "unwound_url": "https://example.com",
+            "url": "https://t.co/5kdpjmDPA4"
+          },
+          {
+            "display_url": "iana.org/domains/reserv…",
+            "end": 158,
+            "expanded_url": "https://www.iana.org/domains/reserved",
+            "start": 135,
+            "status": 200,
+            "title": "IANA-managed Reserved Domains",
+            "unwound_url": "https://www.iana.org/domains/reserved",
+            "url": "https://t.co/h1up4xKWp5"
+          }
+        ]
+      },
+      "id": "2121678500520136747",
+      "text": "Controlled Stated product test: IANA reserved-domains page will list https://t.co/5kdpjmDPA4 at 21:00 UTC on 14 November 2026. Source: https://t.co/h1up4xKWp5"
+    },
+    {
+      "author_id": "1752816457639948288",
+      "created_at": "2026-11-14T18:56:19.000Z",
+      "edit_history_tweet_ids": [
+        "2121678633295024285"
+      ],
+      "entities": {
+        "mentions": [
+          {
+            "end": 15,
+            "id": "2119638363397292032",
+            "start": 0,
+            "username": "statedforecast"
+          }
+        ]
+      },
+      "id": "2121678633295024285",
+      "referenced_tweets": [
+        {
+          "id": "2121678500520136747",
+          "type": "replied_to"
+        }
+      ],
+      "text": "@statedforecast bet 0.1 yes by 14 November 2026 at 21:00 UTC"
+    }
+  ],
+  "includes": {
+    "users": [
+      {
+        "id": "1752816457639948288",
+        "name": "Chain Abstracted",
+        "protected": false,
+        "username": "ChainAbstracted"
+      }
+    ]
+  },
+  "meta": {
+    "result_count": 2
+  }
+}
