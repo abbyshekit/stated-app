@@ -457,7 +457,7 @@ export async function processMention(db, config, { mention, includes = {}, bot, 
       });
       return { outcome: 'article', event, intakeId: intake.id };
     } else {
-      const own = xClaimText(text, bot.username);
+      const own = xClaimText(text, bot.username, { post: mention });
       if (own.length < 12 || !looksLikePrediction(own)) {
         return { outcome: 'no_target', event: await recordEvent(db, config, mention, { outcome: 'no_target' }) };
       }
@@ -470,7 +470,7 @@ export async function processMention(db, config, { mention, includes = {}, bot, 
       const owner = await tx.one(`select * from users where x_user_id = $1 and kind = 'person'`, [mention.author_id]);
       const relation = target.author_id === mention.author_id ? 'mine' : 'following';
       const visibility = initialVisibility(owner, flags, Boolean(targetAuthor?.protected));
-      const claim = xClaimText(targetText, bot.username);
+      const claim = xClaimText(targetText, bot.username, { post: quickBet ? null : target });
       const keepWords = storesAllXText(config) || visibility === 'public';
       const source = await upsertXSource(tx, target, targetAuthor, 'mention', { text: keepWords ? targetText : '' });
       let statement = await upsertXStatement(tx, source, {
@@ -511,7 +511,7 @@ export async function processMention(db, config, { mention, includes = {}, bot, 
         source,
       });
       if (keepWords && !source.text && save.visibility === 'public') {
-        await storeXText(tx, source, statement, targetText, { botUsername: bot.username });
+        await storeXText(tx, source, statement, targetText, { botUsername: bot.username, post: quickBet ? null : target });
         statement = await tx.one('select * from statements where id = $1', [statement.id]);
       }
       const outcome = created ? 'saved' : 'duplicate';

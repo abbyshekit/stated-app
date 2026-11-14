@@ -7,6 +7,7 @@ import { loadConfig } from '../src/config.mjs';
 import { outlayerTermsHash } from '../src/outlayer.mjs';
 import { betTerms } from '../src/bet-view.mjs';
 import { UserError } from '../src/store.mjs';
+import { xClaimSourceUrl } from '../src/xtext.mjs';
 import { enclaveEnv, fakeNearAi } from './support/enclave.mjs';
 
 const NOW = Date.parse('2026-11-13T12:00:20.123Z');
@@ -19,7 +20,7 @@ function fixture(plan, overrides = {}) {
     criteria: 'Coinbase NEAR-USD price decides.', evidenceSourceUrl: 'https://x.com/founder/status/123',
     creatorSide: 'yes', stakeNear: '0.1', acceptBy: iso(NOW + 30 * HOUR),
     resolveAt: '2026-11-14T23:59:00.000Z', ...overrides };
-  const state = { row: null, created: null, replies: [], accounts: 0, now: NOW };
+  const state = { row: null, created: null, replies: [], accounts: 0, now: NOW, commandErrors: [] };
   const cmd = { event_id: 'reply-123', kind: 'bet', x_user_id: user.x_user_id, x_username: user.x_username,
     save_id: '9', words: input.claim, side: 'yes', stake_near: '0.1', attempts: 1 };
   const db = {
@@ -40,6 +41,7 @@ function fixture(plan, overrides = {}) {
     },
     many: async sql => /from bet_commands/.test(sql) ? [cmd] : [],
     query: async (sql, p) => {
+      if (/update bet_commands set detail =/.test(sql)) state.commandErrors.push(p[1]);
       if (/insert into bilateral_bets/.test(sql)) state.row = { id: p[0], creator_user_id: p[1], claim: p[4], criteria: p[5],
         evidence_source_url: p[6], creator_side: p[7], stake_yocto: p[8], accept_by: p[9], resolve_at: p[10],
         terms_hash: p[11], status: 'offered', chain_state: {} };
@@ -65,13 +67,15 @@ function fixture(plan, overrides = {}) {
 async function reply(f) {
   const source = await readFile(new URL('../src/reply-bets.mjs', import.meta.url), 'utf8');
   const body = source.replace(/^import .*?;\n/gm, '').replace(/^export /gm, '');
-  const deps = { createHash, createBet, UserError, userByXId: async () => user, inPilot: () => true,
+  const deps = { createHash, createBet, UserError, xClaimSourceUrl, userByXId: async () => user, inPilot: () => true,
     assertMainnetStakeCap: () => {}, assertStakeLimit: async () => {}, stakeCapReply: () => 'cap',
     requireCreationReferee: () => {}, ensurePlayAccount: async () => { f.state.accounts++; },
     syncNearBet: async () => f.state.row, publishBet: async () => {},
     network: () => ({ real: false }), unit: () => 'test NEAR', formatTestNear: () => '0.1', dayMonth: () => '14 Nov 2026' };
   const run = new Function(...Object.keys(deps), `${body}\nreturn runBetCommands;`)(...Object.values(deps));
-  return run(f.db, f.config, f.chain, { fetchImpl: f.ai.fetchImpl });
+  const result = await run(f.db, f.config, f.chain, { fetchImpl: f.ai.fetchImpl });
+  assert.equal(result.retry + result.failed, 0, f.state.commandErrors.join('; '));
+  return result;
 }
 
 for (const surface of ['web terms', 'X reply']) {

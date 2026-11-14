@@ -24,6 +24,7 @@ import { verifyBetTransaction } from './near-execution-state.mjs';
 import { ensurePlayAccount, inPilot, nearChain, playAccountFor, playAction, referee, refereeId, refereeSettle, refillTreasury, topUpReferee } from './play.mjs';
 import { completeSetup, signInFromX, UserError, userByXId } from './store.mjs';
 import { assertMainnetStakeCap, assertStakeLimit, limitReply, stakeCapReply } from './reputation.mjs';
+import { xClaimSourceUrl } from './xtext.mjs';
 
 const QUICK_X_TERMS = 'quick-x-v1';
 
@@ -256,7 +257,7 @@ async function offer(db, config, chain, cmd, deps) {
         : 'Stated’s recorded Result for this post, with its evidence link, decides.')),
       // An explicit context URL may guide the evidence plan, while the linked
       // source/save remains the original X mention and its permalink.
-      evidenceSourceUrl: quick?.evidenceSourceUrl || row.url,
+      evidenceSourceUrl: quick?.evidenceSourceUrl || xClaimSourceUrl(cmd.words) || row.url,
       creatorSide: cmd.side,
       stakeNear: cmd.stake_near,
       acceptBy: quick?.acceptBy || new Date(Math.min(due - 60000, Date.now() + 7 * DAY)).toISOString(),

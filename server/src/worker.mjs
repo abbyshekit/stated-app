@@ -156,7 +156,7 @@ export async function processDm(db, config, x, event, bot) {
             const body = postText(fetched.post);
             const source = await upsertXSource(tx, fetched.post, fetched.author, 'mention', { text: keepWords ? body : '' });
             const statement = await upsertXStatement(tx, source, {
-              claim: xClaimText(body, bot.username),
+              claim: xClaimText(body, bot.username, { post: fetched.post }),
               keepWords,
               speaker: fetched.author?.username ? `@${fetched.author.username}` : 'Unknown author',
               speakerXUserId: fetched.post.author_id,

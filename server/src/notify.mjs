@@ -270,7 +270,7 @@ export async function purgeOrphanXSources(db) {
 
 async function applyEdit(db, source, post, botUsername) {
   const current = postText(post);
-  const claim = xClaimText(current, botUsername);
+  const claim = xClaimText(current, botUsername, { post });
   const statement = await db.one('select * from statements where source_id = $1 order by id limit 1', [source.id]);
   const terms = readTerms(claim, source.published_at || new Date(), { keepWords: true });
   await db.tx(async (tx) => {
