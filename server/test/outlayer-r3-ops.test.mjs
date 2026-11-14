@@ -9,12 +9,13 @@ import { checkPlan, decide, materialHash } from '../src/enclave-ruling.mjs';
 import { UserError } from '../src/store.mjs';
 import { makeOutlayerMaterial } from '../src/outlayer.mjs';
 import { loadConfig } from '../src/config.mjs';
+import { reservePlaySigner, withAvailablePlaySigner } from '../src/play.mjs';
 
 // Exercise the production module with only transport/database boundaries replaced.
 async function sourceModule(dependencies = {}, names = []) {
   const source = await readFile(new URL('../src/outlayer.mjs', import.meta.url), 'utf8');
   const body = source.replace(/^import .*?;\n/gm, '').replace(/^export \{.*?\};\n/gm, '').replace(/^export /gm, '');
-  const deps = { createHash, randomUUID, isIP, canonicalJson, fingerprint, checkPlan, decide, materialHash,
+  const deps = { createHash, randomUUID, isIP, canonicalJson, fingerprint, checkPlan, decide, materialHash, reservePlaySigner, withAvailablePlaySigner,
     UserError, InvalidNonceError, TransactionExpiredError, isNamedAccount: () => true, ...dependencies };
   return new Function(...Object.keys(deps), `${body}\nreturn {${names.join(',')}};`)(...Object.values(deps));
 }
@@ -74,6 +75,7 @@ async function registrationFixture({ stake = '100000000000000000000000', config 
   const rows = []; const events = []; const calls = []; const locks = [];
   const db = { tx: async fn => fn(db), many: async () => [],
     one: async (sql, args = []) => {
+      if (sql === 'select * from play_accounts where account_id = $1 for update') return null;
       if (/pg_try_advisory_lock/.test(sql)) return { locked: true };
       if (/pg_advisory_xact_lock/.test(sql)) { locks.push(args[0]); return {}; }
       if (/select id from bilateral_bets/.test(sql)) return { id: bet.id };

@@ -1,15 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
 import { baseEncode, KeyPair, SignedTransaction } from 'near-api-js';
 import { nearChain } from '../src/play.mjs';
 
 test('OutLayer signing yields a stable hash before any broadcast and resends identical signed bytes', async () => {
   const broadcasts = [];
-  const server = createServer(async (req, res) => {
-    const chunks = []; for await (const chunk of req) chunks.push(chunk);
-    const request = JSON.parse(Buffer.concat(chunks).toString());
+  const fetchImpl = async (url, options) => {
+    assert.equal(url, 'https://synthetic-rpc.example/');
+    assert.equal(options.redirect, 'error');
+    assert.ok(options.signal instanceof AbortSignal);
+    const request = JSON.parse(options.body);
     let result;
     if (request.method === 'query') result = { nonce: 10, permission: 'FullAccess' };
     else if (request.method === 'block') result = { header: { hash: baseEncode(Buffer.alloc(32, 9)), height: 100 } };
@@ -22,14 +23,12 @@ test('OutLayer signing yields a stable hash before any broadcast and resends ide
       assert.equal(signed.transaction.actions[0].functionCall.methodName, 'request_ruling');
       assert.equal(signed.transaction.actions[0].functionCall.gas, 300000000000000n);
       assert.equal(signed.transaction.actions[0].functionCall.deposit, 0n);
-      result = { final_execution_status: 'FINAL', transaction: { hash }, status: { SuccessValue: Buffer.from('true').toString('base64') } };
+      result = { final_execution_status: 'FINAL', transaction: { hash, signer_id: signed.transaction.signerId,
+        receiver_id: signed.transaction.receiverId }, status: { SuccessValue: Buffer.from('true').toString('base64') } };
     } else throw new Error('Unexpected synthetic RPC method');
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }));
-  });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  try {
-    const chain = nearChain({ urls: [`http://127.0.0.1:${server.address().port}`] });
+    return Response.json({ jsonrpc: '2.0', id: request.id, result });
+  };
+    const chain = nearChain({ urls: ['https://synthetic-rpc.example/'], fetchImpl });
     const prepared = await chain.prepareCall({ signerId: 'sponsor.testnet', secret: KeyPair.fromRandom('ed25519').toString(),
       contractId: 'ref.testnet', method: 'request_ruling', args: { bet_id: 'synthetic-bet' }, gas: 300000000000000n });
     assert.equal(broadcasts.length, 0);
@@ -39,5 +38,4 @@ test('OutLayer signing yields a stable hash before any broadcast and resends ide
     await assert.rejects(chain.prepareCall({ signerId: 'sponsor.testnet', secret: 'invalid', contractId: 'ref.testnet',
       method: 'request_ruling', args: {}, gas: 300000000000000n }));
     assert.equal(broadcasts.length, 2);
-  } finally { await new Promise(resolve => server.close(resolve)); }
 });

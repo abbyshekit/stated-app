@@ -24,10 +24,10 @@ const fetchImpl = async (url, options) => {
     if (rpcFailure) throw new Error('Synthetic RPC outage');
     const result = execution?.final_execution_status === 'FINAL' && body.params.wait_until !== 'FINAL'
       ? { final_execution_status: 'INCLUDED' } : execution;
-    return new Response(JSON.stringify({ result }));
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: 'stated', result }));
   }
   if (body.method === 'query' && body.params.method_name === 'get_bet') {
-    return new Response(JSON.stringify({ result: { block_height: 100, result: [...Buffer.from('null')] } }));
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: 'stated', result: { block_height: 100, result: [...Buffer.from('null')] } }));
   }
   throw new Error(`Unexpected synthetic NEAR RPC method: ${body.method}`);
 };

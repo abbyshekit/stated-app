@@ -24,7 +24,7 @@ const fetchImpl = async (_url, options) => {
   } else if (params.request_type === 'view_access_key') {
     result = { nonce: 1, permission: 'FullAccess', block_hash: '11111111111111111111111111111111' };
   } else throw new Error('Unexpected RPC');
-  return new Response(JSON.stringify({ result }));
+  return new Response(JSON.stringify({ jsonrpc: '2.0', id: 'stated', result }));
 };
 const config = () => ({ ...s.config, nearContract: 'escrow.testnet' });
 before(async () => {

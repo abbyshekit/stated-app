@@ -83,7 +83,7 @@ async function rejectLegacyStake(stakeNear, reason) {
     accept_by_ns: (BigInt(Date.parse(input.acceptBy)) * 1000000n).toString(),
     resolve_at_ns: (BigInt(Date.parse(input.resolveAt)) * 1000000n).toString() };
   row.chain_state = chain;
-  const fundedView = async () => Response.json({ result: { block_height: 1, block_hash: 'synthetic-block',
+  const fundedView = async () => Response.json({ jsonrpc: '2.0', id: 'stated', result: { block_height: 1, block_hash: 'synthetic-block',
     result: [...Buffer.from(JSON.stringify(chain))] } });
   await assert.rejects(prepareNearAction(db, policy, { ...user, id: '2' }, id,
     { action: 'accept', accountId: 'taker.near', termsHash: row.terms_hash }, { chain: near.chain, fetchImpl: fundedView }), { reason });

@@ -19,7 +19,7 @@ let follower;
 const publicKey = 'ed25519:11111111111111111111111111111111';
 const config = () => ({ ...s.config, nearContract: 'escrow.testnet' });
 const ns = (value) => (BigInt(new Date(value).getTime()) * 1000000n).toString();
-const response = (data) => new Response(JSON.stringify(data), { status: 200 });
+const response = (data) => new Response(JSON.stringify({ jsonrpc: '2.0', id: 'stated', ...data }), { status: 200 });
 
 function rpc(chain, height = 10, { fail = false, permission = 'FullAccess' } = {}) {
   return { fetchImpl: async (_url, options) => {

@@ -18,11 +18,11 @@ const fetchImpl = async (url, options) => {
   if (s && String(url).startsWith(s.fakeX.base)) return fetch(url, options);
   assert.equal(url, TESTNET_RPC, 'no live NEAR or X requests');
   const { method, params } = JSON.parse(options.body);
-  if (method === 'tx') return Response.json({ result: { final_execution_status: 'INCLUDED' } });
+  if (method === 'tx') return Response.json({ jsonrpc: '2.0', id: 'stated', result: { final_execution_status: 'INCLUDED' } });
   assert.equal(method, 'query');
   assert.equal(params.method_name, 'get_bet');
   const { id } = JSON.parse(Buffer.from(params.args_base64, 'base64'));
-  return Response.json({ result: { block_height: 100, result: [...Buffer.from(JSON.stringify(chains.get(id) || null))] } });
+  return Response.json({ jsonrpc: '2.0', id: 'stated', result: { block_height: 100, result: [...Buffer.from(JSON.stringify(chains.get(id) || null))] } });
 };
 
 before(async () => {

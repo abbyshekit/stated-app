@@ -18,7 +18,7 @@ const PERMISSIONS_POLICY = 'camera=(), microphone=(), geolocation=(), payment=()
 import { registerWalletRpc } from './near-wallet-rpc.mjs';
 import { registerShareRoutes } from './share-pages.mjs';
 import { betsFor } from './bets.mjs';
-import { publicBet, publicBetsForProfile, publicBetsForSave, firstPublicBetsForSaves, nextOpenPublicBet, publicBetHall } from './bet-public.mjs';
+import { publicBet, publicBetsForProfile, publicBetsForSave, publicRulingCandidates, firstPublicBetsForSaves, nextOpenPublicBet, publicBetHall } from './bet-public.mjs';
 import { betList, betBlock as detailBetBlock } from './bet-view.mjs';
 import { betBlock, betLead, betState, dayMonth, timeLeft } from './marked.mjs';
 import { betSourceHeader } from './bet-source-view.mjs';
@@ -30,6 +30,7 @@ import { assertNetworkConfig } from './config.mjs';
 import { logoFile } from './token-logos.mjs';
 import { intentsQuotes } from './intents.mjs';
 import { pkcePair, sameString, token } from './crypto.mjs';
+import { OAUTH_STATE_TTL_SECONDS, reserveOAuthState } from './oauth-states.mjs';
 import { createSession, sessionFor } from './session-tokens.mjs';
 import { collectionPage, exportPage, publicRecord } from './bounded-exports.mjs';
 import { createReadLimiter } from './public-read-limits.mjs';
@@ -202,7 +203,12 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
   const chainFor = () => (playChain ||= nearChain({ fetchImpl }));
   let botName = null;
   let xClient = null;
-  const readBudget = createReadLimiter({ railway: config.hosted && Boolean(process.env.RAILWAY_ENVIRONMENT) });
+  const railway = config.hosted && Boolean(process.env.RAILWAY_ENVIRONMENT);
+  const readBudget = createReadLimiter({ railway });
+  const signinBudget = createReadLimiter({ railway, capacity: 24, refillMs: 10_000 });
+  const correctionBudget = createReadLimiter({ railway, capacity: 20, refillMs: 15_000 });
+  const pageBudget = createReadLimiter({ railway, capacity: 60, refillMs: 1000 });
+  const publicPages = /^(?:\/$|\/court$|\/desk(?:\/\d{1,18})?$|\/u\/\w{1,40}(?:\/\d{1,18})?$|\/search$|\/api\/(?:search$|u\/\w{1,40}(?:\/\d{1,18})?$)|\/bets\/[a-f\d-]{36}(?:\/ruling)?$)/i;
   const publicRuling = createPublicRulingReader({ recipe: enclaveRecipe });
   const readPublicRuling = async (tx, id) => (await publicRuling(tx, id))?.record || null;
 
@@ -884,7 +890,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
 
   route('GET', /^\/$/, async (ctx) => {
     ensureVisitor(ctx);
-    const hall = await publicBetHall(db);
+    const hall = await publicBetHall(db, { before: ctx.url.searchParams.get('betsBefore') });
     const outsideTaken = await outsideBetsTaken(db, { exclude: config.excludeXIds, admins: config.adminXIds });
     const bot = await botUsername();
     // One row per statement: the author's own save wins over a follower's.
@@ -898,8 +904,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
     const betLines = await betLinesFor(recent, ctx.user);
     // DESIGN.md: the latest public ruling is the first object, with its mark on the words.
     let settled = null;
-    for (const row of hall.rows.filter(bet => bet.status === 'settled' && ['yes', 'no'].includes(bet.outcome))
-      .sort((a, b) => new Date(b.settled_at) - new Date(a.settled_at))) {
+    for (const row of (await publicRulingCandidates(db)).rows) {
       const bet = await publicBet(db, row.id, { ...config.play, readRuling: readPublicRuling });
       if (rulingOnEvidence(bet) && !bet.evidence?.privateItemCount) { settled = bet; break; }
     }
@@ -914,7 +919,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
     const featuredId = settled?.id || fallback?.id || dareBet?.id;
     const listed = config.near.real ? hall.rows : hall.rows.filter(bet => bet.id !== featuredId);
     const offers = listed.filter(bet => betState(bet).open);
-    const hasOpenOffers = hall.rows.some(bet => betState(bet).open);
+    const hasOpenOffers = hall.hasOpen;
     const active = listed.filter(bet => ['accepted', 'proposed', 'disputed'].includes(bet.status));
     const finished = listed.filter(bet => !betState(bet).open && !active.includes(bet));
     const homeAction = config.near.real ? { href: ctx.user ? '/me/bets/new' : '/signin?return=%2Fme%2Fbets%2Fnew', label: 'Make a bet' }
@@ -933,6 +938,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
       ${config.near.real ? html`<p class="pitch home-intro">Sign in with X, add NEAR to your account, then make or take a bet. The <a class="tl" href="/court">OutLayer referee</a> rules and the winner is paid.</p>` : html`<p class="pitch home-intro${hasOpenOffers ? '' : ' empty'}">${hasOpenOffers ? '' : 'No open offers right now. '}Reply to any post on X with <span class="mention">@${bot} bet ${config.play.defaultStakeNear} no</span>.${hasOpenOffers ? ' Three AI models judge it and NEAR pays the winner.' : ''}</p>`}
       ${homeAction ? html`<div class="acts"><a class="pill solid big" href="${homeAction.href}">${homeAction.label}</a></div>` : ''}
       ${hall.total || config.near.real ? html`<section id="public-bets"><p class="pitch"><a class="tl" href="#public-bets">${hall.total} ${hall.total === 1 ? 'bet' : 'bets'}</a>, ${hall.settled} settled, ${formatTestNear(hall.wonYocto)} ${unit()} won${outsideTaken >= 1 || config.near.real ? html`, <span class="outside-taken">${outsideTaken} ${outsideTaken === 1 ? 'bet' : 'bets'} taken by people outside the team</span>` : ''}</p>${offers.length || config.near.real ? html`<h2 class="lead">Open offers</h2>${offers.length ? betList(offers, { hall: true }) : html`<p class="empty quiet">No open offers yet.</p>`}` : ''}${active.length || config.near.real ? html`<h2 class="lead">Bets in progress</h2>${active.length ? betList(active, { hall: true }) : html`<p class="empty quiet">No bets in progress yet.</p>`}` : ''}${finished.length || config.near.real ? html`<h2 class="lead">Finished bets</h2>${finished.length ? betList(finished, { hall: true }) : html`<p class="empty quiet">No finished bets yet.</p>`}` : ''}</section>` : ''}
+      ${hall.next ? html`<p class="gut"><a class="tl" rel="next" href="/?betsBefore=${hall.next}#public-bets">More bets</a></p>` : ''}
       ${rest.length ? fileList(rest, publicRow, faces, betLines) : ''}
     `, { flush: true, signin: false, og: {
       title: 'Stated: bets on what is said on X', description: 'Bet on what is said on X, decided by three AI models in NEAR AI enclaves.',
@@ -976,15 +982,11 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
       ? await db.one('select ref from visitor_refs where visitor = $1', [createHash('sha256').update(`stated-visit:${vid}`).digest('hex').slice(0, 32)])
       : null;
     const ref = storedRef?.ref || null;
-    await db.query(`delete from oauth_states where created_at < now() - interval '1 hour'`);
-    await db.query(
-      `insert into oauth_states (state, code_verifier, purpose, return_to, ref) values ($1, $2, 'signin', $3, $4)`,
-      [state, verifier, returnTo, REFS.has(ref) ? ref : null],
-    );
+    await reserveOAuthState(db, { state, verifier, purpose: 'signin', returnTo, ref: REFS.has(ref) ? ref : null });
     // The state is bound to this browser, so a callback link from someone
     // else's sign-in cannot sign this browser in to their account.
     redirect(ctx.res, authorizeUrl(config, { state, challenge, scopes: SIGNIN_SCOPES }), {
-      'set-cookie': cookie('stated_oauth', state, { maxAge: 900, secure: config.secureCookies }),
+      'set-cookie': cookie('stated_oauth', state, { maxAge: OAUTH_STATE_TTL_SECONDS, secure: config.secureCookies }),
     });
   });
 
@@ -996,8 +998,8 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
       throw new UserError('That sign-in was started in a different browser. Start again from Sign in with X.', 400);
     }
     const state = await db.one(
-      `delete from oauth_states where state = $1 and created_at > now() - interval '15 minutes' returning *`,
-      [presented],
+      `delete from oauth_states where state = $1 and created_at > now() - $2::int * interval '1 second' returning *`,
+      [presented, OAUTH_STATE_TTL_SECONDS],
     );
     if (!state) throw new UserError('That sign-in link expired. Start again from Sign in with X.', 400);
     if (q.get('error') || !q.get('code')) throw new UserError('Sign-in was cancelled on X. Nothing was saved.', 400);
@@ -1403,6 +1405,10 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
   route('POST', /^\/corrections$/, async (ctx) => {
     const form = await needPost(ctx);
     if (!form) return;
+    const budget = correctionBudget(ctx.req);
+    if (!budget.allowed) {
+      throw new UserError('Too many correction attempts from this address. Try again shortly.', 429, { retryAfter: budget.retryAfter });
+    }
     await requestCorrection(db, ctx.user, {
       statementId: form.get('statement'),
       kind: form.get('kind'),
@@ -1571,7 +1577,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
     redirect(ctx.res, `/me?tab=following&done=following&n=${saves.length}`);
   });
 
-  async function profilePage(ctx, owner, { base, title, publicBets = [] }) {
+  async function profilePage(ctx, owner, { base, title, publicBets = [], publicBetsNext = null }) {
     const publicProfile = canViewProfile(null, owner);
     const collections = publicProfile ? await collectionPage(db, owner, ctx.url)
       : publicBets.length ? { mine: [], following: [], next: null } : null;
@@ -1593,6 +1599,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
       </div>
       ${isOwnerViewing ? html`<p class="notice">This is what others see. Private saves are not listed.</p>` : ''}
       ${publicBets.length ? html`<h2 class="lead">Public bets</h2>${betList(publicBets, { hall: true })}` : ''}
+      ${publicBetsNext ? html`<p class="gut"><a class="tl" href="${base}?betsBefore=${publicBetsNext}">More bets</a></p>` : ''}
       ${publicProfile && owner.kind !== 'editorial' ? html`<h2>Predictions on this page (${collections.mine.length})</h2>
       ${collections.mine.length ? list(collections.mine) : html`<p class="blank">No public predictions.</p>`}` : ''}
       ${publicProfile ? html`<h2>${owner.kind === 'editorial' ? 'Records' : 'Following'} on this page (${collections.following.length})</h2>
@@ -1616,7 +1623,8 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
     ensureVisitor(ctx);
     const who = owner.kind === 'editorial' ? 'the Stated desk' : `@${owner.x_username}`;
     const followers = await publicFollowerCount(db, row.statement_id);
-    const revisions = await revisionsFor(db, row.statement_id, [row.save_id]);
+    const history = await revisionsFor(db, row.statement_id, [row.save_id], { after: ctx.url.searchParams.get('historyAfter'), limit: 51 });
+    const revisions = history.slice(0, 50);
     const flash = flashOf(ctx.url);
     const shareUrl = `${config.baseUrl}${base}/${row.save_id}`;
     const outcome = verdictOf(row);
@@ -1651,7 +1659,8 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
       <section class="folds">
         ${termsFold(row, { more: html`<p class="quiet">Saved by ${who} on ${dayMonth(row.saved_at, { year: true })}.
           ${row.relation === 'following' ? 'Saving it does not mean agreeing with it.' : ''}
-          ${followers ? `${followers} public ${followers === 1 ? 'profile follows' : 'profiles follow'} this claim.` : ''}</p>${historyList(revisions)}` })}
+          ${followers ? `${followers} public ${followers === 1 ? 'profile follows' : 'profiles follow'} this claim.` : ''}</p>${historyList(revisions)}
+          ${history.length > 50 ? html`<p><a class="tl" href="${base}/${row.save_id}?historyAfter=${revisions.at(-1).id}">More history</a></p>` : ''}` })}
         ${correctionForm(ctx, row)}
       </section>
     `, {
@@ -1671,9 +1680,10 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
   route('GET', /^\/u\/(\w{1,40})$/, async (ctx) => {
     const owner = await personByUsername(db, ctx.params[0]);
     if (!owner) return notFound(ctx);
-    const publicBets = await publicBetsForProfile(db, owner.x_username);
+    const betPage = await publicBetsForProfile(db, owner.x_username, { before: ctx.url.searchParams.get('betsBefore') });
+    const publicBets = betPage.rows;
     if (!canViewProfile(null, owner) && !publicBets.length) return notFound(ctx);
-    await profilePage(ctx, owner, { base: `/u/${owner.x_username}`, title: `@${owner.x_username}`, publicBets });
+    await profilePage(ctx, owner, { base: `/u/${owner.x_username}`, title: `@${owner.x_username}`, publicBets, publicBetsNext: betPage.next });
   });
 
   // A save is found by its ID; the handle in the address is only a label. An
@@ -1735,10 +1745,14 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
     const owner = await personByUsername(db, ctx.params[0]);
     const row = owner ? await publicSave(db, owner, ctx.params[1]) : null;
     if (!row) return json(ctx.res, 404, { error: 'not_found' });
+    const history = await revisionsFor(db, row.statement_id, [row.save_id], { after: ctx.url.searchParams.get('historyAfter'), limit: 51 });
+    const revisions = history.slice(0, 50);
     json(ctx.res, 200, {
       ...publicSaveView(row),
       publicFollowers: await publicFollowerCount(db, row.statement_id),
-      history: await revisionsFor(db, row.statement_id, [row.save_id]),
+      history: revisions,
+      historyPagination: { limit: 50, next: history.length > 50
+        ? `${ctx.url.pathname}?historyAfter=${revisions.at(-1).id}` : null },
     });
   });
 
@@ -1995,6 +2009,19 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
     }
     const ctx = { req, res, url, params: [], user: null, session: null };
     try {
+      if (req.method === 'GET' && url.pathname === '/signin/x' && config.x.clientId) {
+        const budget = signinBudget(req);
+        if (!budget.allowed) {
+          throw new UserError('Too many sign-in attempts from this address. Try again shortly.', 429, { retryAfter: budget.retryAfter });
+        }
+      }
+      // Deny a public-page flood before session lookup or any record work.
+      if (req.method === 'GET' && publicPages.test(url.pathname)) {
+        const budget = pageBudget(req);
+        if (!budget.allowed) return send(res, 429, 'Too many pages. Retry after the indicated delay.', {
+          kind: 'private', headers: { 'retry-after': String(budget.retryAfter), 'content-type': 'text/plain; charset=utf-8' },
+        });
+      }
       const viewer = await viewerOf(req);
       ctx.user = viewer.user;
       ctx.session = viewer.session;
@@ -2024,7 +2051,9 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
       send(res, status, await layout(ctx, 'That didn’t work', html`
         <div class="hero"><h1>That didn’t work</h1></div>
         <p class="notice" role="alert">${message}</p>
-        <div class="acts"><a class="pill solid big" href="${back}">Go back</a></div>`, { kind: 'private', flush: true, inboxBadge: false }), { kind: 'private' });
+        <div class="acts"><a class="pill solid big" href="${back}">Go back</a></div>`, { kind: 'private', flush: true, inboxBadge: false }), {
+        kind: 'private', headers: err instanceof UserError && err.retryAfter ? { 'retry-after': String(err.retryAfter) } : {},
+      });
     }
   };
 }

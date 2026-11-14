@@ -35,6 +35,12 @@ test('demo readiness reports initialization failure, RPC failure and recovery wi
 test('the recorded payout requires the exact settled Bet and its finalized transfer and callback', async () => {
   const { environment, payout } = evidence;
   const success = { SuccessValue: 'dHJ1ZQ==' };
+  const rootReceipt = '1'.repeat(32);
+  const callbackData = '2'.repeat(44);
+  const withdraw = { FunctionCall: { method_name: 'withdraw', deposit: '0', gas: 100000000000000,
+    args: Buffer.from('{}').toString('base64') } };
+  const callback = { FunctionCall: { method_name: 'on_withdraw', deposit: '0', gas: 10000000000000,
+    args: Buffer.from(JSON.stringify({ account_id: payout.winner, amount: payout.deliveredYocto })).toString('base64') } };
   const bet = {
     id: environment.bet, status: 'settled', creator_side: 'no', acceptor: payout.winner,
     resolution: { outcome: 'yes', method: 'referee' }, stake_yocto: (BigInt(payout.deliveredYocto) / 2n).toString(),
@@ -42,14 +48,26 @@ test('the recorded payout requires the exact settled Bet and its finalized trans
   const transaction = {
     final_execution_status: 'FINAL', status: success,
     transaction: { hash: payout.transaction, signer_id: payout.winner, receiver_id: environment.escrow,
-      actions: [{ FunctionCall: { method_name: 'withdraw', deposit: '0' } }] },
+      actions: [withdraw] },
+    transaction_outcome: { id: payout.transaction, outcome: { executor_id: payout.winner,
+      receipt_ids: [rootReceipt], status: { SuccessReceiptId: rootReceipt }, logs: [] } },
     receipts: [{
       receipt_id: payout.transferReceipt, predecessor_id: environment.escrow, receiver_id: payout.winner,
-      receipt: { Action: { actions: [{ Transfer: { deposit: payout.deliveredYocto } }] } },
+      receipt: { Action: { signer_id: payout.winner, actions: [{ Transfer: { deposit: payout.deliveredYocto } }],
+        input_data_ids: [], output_data_receivers: [{ data_id: callbackData, receiver_id: environment.escrow }] } },
+    }, {
+      receipt_id: rootReceipt, predecessor_id: payout.winner, receiver_id: environment.escrow,
+      receipt: { Action: { signer_id: payout.winner, actions: [withdraw], input_data_ids: [], output_data_receivers: [] } },
+    }, {
+      receipt_id: payout.callbackReceipt, predecessor_id: environment.escrow, receiver_id: environment.escrow,
+      receipt: { Action: { signer_id: payout.winner, actions: [callback], input_data_ids: [callbackData], output_data_receivers: [] } },
     }],
     receipts_outcome: [
-      { id: payout.transferReceipt, outcome: { executor_id: payout.winner, status: { SuccessValue: '' } } },
-      { id: payout.callbackReceipt, outcome: { executor_id: environment.escrow, status: success } },
+      { id: rootReceipt, outcome: { executor_id: environment.escrow,
+        receipt_ids: [payout.transferReceipt, payout.callbackReceipt],
+        status: { SuccessReceiptId: payout.callbackReceipt }, logs: [] } },
+      { id: payout.transferReceipt, outcome: { executor_id: payout.winner, receipt_ids: [], status: { SuccessValue: '' }, logs: [] } },
+      { id: payout.callbackReceipt, outcome: { executor_id: environment.escrow, receipt_ids: [], status: success, logs: [] } },
     ],
   };
   const verify = (tx, escrow = bet) => verifyRecordedPayout({
@@ -68,6 +86,9 @@ test('the recorded payout requires the exact settled Bet and its finalized trans
   assert.equal(await verify({ ...transaction, final_execution_status: 'EXECUTED' }), false);
   assert.equal(await verify(transaction, { ...bet, status: 'accepted' }), false);
   assert.equal(await verify({ ...transaction, receipts_outcome: transaction.receipts_outcome.slice(0, 1) }), false);
+  const detachedCallback = structuredClone(transaction);
+  detachedCallback.receipts_outcome[0].outcome.receipt_ids = [payout.transferReceipt];
+  assert.equal(await verify(detachedCallback), false);
   transaction.receipts[0].receipt.Action.actions[0].Transfer.deposit = '1';
   assert.equal(await verify(transaction), false);
 });

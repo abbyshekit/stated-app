@@ -1,26 +1,54 @@
 // INTEGRATION: Every image read rechecks public authorization before rendering.
-import { publicBet, publicBetsForSave } from './bet-public.mjs';
-import { renderShareImage } from './share-image.mjs';
+import { createHash } from 'node:crypto';
+import { publicBetForShare, publicBetsForSave } from './bet-public.mjs';
+import { shareImageSvg, renderShareSvg } from './share-image.mjs';
+import { createReadLimiter } from './public-read-limits.mjs';
 import { publicSave, publicPredictionOwner } from './store.mjs';
 import { effectiveTerms, outcomeFor } from './terms.mjs';
 import { isPlaceholder } from './xtext.mjs';
 
 const betName = (username, wallet) => (username ? `@${username}` : wallet);
 
-export function registerShareRoutes({ route, db, config, notFound, headersFor }) {
+export function registerShareRoutes({ route, db, config, notFound, headersFor, render = renderShareSvg, now = Date.now }) {
   const cache = new Map();
+  let cacheBytes = 0;
+  const readBudget = createReadLimiter({ railway: config.hosted && Boolean(process.env.RAILWAY_ENVIRONMENT), capacity: 30, refillMs: 2000, now });
+  const renderBudget = createReadLimiter({ capacity: 20, refillMs: 1000, maxClients: 1, now });
+  function refused(res, budget) {
+    res.writeHead(429, { ...headersFor('private'), 'cache-control': 'no-store',
+      'content-type': 'text/plain; charset=utf-8', 'retry-after': String(budget.retryAfter) });
+    res.end('Too many image requests. Retry after the indicated delay.');
+  }
+  function allowRead(ctx) {
+    const budget = readBudget(ctx.req);
+    if (budget.allowed) return true;
+    refused(ctx.res, budget);
+    return false;
+  }
   function image(res, input) {
     // The cache contains authorized public projections only. Authorization and
     // current content are read before every lookup, including withdrawal.
-    // The card text counts days, so the UTC date is part of the key.
-    const betNow = (bet) => bet?.status === 'offered' && new Date(bet.acceptBy).getTime() <= Date.now();
-    const key = JSON.stringify({ ...input, day: new Date().toISOString().slice(0, 10),
-      acceptanceExpired: input.kind === 'bet' ? betNow(input) : betNow(input.bet) });
+    // Hash exactly the bounded SVG, including the current rendered deadline.
+    // Dates/IDs that do not affect the image cannot fill the render cache.
+    const svg = shareImageSvg(input);
+    const key = createHash('sha256').update(svg).digest('hex');
     let png = cache.get(key);
-    if (!png) {
-      png = renderShareImage(input);
-      if (cache.size >= 32) cache.delete(cache.keys().next().value);
+    if (png) {
+      cache.delete(key);
       cache.set(key, png);
+    } else {
+      const budget = renderBudget({ headers: {}, socket: { remoteAddress: '127.0.0.1' } });
+      if (!budget.allowed) return refused(res, budget);
+      png = render(svg);
+      if (png.length <= 8 * 1024 * 1024) {
+        while (cache.size && (cache.size >= 32 || cacheBytes + png.length > 8 * 1024 * 1024)) {
+          const first = cache.keys().next().value;
+          cacheBytes -= cache.get(first).length;
+          cache.delete(first);
+        }
+        cache.set(key, png);
+        cacheBytes += png.length;
+      }
     }
     res.writeHead(200, { ...headersFor('public'), 'cache-control': 'no-store',
       'content-type': 'image/png', 'content-length': png.length });
@@ -28,11 +56,12 @@ export function registerShareRoutes({ route, db, config, notFound, headersFor })
   }
 
   route('GET', /^\/share\/bets\/([a-fA-F0-9-]{36})\.png$/, async (ctx) => {
-    const bet = await publicBet(db, ctx.params[0]);
+    if (!allowRead(ctx)) return;
+    const bet = await publicBetForShare(db, ctx.params[0]);
     if (!bet) return notFound(ctx);
     // The post's author, when the Bet was made on a post whose public page names them.
     let author = {};
-    const linked = bet.referee_wallet ? await db.one('select source_save_id from bilateral_bets where id=$1', [bet.id]) : null;
+    const linked = bet.referee_wallet ? { source_save_id: bet.sourceSaveId } : null;
     if (linked?.source_save_id) {
       const owner = await publicPredictionOwner(db, linked.source_save_id);
       const row = owner ? await publicSave(db, owner, linked.source_save_id) : null;
@@ -42,7 +71,7 @@ export function registerShareRoutes({ route, db, config, notFound, headersFor })
     }
     image(ctx.res, { ...author, kind: 'bet', id: bet.id, claim: bet.claim,
       status: bet.status, outcome: bet.outcome, settledBy: bet.settled_by, acceptBy: bet.accept_by, funded: bet.funded,
-      settlementVerified: Boolean(bet.settlement_transaction_hash),
+      settlementVerified: bet.settlementVerified,
       date: bet.resolve_at, creatorSide: bet.creator_side,
       creatorName: betName(bet.creator_username, bet.creator_wallet),
       acceptorName: betName(bet.acceptor_username, bet.acceptor_wallet),
@@ -50,6 +79,7 @@ export function registerShareRoutes({ route, db, config, notFound, headersFor })
   });
 
   route('GET', /^\/share\/predictions\/(\d{1,18})\.png$/, async (ctx) => {
+    if (!allowRead(ctx)) return;
     const owner = await publicPredictionOwner(db, ctx.params[0]);
     const row = owner ? await publicSave(db, owner, ctx.params[0]) : null;
     if (!row) return notFound(ctx);

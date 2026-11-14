@@ -14,7 +14,8 @@ const ROSTER = ['Qwen/Qwen3.8-27B', 'deepseek-ai/DeepSeek-V4.1-Flash-1017', 'z-a
 const clone = (value) => structuredClone(value);
 const fail = (message) => { throw new Error(message); };
 const ns = (date) => BigInt(new Date(date).getTime()) * 1_000_000n;
-const json = (value) => new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } });
+const json = (value) => new Response(JSON.stringify({ jsonrpc: '2.0', id: 'stated', ...value,
+  ...(value.error ? { error: { code: -32000, ...value.error } } : {}) }), { headers: { 'content-type': 'application/json' } });
 const hash = (text) => createHash('sha256').update(text).digest('hex');
 
 // pg returns Date objects; Date.parse coerces those through a string without milliseconds.
@@ -87,6 +88,7 @@ export class FakeOutLayerNear extends FakeNear {
     this.chain.view = async (input) => this.outlayers.has(input.contractId)
       ? this.outlayerView(input.contractId, input.method, input.args || {}) : view(input);
     const signed = new Map();
+    const baseBroadcast = this.chain.broadcastCall;
     this.chain.prepareCall = async (input) => {
       const hash = baseEncode(randomBytes(32));
       // Secrets are deliberately omitted from this synthetic signing fixture.
@@ -96,7 +98,7 @@ export class FakeOutLayerNear extends FakeNear {
     };
     this.chain.broadcastCall = async ({ signedTransaction }) => {
       const stored = signed.get(signedTransaction);
-      if (!stored) throw new Error('Unknown signed test transaction');
+      if (!stored) return baseBroadcast({ signedTransaction });
       if (stored.result) return stored.result;
       const result = await this.chain.call(stored.input);
       if (!result.hash) return result;
@@ -107,6 +109,8 @@ export class FakeOutLayerNear extends FakeNear {
       stored.result = { ...result, hash: signedTransaction };
       return stored.result;
     };
+    this.chain.unwrapDelivery = async ({ transactionHash }) => signed.get(transactionHash)?.result?.ok === true;
+    this.chain.preparedFinalized = async ({ hash }) => this.txs.get(hash)?.final_execution_status === 'FINAL';
   }
 
   addOutLayer(accountId, config = {}) {

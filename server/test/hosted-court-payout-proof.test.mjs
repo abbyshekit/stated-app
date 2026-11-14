@@ -36,23 +36,23 @@ function makeRpc({ mutate = () => {}, proof = evidence } = {}) {
       assert.equal(body.params.wait_until, 'FINAL');
       if (body.params.tx_hash === evidence.transactions.approve) {
         assert.equal(body.params.sender_account_id, proof.court.approveSigner);
-        return Response.json(responses.approve);
+        return Response.json({ ...responses.approve, id: body.id });
       }
       assert.equal(body.params.tx_hash, evidence.transactions.withdraw);
       assert.equal(body.params.sender_account_id, proof.payout.recipient);
-      return Response.json(responses.withdrawal);
+      return Response.json({ ...responses.withdrawal, id: body.id });
     }
 
     assert.equal(body.params.finality, 'final');
     if (body.params.request_type === 'view_account') {
       assert.equal(body.params.account_id, evidence.contract);
-      return Response.json(responses.account);
+      return Response.json({ ...responses.account, id: body.id });
     }
     if (body.params.request_type === 'view_access_key_list') {
       const accountId = body.params.account_id;
-      if (accountId === proof.contract) return Response.json(responses.access);
+      if (accountId === proof.contract) return Response.json({ ...responses.access, id: body.id });
       assert.equal(accountId, proof.court.relay);
-      return Response.json(responses.relayAccess);
+      return Response.json({ ...responses.relayAccess, id: body.id });
     }
 
     assert.equal(body.params.request_type, 'call_function');
@@ -61,16 +61,16 @@ function makeRpc({ mutate = () => {}, proof = evidence } = {}) {
     if (accountId === proof.contract) {
       assert.equal(methodName, 'get_bet');
       assert.deepEqual(args, { id: evidence.betUrl.split('/').at(-1) });
-      return Response.json(responses.bet);
+      return Response.json({ ...responses.bet, id: body.id });
     }
     if (accountId === proof.court.dao) {
       if (methodName === 'get_proposal') {
         assert.deepEqual(args, { id: evidence.court.proposalId });
-        return Response.json(responses.proposal);
+        return Response.json({ ...responses.proposal, id: body.id });
       }
       assert.equal(methodName, 'get_policy');
       assert.deepEqual(args, {});
-      return Response.json(responses.policy);
+      return Response.json({ ...responses.policy, id: body.id });
     }
     assert.fail(`unexpected view call ${accountId}.${methodName}`);
   };
@@ -242,7 +242,7 @@ test('CLI accepts the optional evidence path with mocked real RPC responses', ()
       else if (p.params.request_type === 'view_account') key = 'account';
       else if (p.params.request_type === 'view_access_key_list') key = p.params.account_id === e.court.relay ? 'relayAccess' : 'access';
       else key = ({ get_bet: 'bet', get_proposal: 'proposal', get_policy: 'policy' })[p.params.method_name];
-      return Response.json(r[key]);
+      return Response.json({ ...r[key], id: p.id });
     };`;
   const preload = `data:text/javascript,${encodeURIComponent(source)}`;
   const cli = spawnSync(process.execPath, ['--import', preload, verifierPath,

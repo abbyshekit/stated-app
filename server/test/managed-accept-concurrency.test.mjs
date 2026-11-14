@@ -12,7 +12,7 @@ import { createApp } from '../src/web.mjs';
 import { primaryRpc } from '../src/near-escrow.mjs';
 import { prepareNearAction } from '../src/near-bets.mjs';
 import { publishBet } from '../src/bet-public.mjs';
-import { ensurePlayAccount, playAccountFor, playAction, yocto } from '../src/play.mjs';
+import { ensurePlayAccount, nearChain, playAccountFor, playAction, yocto } from '../src/play.mjs';
 import { runBetCommands } from '../src/reply-bets.mjs';
 import { tick } from '../src/worker.mjs';
 import { userByXId } from '../src/store.mjs';
@@ -44,7 +44,7 @@ for (const network of ['testnet', 'mainnet']) {
       if (real && new URL(url).origin === new URL(NEARAI_BASE).origin) return ai.fetchImpl(url, options);
       if (String(url) === primaryRpc()) {
         const input = JSON.parse(options.body);
-        if (input.method === 'tx' && transactionResults.has(input.params.tx_hash)) return Response.json({ result: transactionResults.get(input.params.tx_hash) });
+        if (['tx', 'tx_status'].includes(input.method) && transactionResults.has(input.params.tx_hash)) return Response.json({ jsonrpc: '2.0', id: 'stated', result: transactionResults.get(input.params.tx_hash) });
         if (failLockedBet && input.params?.method_name === 'get_bet'
           && JSON.parse(Buffer.from(input.params.args_base64, 'base64')).id === failLockedBet
           && (await s.db.one("select exists(select 1 from pg_locks where locktype='advisory' and granted) as held")).held) {
@@ -55,6 +55,7 @@ for (const network of ['testnet', 'mainnet']) {
       if (s && String(url).startsWith(`${s.fakeX.base}/`)) return fetch(url, options);
       throw new Error('This test refuses external requests');
     };
+    if (real) near.chain.requestRetrySafe = nearChain({ fetchImpl }).requestRetrySafe;
     try {
       s = await startStack({ STATED_NEAR_NETWORK: network, STATED_NEAR_CONTRACT: near.contract,
         STATED_PLAY: '1', STATED_PLAY_AUTOPROVISION: '1', STATED_REPLIES_PER_TAGGER_PER_HOUR: '100',
@@ -270,6 +271,23 @@ for (const network of ['testnet', 'mainnet']) {
             deposit: prepared.depositYocto, gas: 100000000000000 } }] }, status: { Failure: { ActionError: {} } } });
         assert.equal((await send(browser2(alice), bet)).status, 409);
         assert.equal((await counts(bet)).requests[0].execution_status, 'failed');
+        if (real) {
+          // A legacy failure without root evidence remains fenced. The exact
+          // root receipt can prove rollback even without saved signed bytes.
+          assert.equal((await send(browser2(alice), bet)).status, 409);
+          observed = await counts(bet);
+          assert.equal(observed.calls, 0);
+          assert.equal(observed.notices, 0);
+          assert.equal(observed.requests[0].transaction_hash, hash);
+          const failed = transactionResults.get(hash);
+          const root = '22222222222222222222222222222222';
+          failed.transaction_outcome = { id: hash, outcome: { executor_id: account.account_id,
+            receipt_ids: [root], status: { SuccessReceiptId: root } } };
+          failed.receipts = [{ receipt_id: root, predecessor_id: account.account_id, receiver_id: near.contract,
+            receipt: { Action: { signer_id: account.account_id, actions: failed.transaction.actions } } }];
+          failed.receipts_outcome = [{ id: root, outcome: { executor_id: near.contract,
+            receipt_ids: [], status: failed.status } }];
+        }
         assert.equal((await send(browser2(alice), bet)).status, 303);
         observed = await counts(bet);
         assert.equal(observed.calls, 1);

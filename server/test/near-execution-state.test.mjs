@@ -18,7 +18,7 @@ let blockRequests = 0;
 const chains = new Map();
 const hash = '11111111111111111111111111111111';
 const ns = value => (BigInt(new Date(value).getTime()) * 1000000n).toString();
-const response = result => new Response(JSON.stringify({ result }), { headers: { 'content-type': 'application/json' } });
+const response = result => new Response(JSON.stringify({ jsonrpc: '2.0', id: 'stated', result }), { headers: { 'content-type': 'application/json' } });
 const fetchImpl = async (url, options) => {
   if (url !== TESTNET_RPC) return fetch(url, options);
   const { method, params } = JSON.parse(options.body);

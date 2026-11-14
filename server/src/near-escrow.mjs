@@ -8,10 +8,18 @@ import { isAccount, isNamedAccount, network, unit } from './near-network.mjs';
 export const TESTNET_RPC = 'https://test.rpc.fastnear.com';
 /** The first endpoint for this server's network. A test double answers for exactly this one. */
 export const primaryRpc = () => network().rpc[0];
-// The network's own list, tried in order when one is busy or down. STATED_NEAR_RPC replaces the list.
+
 export function rpcUrls(env = process.env) {
-  const listed = String(env.STATED_NEAR_RPC || '').split(',').map((url) => url.trim()).filter((url) => /^https:\/\/[^\s]+$/.test(url));
-  return listed.length ? listed : network().rpc;
+  if (env.STATED_NEAR_RPC == null) return network().rpc;
+  const listed = String(env.STATED_NEAR_RPC).split(',').map((part) => {
+    const value = part.trim();
+    const url = /^https:\/\/[^\s\\#]+$/i.test(value) ? URL.parse(value) : null;
+    if (!url?.hostname || url.username || url.password || value.split('/')[2].includes('@')) {
+      throw new Error('STATED_NEAR_RPC must contain only HTTPS endpoints without credentials or fragments.');
+    }
+    return url.href;
+  });
+  return [...new Set(listed)];
 }
 export const STORAGE_FEE_YOCTO = '10000000000000000000000';
 export const NEAR_CALL_GAS = 100000000000000n;
@@ -47,28 +55,11 @@ export function formatTestNear(value) {
   return new D(unsigned(value)).div(ONE_NEAR).toFixed();
 }
 
-// A caller that supplies its own fetch (a test double) gets exactly one endpoint, so no test reaches the network.
-export async function rpc(method, params, { fetchImpl = fetch, urls = fetchImpl === fetch ? rpcUrls() : [primaryRpc()] } = {}) {
-  let response = null;
-  let failure = null;
-  for (const url of urls) {
-    try {
-      response = await fetchImpl(url, {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: 'stated', method, params }),
-        signal: AbortSignal.timeout(15000), redirect: 'error'
-      });
-      // Busy or broken: the next endpoint may answer. Anything else is this endpoint's answer.
-      if (response.status !== 429 && response.status < 500) break;
-      failure = new Error(`NEAR RPC HTTP ${response.status}`);
-      response = null;
-    } catch (error) {
-      failure = error;
-    }
+export async function readRpcJson(response) {
+  if (Number(response.headers.get('content-length')) > MAX_RESPONSE) {
+    await response.body?.cancel().catch(() => {});
+    throw new Error('NEAR RPC response too large');
   }
-  if (!response) throw failure || new Error('NEAR RPC unavailable');
-  if (!response.ok) throw new Error(`NEAR RPC HTTP ${response.status}`);
-  if (Number(response.headers.get('content-length')) > MAX_RESPONSE) throw new Error('NEAR RPC response too large');
   if (!response.body) throw new Error('Empty NEAR RPC response');
   const reader = response.body.getReader();
   const chunks = [];
@@ -85,15 +76,59 @@ export async function rpc(method, params, { fetchImpl = fetch, urls = fetchImpl 
     await reader.cancel().catch(() => {});
     throw error;
   }
-  const result = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-  if (result.error) {
-    // The message is generic ("Server error"); the cause names what happened.
-    const error = new Error(`NEAR RPC error: ${result.error.message || 'request failed'}`);
-    error.rpcCause = result.error.cause?.name || null;
+  return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)));
+}
+
+// An injected fetch uses one endpoint unless the caller supplies an exact list.
+export async function rpc(method, params, { fetchImpl = fetch, urls = fetchImpl === fetch ? rpcUrls() : [primaryRpc()] } = {}) {
+  let failure;
+  let ambiguous = false;
+  for (const url of urls) {
+    let response;
+    try {
+      response = await fetchImpl(url, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 'stated', method, params }),
+        signal: AbortSignal.timeout(15000), redirect: 'error'
+      });
+    } catch (error) {
+      if (method === 'send_tx') ambiguous = true;
+      error.rpcAmbiguous = ambiguous;
+      failure = error;
+      continue;
+    }
+    if (!response.ok || response.redirected) {
+      await response.body?.cancel().catch(() => {});
+      failure = new Error(`NEAR RPC HTTP ${response.status}`);
+      if (response.status === 408 || response.status === 429 || response.status >= 500) {
+        if (method === 'send_tx') ambiguous = true;
+        failure.rpcAmbiguous = ambiguous;
+        continue;
+      }
+      failure.rpcAmbiguous = ambiguous;
+      throw failure;
+    }
+    const payload = await readRpcJson(response);
+    if (payload?.jsonrpc !== '2.0' || payload.id !== 'stated'
+      || Object.hasOwn(payload, 'result') === Object.hasOwn(payload, 'error')) throw new Error('Invalid NEAR RPC response');
+    if (Object.hasOwn(payload, 'result')) return payload.result;
+    if (!Number.isInteger(payload.error?.code) || typeof payload.error.message !== 'string') throw new Error('Invalid NEAR RPC response');
+    const error = new Error(`NEAR RPC error: ${payload.error.message.slice(0, 300)}`);
+    error.rpcCause = payload.error.cause?.name || null;
+    error.rpcCode = payload.error.code;
+    error.rpcAmbiguous = ambiguous;
+    const invalid = error.rpcCause === 'INVALID_TRANSACTION' ? payload.error.data?.TxExecutionError?.InvalidTxError : null;
+    error.invalidNonce = invalid?.InvalidNonce || null;
+    error.transactionExpired = invalid === 'Expired';
+    if (['DOES_NOT_TRACK_SHARD', 'INTERNAL_ERROR'].includes(error.rpcCause || payload.error.name)) {
+      if (method === 'send_tx') ambiguous = true;
+      error.rpcAmbiguous = ambiguous;
+      failure = error;
+      continue;
+    }
     throw error;
   }
-  if (!Object.hasOwn(result, 'result')) throw new Error('Invalid NEAR RPC response');
-  return result.result;
+  throw failure || new Error('NEAR RPC unavailable');
 }
 
 async function gasPricing(options) {

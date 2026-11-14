@@ -13,13 +13,15 @@
 // a browser wallet: prepareNearAction, then verifyBetTransaction, then syncNearBet.
 import Decimal from 'decimal.js';
 import { createHash, randomBytes } from 'node:crypto';
-import { Account, FailoverRpcProvider, JsonRpcProvider, KeyPair, KeyPairSigner, PublicKey, SignedTransaction, actions, baseEncode } from 'near-api-js';
+import { Account, JsonRpcProvider, KeyPair, KeyPairSigner, PublicKey, SignedTransaction, actions, baseDecode, baseEncode } from 'near-api-js';
+import { InvalidNonceError, TransactionExpiredError } from 'near-api-js/rpc-errors';
 import { open, seal } from './crypto.mjs';
+import { canonicalJson } from './canonical.mjs';
 import { kvGet, kvSet } from './db.mjs';
 import { verifyBetTransaction } from './near-execution-state.mjs';
 import { deliveryFromReceipts } from './near-delivery.mjs';
 import { prepareNearAction, syncNearBet } from './near-bets.mjs';
-import { COURT_CALL_GAS, functionCallFunds, NEAR_CALL_GAS as GAS, rpc, rpcUrls } from './near-escrow.mjs';
+import { COURT_CALL_GAS, functionCallFunds, NEAR_CALL_GAS as GAS, rpc } from './near-escrow.mjs';
 import { inPilot, isNamedAccount, network, unit } from './near-network.mjs';
 import { UserError } from './store.mjs';
 
@@ -73,23 +75,102 @@ export function implicitAccountId(publicKey) {
 export { inPilot };
 
 /** The real chain. Tests pass an object with the same methods. */
-export function nearChain({ urls = rpcUrls(), fetchImpl = fetch } = {}) {
-  const provider = new FailoverRpcProvider(urls.map((url) => new JsonRpcProvider({ url })));
+const txHash = (transaction) => baseEncode(createHash('sha256').update(transaction.transaction.encode()).digest());
+const validHash = (hash) => typeof hash === 'string' && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(hash) && baseDecode(hash).length === 32;
+
+function rootCallRolledBack(result, expected) {
+  const matchesCall = items => Array.isArray(items) && items.length === 1 && Object.keys(items[0]).length === 1
+    && items[0]?.FunctionCall?.method_name === expected.method
+    && items[0].FunctionCall.args === expected.argsBase64
+    && items[0].FunctionCall.deposit === expected.depositYocto
+    && String(items[0].FunctionCall.gas) === String(expected.gas);
+  const initial = result?.transaction_outcome;
+  const root = initial?.outcome?.status?.SuccessReceiptId;
+  const receipt = result?.receipts?.find(item => item.receipt_id === root);
+  const outcome = result?.receipts_outcome?.find(item => item.id === root)?.outcome;
+  return result?.final_execution_status === 'FINAL' && Boolean(result.status?.Failure)
+    && Object.keys(result.status).length === 1 && result.transaction?.hash === expected.hash
+    && result.transaction.signer_id === expected.signerId && result.transaction.receiver_id === expected.contractId
+    && matchesCall(result.transaction.actions)
+    && initial?.id === expected.hash && initial.outcome.executor_id === expected.signerId
+    && initial.outcome.receipt_ids?.length === 1 && initial.outcome.receipt_ids[0] === root
+    && receipt?.receiver_id === expected.contractId && receipt.predecessor_id === expected.signerId
+    && receipt.receipt?.Action?.signer_id === expected.signerId && matchesCall(receipt.receipt.Action.actions)
+    && outcome?.executor_id === expected.contractId && Boolean(outcome.status?.Failure)
+    && Object.keys(outcome.status).length === 1;
+}
+
+export function nearChain({ urls, fetchImpl = fetch } = {}) {
+  const rpcOptions = { fetchImpl, urls };
+  const request = (method, params) => rpc(method, params, rpcOptions);
+  // Use the SDK's serialization and signing, but send through the same bounded
+  // and redirect-free transport as every on-chain verification read.
+  const provider = new JsonRpcProvider();
+  provider.sendJsonRpc = async (method, params) => {
+    try { return await request(method, params); }
+    catch (error) {
+      if (error.invalidNonce) throw Object.assign(new InvalidNonceError(error.invalidNonce.ak_nonce, error.invalidNonce.tx_nonce),
+        { rpcAmbiguous: error.rpcAmbiguous });
+      if (error.transactionExpired) throw Object.assign(new TransactionExpiredError(), { rpcAmbiguous: error.rpcAmbiguous });
+      throw error;
+    }
+  };
   const signer = (id, secret) => new Account(id, provider, new KeyPairSigner(KeyPair.fromString(secret)));
-  const sent = (result) => {
+  const sent = (result, expected) => {
     const status = result?.status || {};
     const hash = result?.transaction?.hash || null;
-    const ok = Boolean(hash) && result.final_execution_status === 'FINAL' && typeof status.SuccessValue === 'string';
+    if (hash && (hash !== expected.hash || result.transaction.signer_id !== expected.signerId
+      || result.transaction.receiver_id !== expected.receiverId)) throw new Error('NEAR returned a different signed transaction');
+    const final = Boolean(hash) && hash === expected.hash && result?.final_execution_status === 'FINAL' && Object.keys(status).length === 1;
+    const ok = final && typeof status.SuccessValue === 'string';
     // The call's return value (a DAO's add_proposal returns the new proposal id), parsed as JSON when it is JSON.
     let value = null;
     if (ok && status.SuccessValue) {
       const text = Buffer.from(status.SuccessValue, 'base64').toString('utf8');
       try { value = JSON.parse(text); } catch { value = text; }
     }
-    return { hash, ok, value, failure: ok ? null : Object.hasOwn(status, 'Failure') ? JSON.stringify(status.Failure).slice(0, 400) : 'Final success not established' };
+    return { hash, ok, value, failure: ok ? null : final && Object.hasOwn(status, 'Failure')
+      ? JSON.stringify(status.Failure).slice(0, 400) : 'Final success not established' };
   };
-  const send = async (id, secret, receiverId, list) => sent(await signer(id, secret).signAndSendTransaction({
-    receiverId, actions: list, waitUntil: 'FINAL', throwOnFailure: false }));
+  const broadcast = async (transaction) => sent(await provider.sendTransactionUntil(transaction, 'FINAL'),
+    { hash: txHash(transaction), signerId: transaction.transaction.signerId, receiverId: transaction.transaction.receiverId });
+  provider.sendTransactionUntil = async (transaction, waitUntil) => {
+    const expected = { hash: txHash(transaction), signerId: transaction.transaction.signerId, receiverId: transaction.transaction.receiverId };
+    const pending = { final_execution_status: 'NONE', status: 'NotStarted',
+      transaction: { hash: expected.hash, signer_id: expected.signerId, receiver_id: expected.receiverId } };
+    let result;
+    try {
+      result = await provider.sendJsonRpc('send_tx', {
+        signed_tx_base64: Buffer.from(transaction.encode()).toString('base64'), wait_until: waitUntil,
+      });
+    } catch (rejection) {
+      // A nonce rejection after a lost response may refer to this very send.
+      // Reconcile its exact signed hash before the SDK may allocate another nonce.
+      try {
+        result = await request('tx', { tx_hash: expected.hash, sender_account_id: expected.signerId, wait_until: 'NONE' });
+      } catch (lookup) {
+        if (!rejection.rpcAmbiguous && lookup.rpcCause === 'UNKNOWN_TRANSACTION'
+          && (rejection instanceof InvalidNonceError || rejection instanceof TransactionExpiredError)) throw rejection;
+        return pending;
+      }
+    }
+    sent(result, expected);
+    return result?.transaction?.hash ? result : pending;
+  };
+  const send = async (id, secret, receiverId, list) => {
+    const result = await signer(id, secret).signAndSendTransaction({
+      receiverId, actions: list, waitUntil: 'FINAL', throwOnFailure: false, retries: 2,
+    });
+    return sent(result, { hash: result?.transaction?.hash || null, signerId: id, receiverId });
+  };
+  const receipts = async (hash, signerId) => {
+    const params = { tx_hash: hash, sender_account_id: signerId, wait_until: 'NONE' };
+    try { return await request('tx_status', params); }
+    catch (error) {
+      if (error.rpcCause !== 'METHOD_NOT_FOUND' && error.rpcCode !== -32601) throw error;
+      return request('EXPERIMENTAL_tx_status', params);
+    }
+  };
   return {
     newKey() {
       const key = KeyPair.fromRandom('ed25519');
@@ -106,16 +187,18 @@ export function nearChain({ urls = rpcUrls(), fetchImpl = fetch } = {}) {
     },
     async balance(accountId) {
       try {
-        const state = await rpc('query', { request_type: 'view_account', finality: 'final', account_id: accountId }, { fetchImpl });
-        return typeof state.amount === 'string' ? state.amount : null;
+        const state = await request('query', { request_type: 'view_account', finality: 'final', account_id: accountId });
+        if (typeof state?.error === 'string' && /^account [^ ]+ does not exist while viewing/i.test(state.error)) return null;
+        if (typeof state?.amount !== 'string' || !/^(0|[1-9][0-9]{0,38})$/.test(state.amount)) throw new Error('Invalid NEAR account balance');
+        return state.amount;
       } catch (error) {
-        if (error.rpcCause === 'UNKNOWN_ACCOUNT' || /does not exist/i.test(String(error.message))) return null;
+        if (error.rpcCause === 'UNKNOWN_ACCOUNT') return null;
         throw error;
       }
     },
-    callFunds: (accountId, gas = GAS) => functionCallFunds(accountId, gas, { fetchImpl }),
+    callFunds: (accountId, gas = GAS) => functionCallFunds(accountId, gas, rpcOptions),
     async readAccessKeys(accountId) {
-      const state = await rpc('query', { request_type: 'view_access_key_list', finality: 'final', account_id: accountId }, { fetchImpl });
+      const state = await request('query', { request_type: 'view_access_key_list', finality: 'final', account_id: accountId });
       const valid = (key) => {
         try { PublicKey.fromString(key.public_key); } catch { return false; }
         const access = key.access_key;
@@ -133,7 +216,7 @@ export function nearChain({ urls = rpcUrls(), fetchImpl = fetch } = {}) {
     },
     async hasKey(accountId, publicKey, { fullAccess = false } = {}) {
       try {
-        const key = await rpc('query', { request_type: 'view_access_key', finality: 'final', account_id: accountId, public_key: publicKey }, { fetchImpl });
+        const key = await request('query', { request_type: 'view_access_key', finality: 'final', account_id: accountId, public_key: publicKey });
         // Some providers return an old-style query error inside result.
         if (typeof key?.error === 'string' && /^(access key|account) .+ does not exist while viewing/i.test(key.error)) return false;
         const access = key?.permission;
@@ -147,9 +230,11 @@ export function nearChain({ urls = rpcUrls(), fetchImpl = fetch } = {}) {
       }
     },
     async depositDelivery(payment) {
-      if (!/^[1-9A-HJ-NP-Za-km-z]{43,44}$/.test(payment.transactionHash)) return null;
-      const params = { tx_hash: payment.transactionHash, sender_account_id: payment.accountId, wait_until: 'NONE' };
-      const result = await rpc('tx_status', params, { fetchImpl });
+      if (!validHash(payment.transactionHash)) return null;
+      // 1Click supplies a hash without its signer. Public all-shard nodes can
+      // retrieve it by hash using the recipient as the routing hint. The
+      // returned signer and complete receipt graph supply the proof.
+      const result = await receipts(payment.transactionHash, payment.accountId);
       return deliveryFromReceipts(result, payment);
     },
     createAccount: ({ parentId, parentSecret, accountId, publicKey, amountYocto }) => send(parentId, parentSecret, accountId,
@@ -160,18 +245,129 @@ export function nearChain({ urls = rpcUrls(), fetchImpl = fetch } = {}) {
     async prepareCall({ signerId, secret, contractId, method, args, depositYocto = '0', gas = GAS }) {
       const transaction = await signer(signerId, secret).createSignedTransaction({ receiverId: contractId,
         actions: [actions.functionCall(method, args, gas, BigInt(depositYocto))] });
-      return { hash: baseEncode(createHash('sha256').update(transaction.transaction.encode()).digest()),
+      return { hash: txHash(transaction),
         signedTransaction: Buffer.from(transaction.encode()).toString('base64') };
     },
     async broadcastCall({ signedTransaction }) {
       const transaction = SignedTransaction.decode(Buffer.from(signedTransaction, 'base64'));
-      return sent(await provider.sendTransactionUntil(transaction, 'FINAL'));
+      return broadcast(transaction);
+    },
+    async preparedFinalized({ signedTransaction, hash }) {
+      const signed = SignedTransaction.decode(Buffer.from(signedTransaction, 'base64'));
+      if (txHash(signed) !== hash) return false;
+      try {
+        const result = await receipts(hash, signed.transaction.signerId);
+        const matchingActions = Array.isArray(result?.transaction?.actions)
+          && result.transaction.actions.length === signed.transaction.actions.length
+          && signed.transaction.actions.every((action, index) => {
+            const observed = result.transaction.actions[index];
+            if (!observed || Object.keys(observed).length !== 1) return false;
+            if (action.functionCall) {
+              const call = action.functionCall;
+              return observed.FunctionCall?.method_name === call.methodName
+                && observed.FunctionCall.args === Buffer.from(call.args).toString('base64')
+                && observed.FunctionCall.deposit === call.deposit.toString()
+                && String(observed.FunctionCall.gas) === call.gas.toString();
+            }
+            if (action.addKey) return observed.AddKey?.public_key === PublicKey.from(action.addKey.publicKey).toString()
+              && observed.AddKey.access_key?.permission === 'FullAccess';
+            if (action.deleteKey) return observed.DeleteKey?.public_key === PublicKey.from(action.deleteKey.publicKey).toString();
+            return false;
+          });
+        return result?.final_execution_status === 'FINAL' && result.transaction?.hash === hash
+          && matchingActions
+          && result.transaction.signer_id === signed.transaction.signerId
+          && result.transaction.receiver_id === signed.transaction.receiverId
+          && Object.keys(result.status || {}).length === 1
+          && (typeof result.status.SuccessValue === 'string' || Boolean(result.status.Failure));
+      } catch { return false; }
+    },
+    async prepareRotation({ accountId, secret, addPublicKey, removePublicKey }) {
+      const transaction = await signer(accountId, secret).createSignedTransaction({ receiverId: accountId,
+        actions: [actions.addFullAccessKey(PublicKey.fromString(addPublicKey)), actions.deleteKey(PublicKey.fromString(removePublicKey))] });
+      return { hash: txHash(transaction), signedTransaction: Buffer.from(transaction.encode()).toString('base64') };
+    },
+    async unwrapDelivery({ transactionHash, accountId, amountYocto }) {
+      const wrapContractId = network().wrap;
+      let result;
+      try { result = await receipts(transactionHash, accountId); }
+      catch (error) {
+        if (error.rpcCause === 'UNKNOWN_TRANSACTION') return false;
+        throw error;
+      }
+      const transaction = result?.transaction;
+      const call = transaction?.actions?.[0]?.FunctionCall;
+      if (transaction?.hash !== transactionHash || transaction.signer_id !== accountId
+        || transaction.receiver_id !== wrapContractId || transaction.actions?.length !== 1
+        || call?.method_name !== 'near_withdraw' || call.deposit !== '1'
+        || call.args !== Buffer.from(JSON.stringify({ amount: amountYocto })).toString('base64')) return false;
+      // The contract's promise transfers the amount plus its one-yocto call
+      // deposit. Require that transfer itself to have finalized successfully.
+      return Boolean(deliveryFromReceipts(result, { transactionHash, accountId, amountYocto, wrapContractId, unwrap: true }));
+    },
+    async preparedRetrySafe({ signedTransaction, transactionHash }, rejection) {
+      const signed = SignedTransaction.decode(Buffer.from(signedTransaction, 'base64'));
+      if (txHash(signed) !== transactionHash) return false;
+      const transaction = signed.transaction;
+      const expected = transaction.actions[0]?.functionCall;
+      if (transaction.actions.length !== 1 || !expected) return false;
+      try {
+        const result = await receipts(transactionHash, transaction.signerId);
+        // A failure of the exact root action rolls back its changes and deposit.
+        // A failed downstream transfer or callback does not establish rollback.
+        return rootCallRolledBack(result, { hash: transactionHash, signerId: transaction.signerId,
+          contractId: transaction.receiverId, method: expected.methodName,
+          argsBase64: Buffer.from(expected.args).toString('base64'), depositYocto: expected.deposit.toString(), gas: expected.gas.toString() });
+      } catch (error) {
+        if (error.rpcCause !== 'UNKNOWN_TRANSACTION') throw error;
+      }
+      if (!(rejection instanceof InvalidNonceError || rejection instanceof TransactionExpiredError)) return false;
+      const head = await request('block', { finality: 'final' });
+      if (!Number.isSafeInteger(head?.header?.height) || head.header.height < 0 || !validHash(head.header.hash)) return false;
+      const key = await request('query', { request_type: 'view_access_key', block_id: head.header.hash,
+        account_id: transaction.signerId, public_key: transaction.publicKey.toString() });
+      // A consumed nonce could be this transaction's lost successful response.
+      // A lower finalized nonce proves it never executed in finalized history.
+      if (key?.error || key.permission !== 'FullAccess' || !Number.isSafeInteger(key.nonce)
+        || key.nonce < 0 || BigInt(key.nonce) >= transaction.nonce) return false;
+      const referenceHash = baseEncode(Buffer.from(transaction.blockHash));
+      const [reference, protocol] = await Promise.all([
+        request('block', { block_id: referenceHash }),
+        request('EXPERIMENTAL_protocol_config', { block_id: head.header.hash }),
+      ]);
+      return reference?.header?.hash === referenceHash && Number.isSafeInteger(reference.header.height) && reference.header.height >= 0
+        && Number.isSafeInteger(protocol?.transaction_validity_period) && protocol.transaction_validity_period > 0
+        && BigInt(head.header.height) > BigInt(reference.header.height) + BigInt(protocol.transaction_validity_period);
+    },
+    async requestRetrySafe(row) {
+      // Legacy request rows lack signed bytes. Their exact root receipt can
+      // still prove rollback; absence, nonce state and callbacks cannot.
+      if (!validHash(row.transaction_hash) || !row.metadata?.contract || !row.wallet_account) return false;
+      try {
+        const result = await receipts(row.transaction_hash, row.wallet_account);
+        const encoded = result?.transaction?.actions?.[0]?.FunctionCall?.args;
+        if (typeof encoded !== 'string' || encoded.length > 65536) return false;
+        const bytes = Buffer.from(encoded, 'base64');
+        if (bytes.toString('base64') !== encoded || canonicalJson(JSON.parse(bytes.toString('utf8'))) !== canonicalJson(row.args)) return false;
+        return rootCallRolledBack(result, { hash: row.transaction_hash, signerId: row.wallet_account,
+          contractId: row.metadata.contract, method: row.method, argsBase64: encoded,
+          depositYocto: row.metadata.depositYocto, gas: row.metadata.gas || GAS.toString() });
+      } catch { return false; }
+    },
+    async unwrapRetrySafe(payment, rejection) {
+      const transaction = SignedTransaction.decode(Buffer.from(payment.signedTransaction, 'base64')).transaction;
+      if (transaction.receiverId !== network().wrap || transaction.actions.length !== 1
+        || transaction.actions[0]?.functionCall?.methodName !== 'near_withdraw') return false;
+      return this.preparedRetrySafe(payment, rejection);
     },
     // A read of another contract's state (a token balance, a storage registration). Costs nothing.
     async view({ contractId, method, args = {} }) {
-      const result = await rpc('query', { request_type: 'call_function', finality: 'final', account_id: contractId,
-        method_name: method, args_base64: Buffer.from(JSON.stringify(args)).toString('base64') }, { fetchImpl });
+      const result = await request('query', { request_type: 'call_function', finality: 'final', account_id: contractId,
+        method_name: method, args_base64: Buffer.from(JSON.stringify(args)).toString('base64') });
       if (typeof result.error === 'string') throw new Error(`NEAR view error: ${result.error.slice(0, 300)}`);
+      if (!Array.isArray(result.result) || result.result.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255)) {
+        throw new Error('Invalid NEAR view result');
+      }
       return JSON.parse(Buffer.from(result.result).toString('utf8'));
     },
     deploy: ({ accountId, secret, wasm, init = 'new' }) => send(accountId, secret, accountId,
@@ -298,7 +494,7 @@ export async function referee(db, config, chain) {
   if ((await chain.balance(id)) == null) {
     const made = await chain.createAccount({ parentId: bank.id, parentSecret: bank.secret, accountId: id, publicKey: key.publicKey, amountYocto: yocto('0.3') });
     if (!made.ok) throw new Error(`The referee account could not be created: ${made.failure || 'no transaction'}`);
-  } else if (!(await chain.hasKey(id, key.publicKey))) {
+  } else if (!(await chain.hasKey(id, key.publicKey, { fullAccess: true }))) {
     throw new Error('The referee account exists with a key this server does not hold.');
   }
   await kvSet(db, 'play_referee', seal(JSON.stringify({ id, secret: key.secret }), config.tokenKey));
@@ -359,7 +555,7 @@ async function provisionPlayAccount(db, config, chain, { xUserId, username }) {
     const made = await chain.createAccount({ parentId: bank.id, parentSecret: bank.secret, accountId: row.account_id,
       publicKey: row.public_key, amountYocto: amount });
     if (!made.ok) throw new Error(`The play account could not be created: ${made.failure || 'no transaction'}`);
-  } else if (!(await chain.hasKey(row.account_id, row.public_key))) {
+  } else if (!(await chain.hasKey(row.account_id, row.public_key, { fullAccess: true }))) {
     throw new Error(`That account name exists on ${network().id} with a key this server does not hold.`);
   }
   return db.one(`update play_accounts set ready = true, granted_yocto = case when granted_yocto = '0' then $2 else granted_yocto end
@@ -376,6 +572,100 @@ export function secretOf(config, account) {
     throw new UserError('You claimed this account, so only your own wallet can sign for it now.', 409);
   }
   return open(account.secret_sealed, config.tokenKey);
+}
+
+// Call while holding the managed account row lock. A signed unwrap owns its
+// account nonce until its delivery or inability to execute has been established.
+export async function assertSignerAvailable(tx, accountId, allowedDeposit = null, { chain, intentKey = null, requestId = null, outlayerId = null } = {}) {
+  const pending = await tx.one(`select id from play_deposits where account_id = $1
+    and unwrap_signed_transaction is not null and finished_at is null
+    and ($2::uuid is null or id <> $2::uuid) limit 1`, [accountId, allowedDeposit]);
+  if (pending) throw new UserError('A payment is still being unwrapped. Wait for its confirmation before using this account.', 409);
+  const account = await tx.one('select signer_intent from play_accounts where account_id=$1', [accountId]);
+  const intent = account?.signer_intent;
+  if (intent && intent.key !== intentKey) {
+    let resolved = Boolean(chain?.preparedFinalized && await chain.preparedFinalized(intent));
+    if (!resolved && chain?.preparedRetrySafe) {
+      try {
+        resolved = await chain.preparedRetrySafe({ transactionHash: intent.hash, signedTransaction: intent.signedTransaction }, new TransactionExpiredError());
+        if (resolved) {
+          await tx.query(`update bilateral_near_requests set execution_status='failed', execution_message='Signed transaction can no longer be included'
+            where wallet_account=$1 and transaction_hash=$2 and execution_status='pending'`, [accountId, intent.hash]);
+          await tx.query(`update outlayer_near_requests set execution_status='failed', detail='Signed transaction can no longer be included'
+            where signer_account=$1 and transaction_hash=$2 and execution_status='pending'`, [accountId, intent.hash]);
+        }
+      } catch { /* ambiguous history keeps the nonce fenced */ }
+    }
+    if (!resolved) {
+      throw new UserError('An account transaction is still pending. Wait for its confirmation before using this account.', 409);
+    }
+    // Nonce finality and business execution are separate. Keep verification of
+    // the request's success/failure intact while allowing the next nonce.
+    await tx.query(`update bilateral_near_requests set signer_released_at=coalesce(signer_released_at,clock_timestamp())
+      where wallet_account=$1 and transaction_hash=$2`, [accountId, intent.hash]);
+    await tx.query(`update outlayer_near_requests set signer_released_at=coalesce(signer_released_at,clock_timestamp())
+      where signer_account=$1 and transaction_hash=$2`, [accountId, intent.hash]);
+  }
+  // Preserve pre-migration unresolved sends as well as the current reservation.
+  // A terminal execution status is usable only after exact transaction verification.
+  const prior = await tx.one(`select id from bilateral_near_requests where wallet_account=$1
+    and transaction_hash is not null and execution_status='pending' and signer_released_at is null
+    and ($2::uuid is null or id <> $2::uuid)
+    and ($3::text is null or transaction_hash <> $3) limit 1`, [accountId, requestId, intent?.hash || null]);
+  const outlayer = await tx.one(`select id from outlayer_near_requests where signer_account=$1
+    and signed_transaction is not null and execution_status='pending' and signer_released_at is null
+    and ($2::uuid is null or id <> $2::uuid)
+    and ($3::text is null or transaction_hash <> $3) limit 1`, [accountId, outlayerId, intent?.hash || null]);
+  if (prior || outlayer) throw new UserError('An account transaction is still pending. Wait for its confirmation before using this account.', 409);
+}
+
+// Commit the account-wide reservation before any bytes leave this process.
+// The exact operation may resume its bytes; every other operation must establish
+// finality first. Request rows retain their history after the account moves on.
+export async function reservePlaySigner(db, chain, accountId, key, prepare, { requestId = null, outlayerId = null } = {}) {
+  return db.tx(async tx => {
+    await tx.query("set local lock_timeout = '5s'");
+    const account = await tx.one('select * from play_accounts where account_id = $1 for update', [accountId]);
+    if (!account) return prepare(tx, null);
+    if (account.claimed_at) throw new UserError('You hold this account’s key now. Use your own wallet.', 409);
+    await assertSignerAvailable(tx, accountId, null, { chain, intentKey: key, requestId, outlayerId });
+    let replacing = false;
+    if (account.signer_intent?.key === key && chain.preparedRetrySafe) {
+      try {
+        replacing = await chain.preparedRetrySafe({ transactionHash: account.signer_intent.hash,
+          signedTransaction: account.signer_intent.signedTransaction }, new TransactionExpiredError());
+      } catch { /* reuse the committed bytes when retirement is unproved */ }
+    }
+    if (requestId && account.signer_intent?.key !== key) {
+      const prior = await tx.one('select * from bilateral_near_requests where id=$1 for update', [requestId]);
+      if (prior?.transaction_hash && prior.execution_status === 'failed') {
+        try {
+          replacing = prior.signed_transaction && chain.preparedRetrySafe
+            ? await chain.preparedRetrySafe({ transactionHash: prior.transaction_hash, signedTransaction: prior.signed_transaction }, new TransactionExpiredError())
+            : Boolean(chain.requestRetrySafe && await chain.requestRetrySafe(prior));
+        } catch { /* legacy or unavailable proof never authorizes replacement */ }
+      }
+    }
+    const prepared = account.signer_intent?.key === key && !replacing ? account.signer_intent : await prepare(tx, account, replacing);
+    if (!prepared?.hash || !prepared.signedTransaction) throw new Error('The account signing reservation is incomplete.');
+    await tx.query('update play_accounts set signer_intent=$2 where account_id=$1', [accountId, { ...prepared, key }]);
+    if (requestId) await tx.query(`update bilateral_near_requests set transaction_hash=$2, signed_transaction=$3,
+      execution_status=case when $4 then 'pending' else execution_status end,
+      signer_released_at=case when $4 then null else signer_released_at end
+      where id=$1 and (transaction_hash is null or transaction_hash=$2 or $4)`, [requestId, prepared.hash, prepared.signedTransaction, replacing]);
+    return prepared;
+  });
+}
+
+export async function withAvailablePlaySigner(db, accountId, work, options = {}) {
+  return db.tx(async tx => {
+    const account = await tx.one('select * from play_accounts where account_id = $1 for update', [accountId]);
+    if (account) {
+      if (account.claimed_at) throw new UserError('You hold this account’s key now. Use your own wallet.', 409);
+      await assertSignerAvailable(tx, accountId, null, options);
+    }
+    return work();
+  });
 }
 
 /** How much more the account needs before it can cover a deposit and its fees. "0" when it has enough. */
@@ -493,6 +783,24 @@ async function performPlayAction(db, config, chain, user, betId, input, { fetchI
   const account = await playAccountFor(db, user.x_user_id);
   if (!account?.ready) throw new UserError('This person has no play account yet.', 409);
   secretOf(config, account);
+  const resume = async request => {
+    const signed = await reservePlaySigner(db, chain, account.account_id, `request:${request.id}`,
+      async (tx, current, replacing) => {
+        if (!replacing) return { hash: request.transaction_hash, signedTransaction: request.signed_transaction };
+        if (!current?.ready) throw new UserError('This account is no longer available.', 409);
+        await ensureFunds(tx, config, chain, current, request.metadata.depositYocto);
+        return chain.prepareCall({ signerId: current.account_id, secret: secretOf(config, current),
+          contractId: request.metadata.contract, method: request.method, args: request.args,
+          depositYocto: request.metadata.depositYocto, gas: BigInt(request.metadata.gas || GAS) });
+      }, { requestId: request.id });
+    try { await chain.broadcastCall(signed); }
+    catch (error) {
+      if (!(error instanceof InvalidNonceError || error instanceof TransactionExpiredError)) throw error;
+      // The reservation already checked retirement. Ambiguous rejection keeps
+      // its exact bytes; verification below reports their unresolved state.
+    }
+    return signed.hash;
+  };
   if (input.action === 'fund') {
     const bet = await syncNearBet(db, config, user, betId, { fetchImpl, chain });
     if (String(bet.creator_user_id) === String(user.id) && bet.chain_state?.creator === account.account_id) {
@@ -502,10 +810,14 @@ async function performPlayAction(db, config, chain, user, betId, input, { fetchI
       and wallet_account=$3 and method='create_bet' and metadata->>'contract'=$4 order by created_at,id limit 1`,
     [betId, user.id, account.account_id, config.nearContract]);
     if (request?.transaction_hash && request.execution_status !== 'failed') {
+      let transactionHash = request.transaction_hash;
+      if (request.signed_transaction && request.execution_status === 'pending') {
+        transactionHash = await resume(request);
+      }
       const verified = await verifyBetTransaction(db, config, user, betId,
-        { requestId: request.id, transactionHash: request.transaction_hash }, { fetchImpl });
+        { requestId: request.id, transactionHash }, { fetchImpl });
       if (verified.status === 'failed') throw new UserError(`NEAR rejected that: ${verified.explanation}`, 409);
-      return { bet: await syncNearBet(db, config, user, betId, { fetchImpl, chain }), hash: request.transaction_hash, status: verified.status };
+      return { bet: await syncNearBet(db, config, user, betId, { fetchImpl, chain }), hash: transactionHash, status: verified.status };
     }
   }
   if (input.action === 'accept') {
@@ -526,26 +838,32 @@ async function performPlayAction(db, config, chain, user, betId, input, { fetchI
     // transaction must not be replaced by a second broadcast while unresolved.
     if (exact && bet.status === 'offered' && bet.chain_state?.status === 'offered'
       && request.transaction_hash && request.execution_status !== 'failed') {
+      let transactionHash = request.transaction_hash;
+      if (request.signed_transaction && request.execution_status === 'pending') {
+        transactionHash = await resume(request);
+      }
       const verified = await verifyBetTransaction(db, config, user, betId,
-        { requestId: request.id, transactionHash: request.transaction_hash }, { fetchImpl });
+        { requestId: request.id, transactionHash }, { fetchImpl });
       if (verified.status === 'failed') throw new UserError(`NEAR rejected that: ${verified.explanation}`, 409);
-      return { bet: await syncNearBet(db, config, user, betId, { fetchImpl, chain }), hash: request.transaction_hash, status: verified.status };
+      return { bet: await syncNearBet(db, config, user, betId, { fetchImpl, chain }), hash: transactionHash, status: verified.status };
     }
   }
   const prepared = await prepareNearAction(db, config, user, betId, { ...input, accountId: account.account_id }, { fetchImpl, chain });
-  const sign = async (tx, current) => {
+  const sign = async (tx, current, replacing = false) => {
+    if (!current?.ready) throw new UserError('This account is no longer available.', 409);
     const secret = secretOf(config, current);
+    if (config.near?.real) {
+      const prior = await tx.one('select * from bilateral_near_requests where id=$1 for update', [prepared.requestId]);
+      if (prior?.signed_transaction && !replacing) return { hash: prior.transaction_hash, signedTransaction: prior.signed_transaction };
+      if (prior?.transaction_hash && !replacing) throw new UserError('An earlier account transaction needs confirmation before this request can be signed.', 409);
+    }
     await ensureFunds(tx, config, chain, current, prepared.depositYocto);
-    return chain.call({ signerId: current.account_id, secret, contractId: prepared.payload.contract,
+    return (config.near?.real ? chain.prepareCall : chain.call)({ signerId: current.account_id, secret, contractId: prepared.payload.contract,
       method: prepared.method, args: prepared.args, depositYocto: prepared.depositYocto });
   };
   // On mainnet, serialize the balance check and signing with other spends, deposits and key handover.
-  const sent = config.near?.real ? await db.tx(async (tx) => {
-    await tx.query("set local lock_timeout = '5s'");
-    const current = await tx.one('select * from play_accounts where x_user_id = $1 for update', [String(user.x_user_id)]);
-    if (current?.account_id !== account.account_id || !current.ready) throw new UserError('This account is no longer available.', 409);
-    return sign(tx, current);
-  }) : await sign(db, account);
+  const sent = config.near?.real ? await chain.broadcastCall(await reservePlaySigner(db, chain, account.account_id, `request:${prepared.requestId}`,
+    (tx, current, replacing) => sign(tx, current, replacing), { requestId: prepared.requestId })) : await sign(db, account);
   if (!sent.hash) throw new Error('The transaction was not accepted by the network.');
   const verified = await verifyBetTransaction(db, config, user, betId, { requestId: prepared.requestId, transactionHash: sent.hash }, { fetchImpl });
   if (verified.status === 'failed') throw new UserError(`NEAR rejected that: ${sent.failure || verified.explanation}`, 409);
@@ -586,17 +904,38 @@ export async function claimPlayAccount(db, config, chain, xUserId, publicKey) {
   }
   try { PublicKey.fromString(publicKey); }
   catch { throw new UserError('That is not a valid ed25519 public key.'); }
+  let reservedRotation = null;
+  if (config.near?.real) {
+    const account = await playAccountFor(db, xUserId);
+    if (!account?.ready) throw new UserError('You have no play account yet. Bet once and one is made for you.', 404);
+    secretOf(config, account);
+    if (publicKey === account.public_key) throw new UserError('That is the key this server already holds. Use one of your own.');
+    const already = !(await chain.hasKey(account.account_id, account.public_key))
+      && await chain.hasKey(account.account_id, publicKey, { fullAccess: true });
+    if (!already) {
+      reservedRotation = await reservePlaySigner(db, chain, account.account_id, `rotate:${publicKey}`,
+        (_tx, current) => chain.prepareRotation({ accountId: current.account_id, secret: secretOf(config, current),
+          addPublicKey: publicKey, removePublicKey: current.public_key }));
+      const sent = await chain.broadcastCall(reservedRotation);
+      if (!sent.ok) throw new UserError(`NEAR did not change the keys: ${sent.failure || 'not accepted'}`, 409);
+    }
+  }
   return db.tx(async (tx) => {
     await tx.query("set local lock_timeout = '5s'");
     const account = await tx.one('select * from play_accounts where x_user_id = $1 for update', [String(xUserId)]);
     if (!account?.ready) throw new UserError('You have no play account yet. Bet once and one is made for you.', 404);
+    const pending = await tx.one(`select 1 as found from play_deposits where x_user_id = $1
+      and unwrap_signed_transaction is not null and finished_at is null limit 1`, [String(xUserId)]);
+    if (pending) throw new UserError('A payment is still being unwrapped. Wait for its confirmation before taking the account.', 409);
+    await assertSignerAvailable(tx, account.account_id, null, { chain });
     const secret = secretOf(config, account);
     if (publicKey === account.public_key) throw new UserError('That is the key this server already holds. Use one of your own.');
     // Recover a completed rotation whose connection was lost before the database commit.
-    let transactionHash = null;
+    let transactionHash = reservedRotation?.hash || null;
     const already = !(await chain.hasKey(account.account_id, account.public_key))
       && await chain.hasKey(account.account_id, publicKey, { fullAccess: true });
     if (!already) {
+      if (config.near?.real) throw new UserError('The account key change is still pending. Retry after its confirmation.', 409);
       const done = await chain.rotateKey({ accountId: account.account_id, secret, addPublicKey: publicKey, removePublicKey: account.public_key });
       if (!done.ok) throw new UserError(`NEAR did not change the keys: ${done.failure || 'not accepted'}`, 409);
       transactionHash = done.hash;

@@ -67,7 +67,7 @@ test('managed join serves one versioned script and keeps ordinary form fields ov
     const { method, params } = JSON.parse(options.body);
     assert.equal(method, 'query'); assert.equal(params.method_name, 'get_bet');
     const { id } = JSON.parse(Buffer.from(params.args_base64, 'base64'));
-    return Response.json({ result: { block_height: 1, result: [...Buffer.from(JSON.stringify(id === chain?.id ? chain : null))] } });
+    return Response.json({ jsonrpc: '2.0', id: 'stated', result: { block_height: 1, result: [...Buffer.from(JSON.stringify(id === chain?.id ? chain : null))] } });
   };
   try {
     s = await startStack({ STATED_NEAR_CONTRACT: 'escrow.testnet' }, { fetchImpl });

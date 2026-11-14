@@ -35,7 +35,8 @@ export function createPublicRulingReader({ verify = verifyEnclaveRecordWithGpu, 
     if (pending.has(pendingKey)) return pending.get(pendingKey);
     if (pending.size >= maxInFlight) throw new UserError('Ruling verification is busy. Retry shortly.', 503);
     const load = (async () => {
-      const event = await tx.one('select detail from bilateral_bet_events where id = $1', [row.event_id]);
+      const event = await tx.one(`select detail from bilateral_bet_events where id = $1
+        and octet_length(detail::text) <= $2`, [row.event_id, 8 * 1024 * 1024]);
       if (!event) return null;
       let record;
       try { record = await verify(event.detail); } catch { return null; }
@@ -52,7 +53,7 @@ export function createPublicRulingReader({ verify = verifyEnclaveRecordWithGpu, 
     try { return await load; } finally { pending.delete(pendingKey); }
   }
 
-  return async (tx, betId) => {
+  return async (tx, betId, { projection = false } = {}) => {
     // xmin invalidates same-ID edits to event.detail. Holding the event/publication
     // locks keeps the cold read and the authorization snapshot consistent.
     const row = await tx.one(`select e.id as event_id, e.xmin::text as event_revision,
@@ -71,17 +72,21 @@ export function createPublicRulingReader({ verify = verifyEnclaveRecordWithGpu, 
       || !rulingCovers(record, { betId: row.id, termsHash: row.terms_hash })) return null;
     if (record.evidence.kind === 'submitted') {
       // Same anonymous evidence visibility policy as evidenceForBet, selecting IDs only.
-      const rows = row.statement_id ? await tx.many(`select e.id from bet_evidence e
+      if (record.evidence.items.length > 1000 || record.evidence.items.some(item => !/^[1-9]\d{0,17}$/.test(String(item.id)))) return null;
+      const rows = row.statement_id && record.evidence.items.length ? await tx.many(`select e.id from bet_evidence e
         join users u on u.id=e.user_id join bilateral_bets b on b.id=e.bet_id
-        where e.statement_id=$1 and (e.bet_id=$2
+        where e.statement_id=$1 and e.id=any($3::bigint[]) and (e.bet_id=$2
           or exists (select 1 from bilateral_bet_publications p
-            where p.bet_id=b.id and p.creator_user_id=b.creator_user_id and p.withdrawn_at is null))`,
-      [row.statement_id, betId]) : [];
+            where p.bet_id=b.id and p.creator_user_id=b.creator_user_id and p.withdrawn_at is null)) limit 1000`,
+      [row.statement_id, betId, record.evidence.items.map(item => String(item.id))]) : [];
       const visible = new Set(rows.map(item => String(item.id)));
-      if (record.evidence.items.some(item => !visible.has(String(item.id)))) return null;
+      if (!projection && record.evidence.items.some(item => !visible.has(String(item.id)))) return null;
     }
     const settled = row.status === 'settled' && ['yes', 'no'].includes(row.outcome);
     const agrees = record.mode === 'review' && record.outcome !== 'unclear' && settled ? record.outcome === row.outcome : null;
+    // Internal page projection retains the verdict so readPublicBet can count
+    // private contributions and suppress its reason. It has no JSON response.
+    if (projection) return { record: { ...record, agrees } };
     if (entry.body === null || entry.agrees !== agrees) {
       const body = JSON.stringify({ record: { ...record, agrees }, recipe });
       const bodyBytes = Buffer.byteLength(body);

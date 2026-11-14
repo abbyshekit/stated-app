@@ -5,20 +5,23 @@ import { randomUUID } from 'node:crypto';
 import { startPostgres } from './support/pg.mjs';
 import { createDb } from '../src/db.mjs';
 import { UserError } from '../src/store.mjs';
+import { reservePlaySigner, withAvailablePlaySigner } from '../src/play.mjs';
+import { InvalidNonceError, TransactionExpiredError } from 'near-api-js/rpc-errors';
 
 // Keep the real SQL, transaction isolation, ledger, clock and lock behavior.
 // Only NEAR signing/broadcast/finality are synthetic; no external calls occur.
 async function persistentCallModule() {
   const source = await readFile(new URL('../src/outlayer.mjs', import.meta.url), 'utf8');
   const body = source.replace(/^import .*?;\n/gm, '').replace(/^export \{.*?\};\n/gm, '').replace(/^export /gm, '');
-  return new Function('randomUUID', 'UserError', 'verifyNearExecution', `${body}\nreturn persistentCall;`)(
-    randomUUID, UserError, async () => ({ status: 'succeeded' }));
+  return new Function('randomUUID', 'UserError', 'verifyNearExecution', 'withAvailablePlaySigner', 'reservePlaySigner', 'InvalidNonceError', 'TransactionExpiredError', `${body}\nreturn persistentCall;`)(
+    randomUUID, UserError, async () => ({ status: 'succeeded' }), withAvailablePlaySigner, reservePlaySigner, InvalidNonceError, TransactionExpiredError);
 }
 
 test('PostgreSQL concurrent registrations enforce both bettors durable daily allowances', async () => {
   const pg = await startPostgres(); const db = createDb(pg.url);
   try {
-    await db.query(`create table bilateral_bets(id uuid primary key,creator_user_id bigint not null,acceptor_user_id bigint);
+    await db.query(`create table play_accounts(account_id text primary key,claimed_at timestamptz);
+      create table bilateral_bets(id uuid primary key,creator_user_id bigint not null,acceptor_user_id bigint);
       create table outlayer_near_requests(id uuid primary key,bet_id uuid not null references bilateral_bets(id),
         signer_account text,contract_account text,method text,args jsonb,deposit_yocto text,gas text,intent_key text,
         transaction_hash text unique,signed_transaction text,broadcast_started_at timestamptz,detail text,
@@ -29,7 +32,9 @@ test('PostgreSQL concurrent registrations enforce both bettors durable daily all
       acceptor_user_id: '1', referee_wallet: 'ref.near' }));
     for (const bet of bets) await db.query('insert into bilateral_bets values($1,$2,$3)', [bet.id, bet.creator_user_id, bet.acceptor_user_id]);
     let signed = 0;
-    const chain = { prepareCall: async () => { signed++; return { hash: randomUUID(), signedTransaction: 'synthetic' }; }, broadcastCall: async () => {} };
+    const rootRollbacks = new Set();
+    const chain = { prepareCall: async () => { signed++; return { hash: randomUUID(), signedTransaction: 'synthetic' }; }, broadcastCall: async () => {},
+      preparedRetrySafe: async ({ transactionHash }) => rootRollbacks.has(transactionHash) };
     const call = bet => persistentCall(db, chain, bet, { id: 'sponsor.near' }, 'register_material', {}, '1', '1', null,
       { signerLocked: true, registrationLimit: 5 });
     const results = await Promise.allSettled(bets.map(call));
@@ -42,6 +47,7 @@ test('PostgreSQL concurrent registrations enforce both bettors durable daily all
     await call(bet);
     assert.equal(signed, 5, 'reconciliation reuses the durable intent');
     await db.query("update outlayer_near_requests set execution_status='failed' where bet_id=$1", [reserved.bet_id]);
+    rootRollbacks.add((await db.one('select transaction_hash from outlayer_near_requests where bet_id=$1', [reserved.bet_id])).transaction_hash);
     await assert.rejects(call(bet), /daily sponsored registration limit/);
     // Old reservations survive, but no longer consume the current UTC budget.
     await db.query("update outlayer_near_requests set created_at=clock_timestamp()-interval '2 days'");
@@ -53,7 +59,8 @@ test('PostgreSQL concurrent registrations enforce both bettors durable daily all
 test('PostgreSQL concurrent ruling sends reserve twelve UTC slots and recover an existing intent', async () => {
   const pg = await startPostgres(); const db = createDb(pg.url);
   try {
-    await db.query(`create table bilateral_bets(id uuid primary key);
+    await db.query(`create table play_accounts(account_id text primary key,claimed_at timestamptz);
+      create table bilateral_bets(id uuid primary key);
       create table outlayer_near_requests(id uuid primary key,bet_id uuid not null references bilateral_bets(id),
         signer_account text,contract_account text,method text,args jsonb,deposit_yocto text,gas text,intent_key text,
         transaction_hash text unique,signed_transaction text,broadcast_started_at timestamptz,detail text,

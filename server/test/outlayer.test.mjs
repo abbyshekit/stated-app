@@ -212,7 +212,11 @@ test('a definitive first-broadcast nonce rejection permits a fresh signed regist
   const bet = await createBet(s.db, alice, terms(), options());
   await playAction(s.db, s.config, near.chain, alice, bet.id, { action: 'fund' }, { fetchImpl });
   const broadcast = near.chain.broadcastCall;
-  near.chain.broadcastCall = async () => { throw new InvalidNonceError(20, 19); };
+  const proof = near.chain.preparedRetrySafe;
+  let rejectedHash;
+  near.chain.preparedRetrySafe = async ({ transactionHash, signedTransaction }) =>
+    transactionHash === rejectedHash && signedTransaction === rejectedHash && !near.txs.has(transactionHash);
+  near.chain.broadcastCall = async ({ signedTransaction }) => { rejectedHash = signedTransaction; throw new InvalidNonceError(20, 19); };
   try { await playAction(s.db, s.config, near.chain, bob, bet.id, { action: 'accept', termsHash: bet.terms_hash }, { fetchImpl }); }
   finally { near.chain.broadcastCall = broadcast; }
   const prior = await s.db.one("select * from outlayer_near_requests where bet_id=$1 and method='register_material'", [bet.id]);
@@ -221,6 +225,7 @@ test('a definitive first-broadcast nonce rejection permits a fresh signed regist
     await s.db.one('select * from bilateral_bets where id=$1', [bet.id]), { fetchImpl });
   const registered = near.outlayerView(near.referee, 'get_ruling', { bet_id: bet.id });
   assert.equal(registered.terms_hash, bet.terms_hash);
+  near.chain.preparedRetrySafe = proof;
 });
 
 test('X creation and evidence replies route to OutLayer with local inference disabled', async t => {

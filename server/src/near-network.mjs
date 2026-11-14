@@ -54,6 +54,7 @@ const sized = (value) => typeof value === 'string' && value.length >= 2 && value
 export const isNamedAccount = (value) => sized(value) && NAMED[current.id].test(value);
 /** A named account on this network, or a 64-character implicit account. */
 export const isAccount = (value) => sized(value) && (NAMED[current.id].test(value) || IMPLICIT.test(value));
+export const accountPattern = () => `(${NAMED[current.id].source})|(${IMPLICIT.source})`;
 
 export const accountLink = (accountId) => `${current.explorer}/address/${accountId}`;
 export const transactionLink = (hash) => `${current.explorer}/txns/${hash}`;

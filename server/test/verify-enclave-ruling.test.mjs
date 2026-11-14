@@ -163,7 +163,7 @@ async function courtChecks({ mutate = () => {}, proposals, fallback = false, out
       if (fallback && String(url).includes('fastnear.com')) throw new Error('primary unavailable');
       const args = JSON.parse(Buffer.from(request.params.args_base64, 'base64').toString());
       const value = request.params.method_name === 'get_last_proposal_id' ? rows.length : rows.slice(args.from_index, args.from_index + args.limit);
-      return Response.json({ result: { result: [...Buffer.from(JSON.stringify(value))] } });
+      return Response.json({ jsonrpc: '2.0', id: 'stated', result: { result: [...Buffer.from(JSON.stringify(value))] } });
     },
   });
   return { checks, calls };

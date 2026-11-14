@@ -33,6 +33,13 @@ function fakeDb(rows, { profile = false, publishedAt = null } = {}) {
     calls,
     async one(sql, params = []) {
       calls.push(sql);
+      if (sql.includes('from public_withdrawals')) return { total: '0', yes: '0', no: '0', after_outcome: '0', after_deadline: '0', scored: '0', score_total: 0 };
+      if (sql.startsWith('select count(*)::text as total')) {
+        const settled = rows.filter(row => row.chain_state.status === 'settled');
+        return { total: String(rows.length), settled: String(settled.length), paid: '0',
+          won: settled.reduce((total, row) => total + BigInt(row.stake_yocto) * 2n, 0n).toString(),
+          has_open: rows.some(row => row.chain_state.status === 'offered' && new Date(row.accept_by) > new Date()) };
+      }
       if (sql.startsWith('select src.published_at')) return { published_at: publishedAt };
       if (sql.includes("from users where kind = 'person'")) return { id: '1', kind: 'person', x_user_id: '1', x_username: 'alice', x_name: 'Private Name', profile_visibility: 'private' };
       if (sql.includes('from bilateral_bets b\n  join bilateral_bet_publications')) return rows.find(r => r.id === params[0]) || null;
@@ -48,6 +55,13 @@ function fakeDb(rows, { profile = false, publishedAt = null } = {}) {
     async many(sql) {
       calls.push(sql);
       if (sql.includes('lower(creator.x_username)')) return profile ? rows : [];
+      if (sql.includes('as ruling_time')) return [];
+      if (sql.includes('as hall_rank')) return [...rows].sort((a, b) => {
+        const openA = a.chain_state.status === 'offered' && new Date(a.accept_by) > new Date();
+        const openB = b.chain_state.status === 'offered' && new Date(b.accept_by) > new Date();
+        return Number(openB) - Number(openA) || (openA ? new Date(a.accept_by) - new Date(b.accept_by)
+          : new Date(b.settled_at || b.published_at) - new Date(a.settled_at || a.published_at));
+      });
       if (sql.includes("where p.withdrawn_at is null and b.status='offered'")) return rows.filter(row => row.accept_by > new Date()).sort((a, b) => a.accept_by - b.accept_by);
       if (sql.includes('from bilateral_bets b\n  join bilateral_bet_publications')) return rows;
       if (sql.includes('select distinct b.id from bilateral_bets')) return [];

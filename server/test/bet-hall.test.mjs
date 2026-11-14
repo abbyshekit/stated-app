@@ -28,9 +28,26 @@ function storedBet(status = 'offered') {
   return row;
 }
 
-const database = (rows, paid = []) => ({ tx: async (fn) => fn({
-  many: async (sql) => sql.startsWith('select distinct b.id') ? paid.map(id => ({ id })) : rows,
-}) });
+function database(rows, paid = []) {
+  const verified = rows.filter(row => row.near_verified_at && row.chain_state.stake_yocto === row.stake_yocto);
+  const settled = verified.filter(row => row.chain_state.status === 'settled');
+  const pot = count => (BigInt(count) * 200000000000000000000000n).toString();
+  return { tx: async fn => fn({
+    one: async sql => {
+      assert.match(sql, /count\(\*\)::text as total/);
+      return { total: String(verified.length), settled: String(settled.length),
+        paid: pot(settled.filter(row => paid.includes(row.id)).length), won: pot(settled.length),
+        has_open: verified.some(row => row.chain_state.status === 'offered' && new Date(row.accept_by) > new Date(row.read_at)) };
+    },
+    many: async sql => {
+      assert.match(sql, /limit \$5/);
+      return verified.map(row => ({ ...row, payout_completed: paid.includes(row.id),
+        hall_open: Number(row.chain_state.status === 'offered' && new Date(row.accept_by) > new Date(row.read_at)),
+        hall_rank: row.chain_state.status === 'offered' ? -Date.parse(row.accept_by) : Date.parse(row.published_at) }))
+        .sort((a, b) => b.hall_open - a.hall_open || b.hall_rank - a.hall_rank);
+    },
+  }) };
+}
 
 test('hall lists every public verified bet included in its total', async () => {
   const rows = Array.from({ length: 8 }, () => storedBet('settled'));
@@ -60,8 +77,27 @@ test('hall puts open offers in closing order before settled bets', async () => {
   assert.deepEqual(hall.rows.map(bet => bet.id), [soon.id, late.id, settled.id]);
 });
 
+test('the public hall bounds database projection and keeps an older page reachable', async () => {
+  const rows = Array.from({ length: 100 }, (_, i) => ({ ...storedBet('settled'), hall_open: '0', hall_rank: String(100 - i) }));
+  const db = { tx: fn => fn(db), one: async () => ({ total: '100', settled: '100', paid: '0', won: '20000000000000000000000000' }),
+    async many(sql, params) {
+      assert.match(sql, /limit \$/i);
+      const after = params[2];
+      const limit = params[4];
+      return rows.filter(row => !after || Number(row.hall_rank) < Number(after)).slice(0, limit);
+    } };
+  const first = await publicBetHall(db);
+  assert.equal(first.total, 100);
+  assert.ok(first.rows.length > 0 && first.rows.length < first.total);
+  assert.ok(first.next);
+  const second = await publicBetHall(db, { before: first.next });
+  assert.ok(second.rows.length > 0);
+  assert.equal(second.total, 100);
+  assert.equal(second.rows.some(row => first.rows.some(bet => bet.id === row.id)), false);
+});
+
 test('an empty hall has no fabricated totals and plain statuses follow snapshots', async () => {
-  assert.deepEqual(await publicBetHall(database([])), { rows: [], total: 0, settled: 0, paidYocto: '0', wonYocto: '0' });
+  assert.deepEqual(await publicBetHall(database([])), { rows: [], total: 0, settled: 0, paidYocto: '0', wonYocto: '0', hasOpen: false, next: null });
   const hall = await publicBetHall(database([storedBet(), storedBet('accepted')]));
   const html = String(betList(hall.rows, { hall: true }));
   assert.match(html, /Offer closes in \d+ (?:minutes?|hours?|days?), \d{2}:\d{2} UTC 20 Nov 2026/);

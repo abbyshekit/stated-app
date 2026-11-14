@@ -7,14 +7,15 @@ import { createDb } from '../src/db.mjs';
 import { canonicalJson, fingerprint } from '../src/canonical.mjs';
 import { outlayerTermsHash } from '../src/outlayer.mjs';
 import { UserError } from '../src/store.mjs';
-import { withManagedOperation } from '../src/play.mjs';
+import { reservePlaySigner, withAvailablePlaySigner, withManagedOperation } from '../src/play.mjs';
 
 // Real SQL selection, locking and durable intents; only escrow reads and the
 // signing/finality transport are synthetic. Run alongside outlayer-r3-ops-pg.
 test('PostgreSQL keeper closes every terminal escrow stage, respects the cap, and stops selecting settled referees', async () => {
   const pg = await startPostgres(); const db = createDb(pg.url);
   try {
-    await db.query(`create table users(id bigint primary key);
+    await db.query(`create table play_accounts(account_id text primary key,claimed_at timestamptz);
+      create table users(id bigint primary key);
       insert into users values(1);
       create table bilateral_bets(id uuid primary key,creator_user_id bigint,status text,claim text,resolve_at timestamptz,
         terms_salt text,terms_hash text,referee_wallet text,outlayer_material jsonb,chain_state jsonb,
@@ -27,7 +28,7 @@ test('PostgreSQL keeper closes every terminal escrow stage, respects the cap, an
     const now = Date.now(); const rulings = new Map(); const prepared = new Map(); let signed = 0;
     const source = await readFile(new URL('../src/outlayer.mjs', import.meta.url), 'utf8');
     const body = source.replace(/^import .*?;\n/gm, '').replace(/^export \{.*?\};\n/gm, '').replace(/^export /gm, '');
-    const deps = { createHash, randomUUID, canonicalJson, fingerprint, UserError, withManagedOperation,
+    const deps = { createHash, randomUUID, canonicalJson, fingerprint, UserError, reservePlaySigner, withManagedOperation, withAvailablePlaySigner,
       treasury: async () => ({ id: 'sponsor.testnet', secret: 'synthetic' }),
       syncNearBet: async (_db, _config, _user, id) => db.one('select * from bilateral_bets where id=$1', [id]),
       verifyNearExecution: async () => ({ status: 'succeeded' }) };

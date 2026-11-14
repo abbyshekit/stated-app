@@ -54,6 +54,8 @@ const claimClass = (claim) => `prop bet-claim${claim.length > 200 ? ' long' : cl
 export function registerBetRoutes({ route, db, config, layout, needUser, needAdmin, isAdmin, needPost, csrfField, send, json, redirect, notFound, fetchImpl, walletVersion, payVersion, botUsername, chain, quotes = null, allowHeavyRead = null, publicRuling = createPublicRulingReader({ recipe: enclaveRecipe }) }) {
   // Standalone route registrars retain a budget; createApp supplies its shared export/ruling budget.
   const fallbackBudget = createReadLimiter({ railway: config.hosted && Boolean(process.env.RAILWAY_ENVIRONMENT) });
+  const readRuling = async (tx, id) => (await publicRuling(tx, id, { projection: true }))?.record || null;
+  const readPublished = (id, options = {}) => publicBet(db, id, { ...config.play, ...options, readRuling });
   // DESIGN.md: only the proposer name is bold in the source attribution.
   const sourceHeader = async (viewer, bet) => {
     const header = String(await betSourceHeader(db, viewer, bet, config.x.simulatedOrigin));
@@ -179,7 +181,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
         if (host && posted.host !== host) postedHost = posted.host;
       } catch { /* Old stored links still render as text. */ }
       return html`<li><p>Bet ${item.side}: ${url ? html`<a class="tl" href="${url}" rel="noopener noreferrer">${item.title || host}</a>` : item.title || item.url}${item.by ? `, @${item.by}` : ''}${host ? html` <span class="quiet">${host}</span>` : ''}${postedHost ? html` <span class="quiet">posted as ${postedHost}</span>` : ''}</p></li>`;
-    })}</ul>${privateCount ? html`<p class="quiet">and ${privateCount} ${privateCount === 1 ? 'link from a private bet' : 'links from private bets'}</p>` : ''}`) : bet.evidence ? html`<p class="gut quiet">No links yet.</p>` : '';
+    })}</ul>${bet.evidence.next ? html`<p><a class="tl" href="/bets/${bet.id}?evidenceAfter=${bet.evidence.next}">More links</a></p>` : ''}${privateCount ? html`<p class="quiet">and ${privateCount} ${privateCount === 1 ? 'link from a private bet' : 'links from private bets'}</p>` : ''}`) : bet.evidence ? html`<p class="gut quiet">No links yet.</p>` : '';
     return html`${settledJury ? juryLogos(ruling.models) : await courtLine(db, config, chain, bet)}${line || settlement ? settledJury
       ? html`<p class="gut settlement-line">${settlementMarkup(settlement || line)}</p>${!privateCount ? html`<p class="gut link-row"><a class="tl" href="/bets/${bet.id}/ruling">See the ruling</a></p>` : ''}`
       : html`<p class="gut">${line}${ruling && !privateCount ? html` <a class="tl" href="/bets/${bet.id}/ruling">See the ruling</a>` : ''}</p>`
@@ -364,14 +366,14 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
 
   route('GET', new RegExp(`^/admin/bets/${ID}/evidence$`), async (ctx) => {
     if (!(await needAdmin(ctx))) return;
-    const bet = await publicBet(db, ctx.params[0]);
+    const bet = await readPublished(ctx.params[0]);
     if (!bet?.settlement_transaction_hash) return notFound(ctx);
     await evidencePage(ctx, bet);
   });
 
   route('GET', new RegExp(`^/bets/${ID}/attested-check\\.json$`), async (ctx) => {
     if (!config.nearai?.apiKey) return notFound(ctx);
-    const bet = await publicBet(db, ctx.params[0]);
+    const bet = await readPublished(ctx.params[0]);
     const check = bet && await db.tx((tx) => readAttestedCheck(tx, bet));
     if (!check) return notFound(ctx);
     send(ctx.res, 200, JSON.stringify({ ...check, verificationRecipe }), {
@@ -398,7 +400,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
 
   route('GET', new RegExp(`^/bets/${ID}/outlayer-ruling\\.json$`), async (ctx) => {
     if (allowHeavyRead && !allowHeavyRead(ctx)) return;
-    const bet = await publicBet(db, ctx.params[0]);
+    const bet = await readPublished(ctx.params[0]);
     if (!bet?.outlayer) return notFound(ctx);
     send(ctx.res, 200, JSON.stringify(bet.outlayer), { headers: { 'content-type': 'application/json; charset=utf-8' } });
   });
@@ -411,7 +413,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
       await runAttestedCheck(db, config, ctx.params[0], ctx.user.id, { fetchImpl });
     } catch (error) {
       if (!(error instanceof UserError)) throw error;
-      const bet = await publicBet(db, ctx.params[0]);
+      const bet = await readPublished(ctx.params[0]);
       if (!bet?.settlement_transaction_hash) return notFound(ctx);
       return evidencePage(ctx, bet, { error, status: error.status });
     }
@@ -432,13 +434,13 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
       await db.tx(async (tx) => {
         // Lock before the public read: concurrent approvals share one immutable event.
         await tx.one('select id from bilateral_bets where id=$1 for update', [ctx.params[0]]);
-        const bet = await readPublicBet(tx, ctx.params[0]);
+        const bet = await readPublicBet(tx, ctx.params[0], { ...config.play, readRuling });
         if (!bet?.settlement_transaction_hash) throw new UserError('This public referee settlement is unavailable.', 404);
         await publishPublicResultEvidence(tx, ctx.user.id, bet, { ...typed, knownAt });
       });
     } catch (error) {
       if (!(error instanceof UserError)) throw error;
-      const bet = await publicBet(db, ctx.params[0]);
+      const bet = await readPublished(ctx.params[0]);
       if (!bet?.settlement_transaction_hash) return notFound(ctx);
       return evidencePage(ctx, bet, { error, typed, status: error.status });
     }
@@ -605,14 +607,14 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
 
   async function reviewBet(ctx) {
     if (!ctx.user && ctx.url.searchParams.get('join') !== '1') {
-      const published = await publicBet(db, ctx.params[0], config.play);
+      const published = await readPublished(ctx.params[0], { evidenceAfter: ctx.url.searchParams.get('evidenceAfter') });
       if (published) return publicPage(ctx, published);
     }
     if (!(await ready(ctx))) return;
     const bet = await betFor(db, ctx.user, ctx.params[0], { allowDraftPlaceholder: true });
     const creator = Boolean(bet && String(bet.creator_user_id) === String(ctx.user.id));
     if (bet && (bet.status !== 'offered' || bet.expired || (creator && bet.chain_state))) return redirect(ctx.res, pathFor(bet.id));
-    const published = bet && !creator ? await publicBet(db, bet.id) : null;
+    const published = bet && !creator ? await readPublished(bet.id) : null;
     if (!creator && !published?.funded) return show(ctx, 'Waiting for the proposer', html`
       <div class="hero"><h1>Waiting for the proposer</h1></div>
       <p class="gut">The other side opens when the proposer funds and publishes the bet.</p>
@@ -679,7 +681,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
     if (form.get('termsHash') !== bet.terms_hash) throw new UserError('Review the current terms before signing.', 409);
     if (!inPilot(config, ctx.user.x_user_id)) throw new UserError('Bets with real NEAR are invite-only for now.', 403);
     if (action === 'accept') {
-      const published = await publicBet(db, id);
+      const published = await readPublished(id);
       if (!published?.funded || form.get('publicConsent') !== '1') {
         throw new UserError('Review and consent to this public bet before staking.', 409);
       }
@@ -692,7 +694,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
   });
 
   async function betPage(ctx, { failed = null, typed = null } = {}) {
-    const published = await publicBet(db, ctx.params[0], config.play);
+    const published = await readPublished(ctx.params[0], { evidenceAfter: ctx.url.searchParams.get('evidenceAfter') });
     if (published) {
       const parties = ctx.user ? await db.one('select creator_user_id,acceptor_user_id from bilateral_bets where id=$1', [published.id]) : null;
       const participant = ctx.user && [parties?.creator_user_id, parties?.acceptor_user_id].filter(Boolean).some(id => String(id) === String(ctx.user.id));
@@ -993,7 +995,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
     if (!inPilot(config, ctx.user.x_user_id)) throw new UserError('Bets with real NEAR are invite-only for now.', 403);
     try {
       if (form.get('publicConsent') !== '1') throw new UserError('Tick the box to show your X name and wallet on this public bet.');
-      if (!await publicBet(db, id)) return notFound(ctx);
+      if (!await readPublished(id)) return notFound(ctx);
       const termsHash = form.get('termsHash');
       const bet = await syncNearBet(db, config, ctx.user, id, { fetchImpl, chain: chain?.() });
       const account = await playAccountFor(db, ctx.user.x_user_id);
@@ -1023,7 +1025,7 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
     const before = await betFor(db, ctx.user, id);
     let prepared;
     try {
-      if (action === 'accept' && await publicBet(db, id)) {
+      if (action === 'accept' && await readPublished(id)) {
         if (form.get('publicConsent') !== '1') throw new UserError('Tick the box to show your X name and wallet on this public bet.');
         await consentToPublicBet(db, ctx.user, id);
       }

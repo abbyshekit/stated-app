@@ -8,7 +8,7 @@ const functionKey = { ...full, access_key: { nonce: 1, permission: { FunctionCal
 } } } };
 const read = (result) => nearChain({ fetchImpl: async (_url, options) => {
   assert.deepEqual(JSON.parse(options.body).params, { request_type: 'view_access_key_list', finality: 'final', account_id: 'referee.near' });
-  return Response.json({ result });
+  return Response.json({ jsonrpc: '2.0', id: 'stated', result });
 } }).readAccessKeys('referee.near');
 
 test('account key inspection returns finalized RPC keys including an empty list', async () => {

@@ -31,6 +31,7 @@ before(async () => {
 after(async () => { await s?.close(); });
 beforeEach(async () => {
   await resetDb(s.db);
+  s.resetApp();
   s.config.play.settleDelaySeconds = 600;
   s.config.nearai.apiKey = 'synthetic-test-key';
   creatorBrowser = await s.signIn(s.fakeX.addUser('1901', 'public_bettor'));

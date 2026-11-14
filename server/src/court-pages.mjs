@@ -7,7 +7,7 @@ import { accountLink, transactionLink, unit } from './near-network.mjs';
 import { formatTestNear } from './near-escrow.mjs';
 import { dayMonth } from './marked.mjs';
 import { cachedView, courtDao, proposalTarget } from './court-dao.mjs';
-import { publicBet, publicBetHall } from './bet-public.mjs';
+import { publicBet, publicRulingCandidates } from './bet-public.mjs';
 import { markedClaim } from './bet-view.mjs';
 import { juryLogos } from './settlement-view.mjs';
 import { outlayerModels } from './outlayer.mjs';
@@ -26,9 +26,9 @@ async function outlayerCourt({ ctx, db, config, layout, send, chain }) {
   } catch {
     return send(ctx.res, 503, await layout(ctx, 'OutLayer referee', html`<h1 class="court-title">OutLayer referee</h1><p class="gut">The referee could not be checked on NEAR. Retry in a minute.</p><p class="gut"><a class="tl" href="${accountLink(referee)}" rel="noopener noreferrer">${referee}</a></p>`, { flush: true }));
   }
-  const hall = await publicBetHall(db);
+  const candidates = await publicRulingCandidates(db, { referee, limit: 12, before: ctx.url.searchParams.get('before') });
   const rulings = [];
-  for (const row of hall.rows.filter(bet => bet.referee_wallet === referee)) {
+  for (const row of candidates.rows) {
     const bet = await publicBet(db, row.id, config.play);
     if (bet?.outcome === 'void' && bet.settled_by === 'referee' && !bet.settlement_transaction_hash) {
       const proof = await db.one(`select detail->>'transactionHash' as hash, detail->>'transactionAttribution' as attribution from bilateral_bet_events
@@ -58,6 +58,7 @@ async function outlayerCourt({ ctx, db, config, layout, send, chain }) {
       <p>${outcome(bet.outlayer.ruling.outcome || bet.outlayer.result?.outcome)}${bet.settled_at ? `, ${dayMonth(bet.settled_at, { year: true })}` : ''}.</p>
       <p>${bet.settlement_transaction_hash ? html`<a class="tl" href="${transactionLink(bet.settlement_transaction_hash)}" rel="noopener noreferrer">${bet.settlement_transaction_attribution === 'latest_verified_request' ? 'Ruling request' : 'Settlement transaction'}</a>` : 'Settlement transaction not confirmed.'}</p>
     </div></li>`)}</ul>` : html`<p class="empty quiet">No public rulings yet.</p>`}
+    ${candidates.next ? html`<p class="gut"><a class="tl" rel="next" href="/court?before=${candidates.next}">More rulings</a></p>` : ''}
     <div class="folds"><details class="fold"><summary>Referee configuration</summary>
       <p>Escrow: <a class="tl" href="${accountLink(view.escrow)}">${view.escrow}</a></p>
       <p class="acct">Jury WASM SHA256: ${view.wasm_hash}</p>

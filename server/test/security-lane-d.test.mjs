@@ -263,6 +263,20 @@ test('cache hits cannot disclose evidence whose publication was withdrawn', asyn
   assert.equal(db.detailReads(), 1);
 });
 
+test('a cached verdict projection retains private contribution metadata while signed JSON stays withheld', async () => {
+  const db = rulingDb(enclaveRulingFixture({ source: 'evidence' }));
+  db.visible = db.record.evidence.items.map(item => String(item.id));
+  const read = createPublicRulingReader({ verify: async record => record });
+  assert.ok(await read(db, db.row.id));
+  db.visible = [];
+  const projection = await read(db, db.row.id, { projection: true });
+  assert.equal(projection.record.evidence.items.length, 1);
+  assert.equal(projection.body, undefined);
+  assert.equal(projection.etag, undefined);
+  assert.equal(await read(db, db.row.id), null);
+  assert.equal(db.detailReads(), 1);
+});
+
 test('JSON, ruling HTML and the home feature share a verified record and recheck withdrawal', async t => {
   const db = rulingDb(enclaveRulingFixture());
   const material = db.record.material;
@@ -281,6 +295,7 @@ test('JSON, ruling HTML and the home feature share a verified record and recheck
   const cachedOne = db.one;
   let uncachedReads = 0;
   db.one = async sql => {
+    if (sql.startsWith('select count(*)::text as total')) return { total: db.public ? '1' : '0', settled: db.public ? '1' : '0', paid: '0', won: '0', has_open: false };
     if (sql.startsWith('select e.detail')) { uncachedReads += 1; return { ...bet, detail: db.record }; }
     if (sql.startsWith('select b.id, b.creator_user_id')) return db.public ? bet : null;
     if (sql.startsWith('select e.id as event_id') || sql.startsWith('select detail')) return cachedOne(sql);
@@ -291,6 +306,8 @@ test('JSON, ruling HTML and the home feature share a verified record and recheck
     assert.fail(sql);
   };
   db.many = async sql => {
+    if (sql.includes('as ruling_time')) return db.public ? [{ id: bet.id }] : [];
+    if (sql.includes('as hall_rank')) return db.public ? [bet] : [];
     if (sql.startsWith('select b.id, b.creator_user_id')) return db.public ? [bet] : [];
     if (sql.includes('from bet_evidence')) return db.visible.map(id => ({ id, bet_id: bet.id, user_id: '1',
       side: 'yes', url: 'https://news.example.org/report', title: 'Report' }));
@@ -443,7 +460,7 @@ test('ruling HTML has its own page budget, refuses a flood before querying, and 
   assert.ok(allowed >= 60, `a reader gets at least 60 pages before the budget (${allowed})`);
   assert.ok(refused, 'a flood of ruling pages is refused');
   assert.ok(Number(refused.headers.get('retry-after')) > 0);
-  assert.match(refused.headers.get('content-type') || '', /text\/html/);
+  assert.match(refused.headers.get('content-type') || '', /text\/plain/);
   assert.equal(queries, before, 'the refused page made no query');
   assert.equal((await fetch(`${base}${path}/enclave-ruling.json`)).status, 404, 'reading pages does not use up the JSON budget');
 });
@@ -451,6 +468,7 @@ test('ruling HTML has its own page budget, refuses a flood before querying, and 
 test('public profile HTML and API show bounded pages with a next-page link', async t => {
   const db = {
     async one(sql) {
+      if (sql.includes('from public_withdrawals')) return { total: '0', yes: '0', no: '0', after_outcome: '0', after_deadline: '0', scored: '0', score_total: 0 };
       if (sql.includes('from users where kind')) return owner;
       if (sql.includes('bot_credentials')) return null;
       assert.fail(sql);
@@ -459,7 +477,8 @@ test('public profile HTML and API show bounded pages with a next-page link', asy
       if (sql.includes('unnest')) return [];
       if (sql.includes('lower(creator.x_username)')) {
         assert.match(sql, /p\.withdrawn_at is null/);
-        assert.deepEqual(values, ['alice']);
+        assert.equal(values[1], 'alice');
+        assert.equal(values[5], 25);
         return [];
       }
       // The record reads the whole public history (bounded) and the withdrawals, apart from the page.

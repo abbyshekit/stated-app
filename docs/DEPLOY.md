@@ -219,7 +219,7 @@ Take a dump before every deploy that changes `server/src/schema.sql`. Schema cha
 
 ## Known limits on a public host
 
-- `/signin/x` has no rate limit of its own. Sign-in states older than an hour are purged, which bounds the table; a proxy rule is the place for a per-address limit.
+- Web sign-in and correction submissions have separate per-address limits in each app process. PostgreSQL caps pending OAuth starts across app instances at 1,024 sign-ins and 16 bot authorizations. Both expire after 15 minutes. Each account can submit five corrections per hour and have ten awaiting review, with one open correction per prediction and kind.
 - A deploy health check gates the rollout only. Nothing watches the app afterwards; `/healthz` is there for an external monitor.
 - Phone wallet handoff and a hosted share preview on X are unverified until they are run on the public origin. Bot replies from the public origin are recorded in the [12 November payout evidence](../evidence/hosted-court-payout-testnet-20261112.json).
 

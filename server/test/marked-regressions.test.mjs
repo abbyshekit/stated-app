@@ -15,7 +15,7 @@ let s, browser, owner, sourceSave;
 const fetchImpl = async (url, options) => {
   if (url === TESTNET_RPC) {
     const { params } = JSON.parse(options.body);
-    if (params?.method_name === 'get_bet') return new Response(JSON.stringify({ result: { block_height: 100, result: [...Buffer.from('null')] } }));
+    if (params?.method_name === 'get_bet') return new Response(JSON.stringify({ jsonrpc: '2.0', id: 'stated', result: { block_height: 100, result: [...Buffer.from('null')] } }));
     throw new Error('Unexpected synthetic RPC');
   }
   if (s && String(url).startsWith(s.fakeX.base)) return fetch(url, options);

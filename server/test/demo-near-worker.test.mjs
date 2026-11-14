@@ -44,7 +44,7 @@ test('simulated-X startup reconciles external escrow and pending transaction wit
       evidenceSourceUrl: 'https://example.org/result', creatorSide: 'yes', stakeNear: '0.1',
       acceptBy: new Date(Date.now() + 86400000).toISOString(), resolveAt: new Date(Date.now() + 172800000).toISOString() });
     const config = { nearContract: 'escrow.testnet' };
-    const emptyRpc = async () => new Response(JSON.stringify({ result: { block_height: 1, result: [...Buffer.from('null')] } }));
+    const emptyRpc = async () => new Response(JSON.stringify({ jsonrpc: '2.0', id: 'stated', result: { block_height: 1, result: [...Buffer.from('null')] } }));
     const prepared = await prepareNearAction(db, config, user, bet.id, { action: 'fund', accountId: 'creator.testnet' }, { fetchImpl: emptyRpc });
     const request = await db.one('select * from bilateral_near_requests where id=$1', [prepared.requestId]);
     await db.query('update bilateral_near_requests set transaction_hash=$2 where id=$1', [request.id, hash]);
@@ -67,7 +67,7 @@ test('simulated-X startup reconciles external escrow and pending transaction wit
       } else if (body.method === 'tx') result = tx;
       else { res.writeHead(400); res.end(); return; }
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ result }));
+      res.end(JSON.stringify({ jsonrpc: '2.0', id: 'stated', result }));
     });
     await new Promise((resolveListen, reject) => rpcServer.once('error', reject).listen(0, '127.0.0.1', resolveListen));
     const rpcUrl = `http://127.0.0.1:${rpcServer.address().port}`;

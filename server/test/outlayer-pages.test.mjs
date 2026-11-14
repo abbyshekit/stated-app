@@ -70,11 +70,13 @@ function fixture({ published = true, snapshot = true, accepted = false, bound = 
   ruling: { material_json: JSON.stringify(bet.outlayer_material), terms_hash: bet.terms_hash,
     deadline_ns: ns(bet.resolve_at), nonce: 0, started_ns: '0', next_ns: '0', stage: 'idle', outcome: null } } : null;
   const calls = [];
+  const publicProjection = () => ({ ...bet, outlayer_bound: Boolean(bet.outlayer_material),
+    outlayer_evidence: bet.outlayer_material?.evidence || null });
   const db = {
     calls,
     async one(sql) {
       calls.push(sql);
-      if (sql.includes('from bilateral_bets b\n  join bilateral_bet_publications')) return published ? bet : null;
+      if (sql.includes('from bilateral_bets b\n  join bilateral_bet_publications')) return published ? publicProjection() : null;
       if (sql.startsWith('select b.*,e.detail')) return snapshot && record ? { ...bet, detail: record, recorded_at: now } : null;
       if (sql.startsWith('select b.*, creator.x_username') || sql.startsWith('select * from bilateral_bets where id =')) return bet;
       if (sql.startsWith('select creator_user_id,acceptor_user_id')) return bet;
@@ -85,7 +87,7 @@ function fixture({ published = true, snapshot = true, accepted = false, bound = 
     },
     async many(sql) {
       calls.push(sql);
-      if (sql.includes('from bilateral_bets b\n  join bilateral_bet_publications')) return published ? [bet] : [];
+      if (sql.includes('from bilateral_bets b\n  join bilateral_bet_publications')) return published ? [publicProjection()] : [];
       if (sql.includes('bilateral_bet_events') || sql.includes('bilateral_bet_proposals')
         || sql.includes('bilateral_near_requests') || sql.includes('from users') || sql.includes('from bet_evidence')) return [];
       throw new Error(`Unexpected many query: ${sql}`);
@@ -183,7 +185,7 @@ test('public detail and list projections retain only an OutLayer binding flag be
   const detail = await publicBet(db, id);
   assert.equal(detail.outlayer, null);
   const recent = await recentPublicBets(db);
-  const profile = await publicBetsForProfile(db, 'alice');
+  const profile = (await publicBetsForProfile(db, 'alice')).rows;
   assert.equal(recent.length, 1);
   assert.equal(profile.length, 1);
   for (const bet of [detail, ...recent, ...profile]) {

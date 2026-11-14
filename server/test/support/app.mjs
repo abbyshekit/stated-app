@@ -49,6 +49,7 @@ export async function startStack(env = {}, { fetchImpl = fetch, chain = null, in
   handler = createApp({ db, config, fetchImpl, chain, intents });
   const stack = {
     pg, fakeX, db, config, base, server,
+    resetApp() { handler = createApp({ db, config, fetchImpl, chain, intents }); },
     x: botClient(db, config),
     browser: () => new Browser(base),
     async connectBot(botUser) {

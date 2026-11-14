@@ -32,10 +32,11 @@ function localMidnight(parts, zone) {
 
 function resolveDeadline(claim, now, timeZone) {
   const sentence = claim.replace(/[?!.]+$/, '').trimEnd();
-  const timeWord = sentence.match(/\bby midnight(?:\s+(?:\((EST|EDT|ET|UTC)\)|(EST|EDT|ET|UTC)))?$/i);
+  const timeWord = sentence.match(/\bby midnight(?:\s+(?:\((EST|EDT|ET|UTC)\)|(EST|EDT|ET|UTC|Eastern(?:\s+Time)?)))?(?:\s+tonight)?$/i);
   if (timeWord) {
-    const explicit = (timeWord[1] || timeWord[2] || '').toUpperCase();
-    timeZone = { EST: 'Etc/GMT+5', EDT: 'Etc/GMT+4', ET: 'America/New_York', UTC: 'UTC' }[explicit] || timeZone;
+    const explicit = (timeWord[1] || timeWord[2] || '').replace(/\s+/g, ' ').toUpperCase();
+    timeZone = { EST: 'Etc/GMT+5', EDT: 'Etc/GMT+4', ET: 'America/New_York', EASTERN: 'America/New_York',
+      'EASTERN TIME': 'America/New_York', UTC: 'UTC' }[explicit] || timeZone;
     const p = localParts(now, timeZone);
     const next = new Date(Date.UTC(p.year, p.month - 1, p.day + 1));
     return localMidnight({ year: next.getUTCFullYear(), month: next.getUTCMonth() + 1, day: next.getUTCDate() }, timeZone);
@@ -59,7 +60,7 @@ function resolveDeadline(claim, now, timeZone) {
 /** Parse an explicit proposal such as "Claim by 30 Nov 2026, 0.25 NEAR on yes". */
 export function parseQuickBet(text, { now = new Date(), timeZone = 'UTC' } = {}) {
   const raw = String(text ?? '').trim();
-  const match = raw.match(/^([\s\S]*?)\s*,\s*([0-9]+(?:\.[0-9]+)?)\s+NEAR\s+on\s+(yes|no)\.?(?:\s+(https:\/\/\S+))?\s*$/i);
+  const match = raw.match(/^([\s\S]*?)\s*,\s*([0-9]+(?:\.[0-9]+)?)\s+NEAR\s+on\s+(yes|no)\.?(?:\s+(?:Source:\s*)?(https:\/\/\S+))?\s*$/i);
   if (!match) return null;
   const [, claimPart, amount, side, contextUrl] = match;
   if (!validZone(timeZone)) throw new UserError('Choose a valid IANA time zone.');

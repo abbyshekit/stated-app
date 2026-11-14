@@ -13,10 +13,11 @@ export function idOf(value, { message = 'That reference is not valid.', status =
 }
 
 export class UserError extends Error {
-  constructor(message, status = 400) {
+  constructor(message, status = 400, { retryAfter } = {}) {
     super(message);
     this.name = 'UserError';
     this.status = status;
+    this.retryAfter = retryAfter;
   }
 }
 
@@ -610,7 +611,9 @@ export function isScored(row, { publicView = false } = {}) {
     && (!publicView || publishedInTime(row));
 }
 
-export async function revisionsFor(db, statementId, saveIds = []) {
+export async function revisionsFor(db, statementId, saveIds = [], { after = null, limit = null } = {}) {
+  if (after !== null) idOf(after, { message: 'That history reference is invalid.' });
+  if (limit !== null && (!Number.isInteger(limit) || limit < 1 || limit > 101)) throw new UserError('That history page size is invalid.');
   return db.many(
     // Result history is shared too. This also protects old revisions and
     // reviewer input retained separately from the sanitized statement fields.
@@ -624,15 +627,19 @@ export async function revisionsFor(db, statementId, saveIds = []) {
        select r.*, (privacy.hide and r.kind in ('resolved', 'resolution_changed', 'disputed')) as redact
        from revisions r cross join privacy
        where r.statement_id = $1 and (r.save_id is null or r.save_id = any($2::bigint[]))
+         ${limit === null ? '' : 'and ($3::bigint is null or r.id > $3::bigint) order by r.id limit $4'}
      )
      select id, statement_id, save_id, kind, actor,
        case when redact then before - 'url' - 'note' else before end as before,
        case when redact then after - 'url' - 'note' else after end as after,
        case when redact then 'Result recorded. Bet evidence stays on its Bet page.' else note end as note, at
-     from history order by at, (kind = 'captured') desc, id`,
-    [statementId, saveIds.map(String)],
+     from history order by ${limit === null ? "at, (kind = 'captured') desc, id" : 'id'}`,
+    limit === null ? [statementId, saveIds.map(String)] : [statementId, saveIds.map(String), after, limit],
   );
 }
+
+const CORRECTIONS_PER_HOUR = 5;
+const OPEN_CORRECTIONS_PER_REQUESTER = 10;
 
 export async function requestCorrection(db, user, { statementId, kind, body, evidenceUrl }) {
   if (!user) throw new UserError('Sign in to request a correction.', 401);
@@ -642,11 +649,26 @@ export async function requestCorrection(db, user, { statementId, kind, body, evi
   if (text.length < 10) throw new UserError('Say what is wrong, in a sentence.');
   const url = String(evidenceUrl || '').trim();
   if (url && !/^https?:\/\//i.test(url)) throw new UserError('The evidence link has to start with https://.');
-  return db.one(
-    `insert into correction_requests (statement_id, requester_user_id, kind, body, evidence_url)
-     values ($1, $2, $3, $4, $5) returning *`,
-    [id, user.id, kind === 'resolution' ? 'resolution' : 'interpretation', text.slice(0, 2000), url || null],
-  );
+  const correctionKind = kind === 'resolution' ? 'resolution' : 'interpretation';
+  return db.tx(async tx => {
+    await tx.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [`corrections:${user.id}`]);
+    const open = await tx.one(`select count(*)::int as count,
+      bool_or(statement_id = $2 and kind = $3) as duplicate
+      from correction_requests where requester_user_id = $1 and status = 'open'`, [user.id, id, correctionKind]);
+    if (open.duplicate) throw new UserError('You already have a correction of this kind awaiting review for that prediction.', 409);
+    if (open.count >= OPEN_CORRECTIONS_PER_REQUESTER) {
+      throw new UserError('You have too many corrections awaiting review. Try again after a decision.', 429);
+    }
+    const recent = await tx.one(`select count(*)::int as count,
+      ceil(extract(epoch from min(created_at) + interval '1 hour' - statement_timestamp()))::int as retry_after
+      from correction_requests where requester_user_id = $1 and created_at > statement_timestamp() - interval '1 hour'`, [user.id]);
+    if (recent.count >= CORRECTIONS_PER_HOUR) {
+      throw new UserError('You have sent too many corrections in the last hour. Try again later.', 429,
+        { retryAfter: Math.max(1, recent.retry_after) });
+    }
+    return tx.one(`insert into correction_requests (statement_id, requester_user_id, kind, body, evidence_url, created_at)
+      values ($1, $2, $3, $4, $5, statement_timestamp()) returning *`, [id, user.id, correctionKind, text.slice(0, 2000), url || null]);
+  });
 }
 
 export async function openCorrections(db) {

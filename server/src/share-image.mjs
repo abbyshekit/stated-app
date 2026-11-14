@@ -31,7 +31,7 @@ const TABLE = { 400: ADV[400].split(',').map(Number), 800: ADV[800].split(',').m
 
 // Remove XML control characters and direction overrides before measuring or rendering.
 function clean(value, limit = 1000) {
-  return Array.from(String(value ?? '').replace(/[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/gu, ' ').replace(/\s+/gu, ' ').trim()).slice(0, limit).join('');
+  return Array.from(String(value ?? '').slice(0, limit * 4).replace(/[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/gu, ' ').replace(/\s+/gu, ' ').trim()).slice(0, limit).join('');
 }
 
 function escape(value) {
@@ -328,6 +328,10 @@ export function shareImageSvg(input) {
   return `${svg}</svg>`;
 }
 
+export function renderShareSvg(svg) {
+  return new Resvg(svg, { font: { fontFiles: FONTS, loadSystemFonts: false, defaultFontFamily: 'Archivo' } }).render().asPng();
+}
+
 export function renderShareImage(input) {
-  return new Resvg(shareImageSvg(input), { font: { fontFiles: FONTS, loadSystemFonts: false, defaultFontFamily: 'Archivo' } }).render().asPng();
+  return renderShareSvg(shareImageSvg(input));
 }

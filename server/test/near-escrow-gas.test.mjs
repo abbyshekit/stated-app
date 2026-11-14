@@ -5,10 +5,10 @@ import { functionCallFunds, gasPurchasePrice, NEAR_CALL_GAS } from '../src/near-
 function mockGas(current, floor, version = 88) {
   return { fetchImpl: async (_url, request) => {
     const { method } = JSON.parse(request.body);
-    if (method === 'gas_price') return Response.json({ result: { gas_price: current } });
-    if (method === 'query') return Response.json({ result: { amount: '50000000000000000000000', storage_usage: 182 } });
+    if (method === 'gas_price') return Response.json({ jsonrpc: '2.0', id: 'stated', result: { gas_price: current } });
+    if (method === 'query') return Response.json({ jsonrpc: '2.0', id: 'stated', result: { amount: '50000000000000000000000', storage_usage: 182 } });
     assert.equal(method, 'EXPERIMENTAL_protocol_config');
-    return Response.json({ result: {
+    return Response.json({ jsonrpc: '2.0', id: 'stated', result: {
       protocol_version: version,
       runtime_config: { min_gas_purchase_price: floor, storage_amount_per_byte: '10000000000000000000' },
     } });

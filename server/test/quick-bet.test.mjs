@@ -31,6 +31,35 @@ test('uses explicit US timezone abbreviations and validates supplied IANA zones'
   assert.throws(() => parseQuickBet('Will it happen by midnight, 0.25 NEAR on yes', { now, timeZone: 'Mars/Olympus' }), UserError);
 });
 
+test('parses a labeled evidence source and midnight Eastern tonight in the original wager', () => {
+  const claim = 'FAA lifts the nationwide ground stop by midnight Eastern tonight';
+  const result = parseQuickBet(`${claim}, 0.25 NEAR on yes. Source: https://www.fly.faa.gov/adv/advADB.jsp`, { now });
+  assert.equal(result.claim, claim);
+  assert.equal(result.evidenceSourceUrl, 'https://www.fly.faa.gov/adv/advADB.jsp');
+  assert.equal(result.creatorSide, 'yes');
+  assert.equal(result.stakeNear, '0.25');
+  assert.equal(result.resolveAt, '2026-11-14T05:00:00.000Z');
+  assert.equal(parseQuickBet(`${claim}, 0.25 NEAR on yes.`, { now }).resolveAt, result.resolveAt);
+});
+
+test('Eastern midnight follows daylight saving time and keeps unrelated suffix prose unrecognized', () => {
+  const result = parseQuickBet('FAA lifts restrictions by midnight Eastern Time tonight, 0.25 NEAR on yes', {
+    now: new Date('2027-07-01T22:00:00Z'),
+  });
+  assert.equal(result.resolveAt, '2027-07-02T04:00:00.000Z');
+  assert.equal(parseQuickBet('FAA lifts restrictions by midnight, 0.25 NEAR on yes. Maybe later. Source: https://example.com', { now }), null);
+  assert.equal(parseQuickBet('FAA lifts restrictions by midnight, 0.25 NEAR on yes. Source: http://example.com', { now }), null);
+});
+
+test('explicit Eastern Time overrides the default zone with flexible whitespace', () => {
+  for (const zone of ['Eastern  Time', 'Eastern\tTime', 'Eastern\nTime']) {
+    const result = parseQuickBet(`FAA lifts restrictions by midnight ${zone} tonight, 0.25 NEAR on yes`, {
+      now, timeZone: 'Asia/Tokyo',
+    });
+    assert.equal(result.resolveAt, '2026-11-14T05:00:00.000Z', zone);
+  }
+});
+
 test('keeps a terminal question mark and refuses clock qualifiers it cannot parse', () => {
   const result = parseQuickBet('Will it happen by midnight?, 0.25 NEAR on yes', { now });
   assert.equal(result.claim, 'Will it happen by midnight?');

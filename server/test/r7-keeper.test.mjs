@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { canonicalJson, fingerprint } from '../src/canonical.mjs';
 import { UserError } from '../src/store.mjs';
+import { reservePlaySigner, withAvailablePlaySigner } from '../src/play.mjs';
 
 const NOW = Date.parse('2026-11-13T12:00:00.000Z');
 const ns = millis => (BigInt(millis) * 1000000n).toString();
@@ -13,7 +14,7 @@ async function fixture({ status = 'accepted', budget = '1', evidence = [{ side: 
   const source = await readFile(new URL('../src/outlayer.mjs', import.meta.url), 'utf8');
   const body = source.replace(/^import .*?;\n/gm, '').replace(/^export \{.*?\};\n/gm, '').replace(/^export /gm, '');
   const warnings = [];
-  const deps = { createHash, randomUUID, canonicalJson, fingerprint, UserError,
+  const deps = { createHash, randomUUID, canonicalJson, fingerprint, UserError, reservePlaySigner, withAvailablePlaySigner,
     isNamedAccount: () => true, console: { warn(message) { warnings.push(message); } },
     syncNearBet: async () => bet, treasury: async () => ({ id: 'sponsor.testnet', secret: 'synthetic' }),
     verifyNearExecution: async () => { reconciled++; return { status: 'succeeded' }; } };
@@ -37,6 +38,7 @@ async function fixture({ status = 'accepted', budget = '1', evidence = [{ side: 
     if (/outlayer_near_requests/.test(sql)) return [];
     throw Error(`Unexpected SQL: ${sql}`);
   }, one: async (sql, args = []) => {
+    if (sql === 'select * from play_accounts where account_id = $1 for update') return null;
     if (/pg_try_advisory_lock/.test(sql)) return { locked: true };
     if (/select \* from users/.test(sql)) return { id: '1' };
     if (/select id from bilateral_bets/.test(sql)) return { id: bet.id };

@@ -1,5 +1,5 @@
 // INTEGRATION: bounded collection/export reads without changing store.mjs's private callers.
-import { SAVE_SELECT, UserError, recordOf, isScored, withdrawalsFor } from './store.mjs';
+import { SAVE_SELECT, UserError, recordOf, isScored } from './store.mjs';
 import { PUBLIC_SAVE_SQL, profileIsPublic } from './privacy.mjs';
 import { effectiveTerms, isBackfill, outcomeFor, scoringProbability } from './terms.mjs';
 import { isPlaceholder } from './xtext.mjs';
@@ -16,7 +16,25 @@ export async function publicRecord(db, user) {
   const rows = await db.many(`${SAVE_SELECT} join users u on u.id = s.owner_user_id
     where s.owner_user_id = $1 and ${PUBLIC_SAVE_SQL} and s.relation = 'mine'
     order by s.id desc limit $2`, [user.id, RECORD_CAP]);
-  return recordOf(rows, { publicView: true, withdrawals: await withdrawalsFor(db, user.id) });
+  const record = recordOf(rows, { publicView: true });
+  // Withdrawals retain counts only. Aggregate in PostgreSQL so removing a large
+  // history cannot turn each public profile read into an unbounded row transfer.
+  const held = await db.one(`select count(*)::text as total,
+    (count(*) filter (where held_outcome='yes'))::text as yes,
+    (count(*) filter (where held_outcome='no'))::text as no,
+    (count(*) filter (where after_outcome))::text as after_outcome,
+    (count(*) filter (where not after_outcome and after_deadline))::text as after_deadline,
+    (count(*) filter (where held_outcome in ('yes','no') and scoring_probability is not null))::text as scored,
+    coalesce(sum(100 * (ln(case when held_outcome='yes' then greatest(0.001,least(0.999,scoring_probability::double precision))
+      else 1-greatest(0.001,least(0.999,scoring_probability::double precision)) end) - ln(0.5::double precision)) / -ln(0.5::double precision))
+      filter (where held_outcome in ('yes','no') and scoring_probability is not null), 0) as score_total
+    from public_withdrawals where owner_user_id=$1`, [user.id]);
+  const scored = record.scored + Number(held.scored);
+  return { ...record, predictions: record.predictions + Number(held.total),
+    resolved: record.resolved + Number(held.yes) + Number(held.no),
+    cameTrue: record.cameTrue + Number(held.yes), didNot: record.didNot + Number(held.no),
+    withdrawnAfterOutcome: Number(held.after_outcome), withdrawnAfterDeadline: Number(held.after_deadline), scored,
+    averageBaseline: scored ? ((record.averageBaseline || 0) * record.scored + Number(held.score_total)) / scored : null };
 }
 
 function cursor(params, name) {

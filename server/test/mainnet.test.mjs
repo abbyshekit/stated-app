@@ -343,6 +343,9 @@ test('NEAR that arrives wrapped is unwrapped, and the page stops asking', async 
   assert.equal(done.headers.get('refresh'), null);
   const unwraps = near.sent.filter((t) => t.method === 'near_withdraw');
   assert.equal(unwraps.length, 1);
+  const completedPayment = await one('select unwrap_tx from play_deposits where id = $1', [firstPayment]);
+  assert.equal(await near.chain.unwrapDelivery({ transactionHash: completedPayment.unwrap_tx }), true,
+    'the OutLayer fixture verifies the same prepared transaction it broadcasts for wrapped payments');
   assert.deepEqual(unwraps[0], { signerId: 'oskar.stated.near', method: 'near_withdraw', args: { amount: yocto('0.5') }, depositYocto: '1', gas: 30_000_000_000_000n });
   assert.equal(held('oskar.stated.near'), beforeArrival + NEAR('0.5'), 'plain NEAR, ready to stake');
   assert.equal(near.wrapped.get('oskar.stated.near'), 0n);

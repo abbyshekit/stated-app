@@ -68,26 +68,26 @@ function fakeRpc({ change = () => {}, fault = null } = {}) {
     const data = fixture(); change(data, endpoint);
     if (body.method === 'query' && body.params.request_type === 'view_account') {
       assert.equal(body.params.finality, 'final'); assert.equal(body.params.account_id, proof.contract);
-      return Response.json({ result: data.account });
+      return Response.json({ jsonrpc: '2.0', id: 'stated', result: data.account });
     }
     if (body.method === 'query' && body.params.request_type === 'view_access_key_list') {
       assert.equal(body.params.finality, 'final'); assert.equal(body.params.account_id, proof.contract);
-      return Response.json({ result: data.access });
+      return Response.json({ jsonrpc: '2.0', id: 'stated', result: data.access });
     }
     if (body.method === 'query') {
       assert.equal(body.params.request_type, 'call_function'); assert.equal(body.params.finality, 'final');
       assert.equal(body.params.account_id, proof.contract); assert.equal(body.params.method_name, 'get_bet');
       assert.deepEqual(JSON.parse(Buffer.from(body.params.args_base64, 'base64')), { id: betId });
-      return Response.json({ result: { result: [...Buffer.from(JSON.stringify(data.bet))], block_height: endpoint === endpoints[0] ? 1000 : 1001, block_hash: hash(8) } });
+      return Response.json({ jsonrpc: '2.0', id: 'stated', result: { result: [...Buffer.from(JSON.stringify(data.bet))], block_height: endpoint === endpoints[0] ? 1000 : 1001, block_hash: hash(8) } });
     }
     assert.equal(body.params.wait_until, 'FINAL');
     if (body.params.tx_hash === proof.transactions.refereeResolve) {
       assert.equal(body.params.sender_account_id, data.bet.referee);
-      return Response.json({ result: data.ruling });
+      return Response.json({ jsonrpc: '2.0', id: 'stated', result: data.ruling });
     }
     assert.equal(body.params.tx_hash, proof.transactions.withdraw);
     assert.equal(body.params.sender_account_id, winner);
-    return Response.json({ result: data.withdrawal });
+    return Response.json({ jsonrpc: '2.0', id: 'stated', result: data.withdrawal });
   };
   return { fetchImpl, calls };
 }
@@ -264,7 +264,7 @@ test('noncanonical public call arguments fail at their decoding boundary', async
 });
 
 test('an unavailable provider is explicit and neither leaks its message nor becomes a pass', async () => {
-  for (const fault of [() => Response.json({ error: { message: 'untrusted-upstream-marker' } }),
+  for (const fault of [() => Response.json({ jsonrpc: '2.0', id: 'stated', error: { code: -32000, message: 'untrusted-upstream-marker' } }),
     () => new Response('untrusted-upstream-marker', { status: 503 })]) {
     const rpc = fakeRpc({ fault });
     const report = await verifyHostedPayout({ fetchImpl: rpc.fetchImpl });

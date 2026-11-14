@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { isIP } from 'node:net';
 import { InvalidNonceError, TransactionExpiredError } from 'near-api-js/rpc-errors';
+import { KeyPair, SignedTransaction, baseEncode } from 'near-api-js';
 import { canonicalJson, fingerprint } from '../src/canonical.mjs';
 import { checkPlan, decide, materialHash } from '../src/enclave-ruling.mjs';
 import { UserError } from '../src/store.mjs';
@@ -12,6 +13,7 @@ import { parseBetCommand } from '../src/reply-bets.mjs';
 import { outlayerTestFetch } from './support/outlayer-fetch.mjs';
 import { walletPayload } from '../src/near-escrow.mjs';
 import { assertMainnetStakeCap } from '../src/reputation.mjs';
+import { nearChain, reservePlaySigner, withAvailablePlaySigner } from '../src/play.mjs';
 
 // Execute the actual module with only its external boundaries replaced. This
 // keeps durable-intent and keeper regressions runnable when PG cannot start.
@@ -22,7 +24,7 @@ async function sourceModule(name, dependencies, names) {
   return new Function(...Object.keys(dependencies), `${body}\nreturn {${names.join(',')}};`)(...Object.values(dependencies));
 }
 
-const deps = { createHash, randomUUID, isIP, canonicalJson, fingerprint, checkPlan, decide, materialHash, UserError,
+const deps = { createHash, randomUUID, isIP, canonicalJson, fingerprint, checkPlan, decide, materialHash, UserError, reservePlaySigner, withAvailablePlaySigner,
   InvalidNonceError, TransactionExpiredError, isNamedAccount: () => true };
 const base = { id: 'test-bet', claim: 'The release ships.', madeAt: '2026-11-12T18:00:00.000Z',
   deadline: '2026-11-12T19:00:00.000Z', postUrl: 'https://www.sec.gov/release', creatorSide: 'yes', plan: { source: 'evidence' } };
@@ -72,6 +74,7 @@ function intentDb(row) {
   const db = { state,
     tx: async fn => fn(db),
     one: async (sql, args) => {
+      if (sql === 'select * from play_accounts where account_id = $1 for update') return null;
       if (/pg_try_advisory_lock/.test(sql)) return { locked: true };
       if (/select id from bilateral_bets/.test(sql)) return { id: 'test-bet' };
       if (/select \* from outlayer_near_requests/.test(sql)) return { ...state };
@@ -88,7 +91,7 @@ function intentDb(row) {
 
 for (const [label, rejection] of [['nonce used', () => new InvalidNonceError(20, 19)],
   ['expired', () => new TransactionExpiredError()]]) {
-  test(`OutLayer retries a previously broadcast intent when ${label} and RPC proves it unknown`, async () => {
+  test(`OutLayer retires a previously broadcast intent when ${label} and its signed proof establishes nonexecution`, async () => {
     const db = intentDb({ id: 'intent', transaction_hash: 'hash', signed_transaction: 'bytes', execution_status: 'pending',
       broadcast_started_at: new Date(0) });
     db.tx = async fn => fn(db);
@@ -97,7 +100,12 @@ for (const [label, rejection] of [['nonce used', () => new InvalidNonceError(20,
       rpc: async () => { throw Object.assign(new Error('Unknown transaction'), { rpcCause: 'UNKNOWN_TRANSACTION' }); },
     }, ['persistentCall']);
     const result = await persistentCall(db, { prepareCall: () => assert.fail('must reuse signed bytes'),
-      broadcastCall: async () => { throw rejection(); } }, { id: 'test-bet', referee_wallet: 'ref.testnet' },
+      broadcastCall: async () => { throw rejection(); },
+      preparedRetrySafe: async (payment, error) => {
+        assert.deepEqual(payment, { transactionHash: 'hash', signedTransaction: 'bytes' });
+        assert.ok(error instanceof InvalidNonceError || error instanceof TransactionExpiredError);
+        return true;
+      } }, { id: 'test-bet', referee_wallet: 'ref.testnet' },
     { id: 'sponsor.testnet', secret: 'synthetic' }, 'request_ruling', {}, '0', '300000000000000', () => assert.fail('no live fetch'));
     assert.equal(result.execution_status, 'failed');
     assert.equal(db.state.execution_status, 'failed');
@@ -115,6 +123,113 @@ test('OutLayer never retires an ambiguous intent during an RPC outage', async ()
     { id: 'test-bet', referee_wallet: 'ref.testnet' }, { id: 'sponsor.testnet' }, 'request_ruling', {}, '0', '300000000000000');
   assert.equal(result.execution_status, 'pending');
   assert.equal(db.state.execution_status, 'pending');
+});
+
+for (const initialStatus of ['pending', 'failed']) {
+  test(`OutLayer ${initialStatus} signed callback failure cannot allocate a replacement without root rollback proof`, async () => {
+    const db = intentDb({ id: 'intent', transaction_hash: 'committed-deposit', signed_transaction: 'original-bytes', execution_status: initialStatus });
+    let proofs = 0;
+    const { persistentCall } = await sourceModule('outlayer', { ...deps,
+      verifyNearExecution: async () => ({ status: 'failed', explanation: 'Downstream callback failed after the root committed its deposit' }),
+    }, ['persistentCall']);
+    const chain = { prepareCall: () => assert.fail('a second deposit signature must not be allocated'),
+      broadcastCall: () => assert.fail('the failed signature must not be rebroadcast'),
+      preparedRetrySafe: async payment => {
+        proofs++;
+        assert.deepEqual(payment, { transactionHash: 'committed-deposit', signedTransaction: 'original-bytes' });
+        return false;
+      } };
+    const invoke = () => persistentCall(db, chain, { id: 'test-bet', referee_wallet: 'ref.testnet' },
+      { id: 'sponsor.testnet' }, 'submit_evidence', { bet_id: 'test-bet' }, '10000000000000000000000', '100000000000000');
+    assert.equal((await invoke()).transaction_hash, 'committed-deposit');
+    assert.equal((await invoke()).transaction_hash, 'committed-deposit');
+    assert.ok(proofs > 0, 'replacement eligibility must be proved even for an already-failed intent');
+  });
+}
+
+test('legacy OutLayer failure requires its exact root rollback before replacement', async () => {
+  const db = intentDb({ id: 'legacy', transaction_hash: 'legacy-hash', signed_transaction: null,
+    signer_account: 'sponsor.testnet', contract_account: 'ref.testnet', method: 'submit_evidence',
+    args: { bet_id: 'test-bet' }, deposit_yocto: '1', gas: '100000000000000', execution_status: 'failed' });
+  const one = db.one;
+  db.one = (sql, args) => /insert into outlayer_near_requests/.test(sql)
+    ? { ...db.state, id: 'replacement', transaction_hash: null, execution_status: 'pending' } : one(sql, args);
+  const { persistentCall } = await sourceModule('outlayer', deps, ['persistentCall']);
+  let rollback = false;
+  let signatures = 0;
+  const chain = { prepareCall: async () => { signatures++; throw new Error('Stopped before broadcasting replacement'); },
+    broadcastCall: () => assert.fail('the test stops before broadcasting'),
+    requestRetrySafe: async row => {
+      assert.equal(row.transaction_hash, 'legacy-hash');
+      assert.equal(row.wallet_account, 'sponsor.testnet');
+      assert.deepEqual(row.metadata, { contract: 'ref.testnet', depositYocto: '1', gas: '100000000000000' });
+      assert.deepEqual(row.args, { bet_id: 'test-bet' });
+      return rollback;
+    } };
+  const invoke = () => persistentCall(db, chain, { id: 'test-bet', referee_wallet: 'ref.testnet' },
+    { id: 'sponsor.testnet' }, 'submit_evidence', { bet_id: 'test-bet' }, '1', '100000000000000');
+  assert.equal((await invoke()).transaction_hash, 'legacy-hash');
+  assert.equal(signatures, 0);
+  rollback = true;
+  await assert.rejects(invoke(), /Stopped before broadcasting replacement/);
+  assert.equal(signatures, 1);
+});
+
+test('OutLayer real adapter retains an executed lost-response intent with unavailable history and retires never-executed expiry', async () => {
+  for (const executedBeforeLoss of [true, false]) {
+    let nonce = 10, height = 100, executions = 0;
+    const nonces = [];
+    const referenceHash = baseEncode(Buffer.alloc(32, 7));
+    const headHash = baseEncode(Buffer.alloc(32, 8));
+    const adapter = nearChain({ fetchImpl: async (_url, options) => {
+      const { id, method, params } = JSON.parse(options.body);
+      const reply = result => Response.json({ jsonrpc: '2.0', id, result });
+      const failure = (name, invalid = null) => Response.json({ jsonrpc: '2.0', id, error: {
+        code: -32000, message: 'Server error', cause: { name },
+        ...(invalid ? { data: { TxExecutionError: { InvalidTxError: invalid } } } : {}) } });
+      if (method === 'query') return reply({ nonce, permission: 'FullAccess' });
+      if (method === 'block') return reply({ header: params.block_id === referenceHash || height === 100
+        ? { hash: referenceHash, height: 100 } : { hash: headHash, height } });
+      if (method === 'EXPERIMENTAL_protocol_config') return reply({ transaction_validity_period: 100 });
+      if (method === 'tx' || method === 'tx_status') return failure('UNKNOWN_TRANSACTION');
+      assert.equal(method, 'send_tx');
+      const signed = SignedTransaction.decode(Buffer.from(params.signed_tx_base64, 'base64'));
+      nonces.push(Number(signed.transaction.nonce));
+      if (height > 200) return failure('INVALID_TRANSACTION', 'Expired');
+      if (signed.transaction.nonce <= BigInt(nonce)) return failure('INVALID_TRANSACTION',
+        { InvalidNonce: { ak_nonce: nonce, tx_nonce: Number(signed.transaction.nonce) } });
+      nonce = Number(signed.transaction.nonce);
+      executions += 1;
+      throw new TypeError('Synthetic response lost after execution');
+    } });
+    const prepared = await adapter.prepareCall({ signerId: 'sponsor.testnet',
+      secret: KeyPair.fromRandom('ed25519').toString(), contractId: 'ref.testnet',
+      method: 'request_ruling', args: { bet_id: 'test-bet' }, depositYocto: '0', gas: 300000000000000n });
+    if (executedBeforeLoss) {
+      const pending = await adapter.broadcastCall(prepared);
+      assert.equal(pending.ok, false);
+      assert.equal(pending.hash, prepared.hash);
+    } else height = 201;
+    const db = intentDb({ id: 'intent', transaction_hash: prepared.hash, signed_transaction: prepared.signedTransaction,
+      execution_status: 'pending', broadcast_started_at: new Date(0) });
+    const { persistentCall } = await sourceModule('outlayer', { ...deps,
+      verifyNearExecution: async () => ({ status: 'pending' }),
+      rpc: async () => { throw Object.assign(new Error('Unknown transaction'), { rpcCause: 'UNKNOWN_TRANSACTION' }); },
+    }, ['persistentCall']);
+    const chain = { ...adapter, prepareCall: () => assert.fail('must retain the original signed transaction') };
+    const call = () => persistentCall(db, chain, { id: 'test-bet', referee_wallet: 'ref.testnet' },
+      { id: 'sponsor.testnet' }, 'request_ruling', { bet_id: 'test-bet' }, '0', '300000000000000', () => assert.fail('no live fetch'));
+    const result = await call();
+    assert.equal(result.execution_status, executedBeforeLoss ? 'pending' : 'failed');
+    assert.equal(executions, executedBeforeLoss ? 1 : 0);
+    if (executedBeforeLoss) {
+      assert.equal((await call()).execution_status, 'pending');
+      assert.deepEqual(nonces, [11, 11, 11]);
+      assert.equal(executions, 1);
+      assert.equal(db.state.transaction_hash, prepared.hash);
+      assert.equal(db.state.signed_transaction, prepared.signedTransaction);
+    }
+  }
 });
 
 test('bound database calls acquire the shared OutLayer signer lock', async () => {
@@ -160,6 +275,7 @@ async function keeperFixture({ status = 'accepted', ruling = null, lastRequestAt
     one: async (sql, args) => {
       if (/pg_try_advisory_lock/.test(sql)) return { locked: true };
       if (/select \* from users/.test(sql)) return { id: '1' };
+      if (sql === 'select * from play_accounts where account_id = $1 for update') return null;
       if (/select id from bilateral_bets/.test(sql)) return { id: bet.id };
       if (/select detail from bilateral_bet_events/.test(sql)) {
         if (/outlayer_compute_pause/.test(sql)) return pauses.at(-1) ? { detail: pauses.at(-1) } : null;
@@ -339,6 +455,7 @@ test('ruling intent ledger caps new sends at twelve per bet per UTC day and reco
     verifyNearExecution: async () => ({ status: 'succeeded' }) }, ['persistentCall']);
   const rows = []; let signed = 0;
   const db = { tx: async fn => fn(db), one: async (sql, args = []) => {
+    if (sql === 'select * from play_accounts where account_id = $1 for update') return null;
     if (/select id from bilateral_bets/.test(sql)) return { id: 'test-bet' };
     if (/count\(\*\)/.test(sql)) return { n: rows.length };
     if (/select \* from outlayer_near_requests/.test(sql)) return rows.find(row => row.intent_key === args[5]) || null;
@@ -378,7 +495,7 @@ for (const ruling of [null, { stage: 'idle' }, { stage: 'running' }]) {
   });
 }
 
-test('managed evidence releases its account transaction before signing and broadcasting', async () => {
+test('managed evidence holds its account nonce lock while signing and broadcasting', async () => {
   const now = Date.now();
   const f = await keeperFixture({ clock: now + 90000, ruling: { stage: 'idle' } });
   let depth = 0;
@@ -386,7 +503,18 @@ test('managed evidence releases its account transaction before signing and broad
   f.db.tx = async fn => { depth++; try { return await fn(f.db); } finally { depth--; } };
   const originalOne = f.db.one;
   f.db.one = async (sql, args) => {
-    if (/play_accounts.*for update/.test(sql)) { assert.equal(depth, 1); return managed; }
+    if (/select signer_intent from play_accounts/.test(sql)) return managed;
+    if (/select id from (bilateral_near_requests|outlayer_near_requests)/.test(sql)) return null;
+    if (/play_accounts.*for update/.test(sql)) {
+      assert.equal(depth, 1);
+      if (sql.includes('account_id = $1')) assert.equal(args[0], managed.account_id);
+      return managed;
+    }
+    if (sql.startsWith('select id from play_deposits')) {
+      assert.equal(depth, 1);
+      assert.equal(args[0], managed.account_id);
+      return null;
+    }
     return originalOne(sql, args);
   };
   const { submitOutlayerEvidence } = await sourceModule('outlayer', { ...deps,
@@ -394,8 +522,8 @@ test('managed evidence releases its account transaction before signing and broad
     secretOf: () => 'synthetic', verifyNearExecution: async () => ({ status: 'succeeded' }),
   }, ['submitOutlayerEvidence']);
   const prepare = f.chain.prepareCall;
-  f.chain.prepareCall = async input => { assert.equal(depth, 0, 'account transaction committed before signing'); return prepare(input); };
-  f.chain.broadcastCall = async () => { assert.equal(depth, 0, 'account transaction committed before RPC'); };
+  f.chain.prepareCall = async input => { assert.equal(depth, 1, 'account nonce lock held during signing'); return prepare(input); };
+  f.chain.broadcastCall = async () => { assert.equal(depth, 1, 'account nonce lock held during broadcast'); };
   const result = await submitOutlayerEvidence(f.db, f.config, f.chain, f.bet, { id: '1', x_user_id: 'alice' },
     { url: 'https://www.sec.gov/release' });
   assert.equal(result.status, 'succeeded');

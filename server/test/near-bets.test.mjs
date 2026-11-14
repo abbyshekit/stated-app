@@ -13,7 +13,7 @@ let s, creator, invitee, outsider;
 const key = KeyPair.fromRandom('ed25519').getPublicKey().toString();
 const config = () => ({ ...s.config, nearContract: 'escrow.testnet' });
 const ns = (d) => (BigInt(new Date(d).getTime()) * 1000000n).toString();
-const response = (data, headers = {}) => new Response(JSON.stringify(data), { status: 200, headers });
+const response = (data, headers = {}) => new Response(JSON.stringify({ jsonrpc: '2.0', id: 'stated', ...data }), { status: 200, headers });
 function rpc(chain, height = 1, permission = 'FullAccess', credit = '100000000000000000000000') {
   return { fetchImpl: async (_url, opts) => {
     const { params } = JSON.parse(opts.body);

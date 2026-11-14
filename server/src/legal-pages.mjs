@@ -110,7 +110,7 @@ export function privacyPage({ bot, sessionDays, textPolicy, real = false }) {
           ? 'This server is set to store the words of every saved post too.'
           : 'For an X post saved privately, Stated keeps the link and the terms, not the words. The words are stored only while a public record shows the post.'} Sentences you pick from articles are stored with a link to the article.</li>
         <li><b>Cookies.</b> Stated sets only its own cookies: one that keeps you signed in (${sessionDays} days), one used during sign-in (15 minutes), one that remembers which link brought you here until you sign up (30 days), and a random visitor cookie that counts a visit to a public page once a day (a year). None is shared with anyone, and Stated runs no advertising or third-party tracking.</li>
-        <li><b>Your IP address.</b> The server holds it in memory to limit how fast one address can load heavy pages. It is not written to the database, and it is dropped when the server restarts or needs the room. Railway, which hosts Stated, handles every request first and keeps its own records under its own terms.</li>
+        <li><b>Your IP address.</b> The server holds it in memory to limit heavy page requests, sign-in attempts and correction submissions. It is not written to the database, and it is dropped when the server restarts or needs the room. Railway, which hosts Stated, handles every request first and keeps its own records under its own terms.</li>
       </ul>
 
       <h2>How Stated uses it</h2>

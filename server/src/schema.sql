@@ -47,6 +47,8 @@ create table if not exists oauth_states (
   created_at timestamptz not null default now()
 );
 
+create index if not exists oauth_states_created_idx on oauth_states (created_at);
+
 create table if not exists bot_credentials (
   id int primary key default 1 check (id = 1),
   x_user_id text not null,
@@ -212,6 +214,9 @@ create table if not exists correction_requests (
   decided_at timestamptz
 );
 
+create index if not exists correction_requests_requester_created_idx on correction_requests (requester_user_id, created_at);
+create index if not exists correction_requests_open_requester_idx on correction_requests (requester_user_id) where status = 'open';
+
 create table if not exists visibility_events (
   id bigserial primary key,
   save_id bigint references saves(id) on delete cascade,
@@ -359,6 +364,8 @@ create index if not exists bilateral_near_requests_bet_idx on bilateral_near_req
 alter table bilateral_near_requests add column if not exists execution_status text not null default 'pending'
   check (execution_status in ('pending', 'succeeded', 'failed'));
 alter table bilateral_near_requests add column if not exists transaction_hash text;
+alter table bilateral_near_requests add column if not exists signed_transaction text;
+alter table bilateral_near_requests add column if not exists signer_released_at timestamptz;
 alter table bilateral_near_requests add column if not exists execution_message text;
 alter table bilateral_near_requests add column if not exists execution_checked_at timestamptz;
 drop index if exists bilateral_near_requests_transaction_idx;
@@ -499,6 +506,7 @@ create table if not exists play_accounts (
   created_at timestamptz not null default now(),
   claimed_at timestamptz
 );
+alter table play_accounts add column if not exists signer_intent jsonb;
 -- Initial mainnet funding is assigned before account creation. Keep these lifetime
 -- reservations independently of account rows so deleting one never reopens a slot.
 create table if not exists play_account_grants (
@@ -718,5 +726,35 @@ create table if not exists outlayer_near_requests (
 );
 create index if not exists outlayer_near_requests_bet_idx on outlayer_near_requests(bet_id,method,created_at);
 alter table outlayer_near_requests add column if not exists signed_transaction text;
+alter table outlayer_near_requests add column if not exists signer_released_at timestamptz;
 alter table outlayer_near_requests add column if not exists broadcast_started_at timestamptz;
 alter table outlayer_near_requests add column if not exists intent_key text;
+
+-- A delivery proof is consumed once per recipient. Existing completed payments
+-- retain their claim across upgrades, without requiring their stored hashes to be unique.
+create table if not exists play_deposit_deliveries (
+  transaction_hash text not null,
+  account_id text not null,
+  deposit_id uuid not null unique references play_deposits(id),
+  amount_yocto text not null,
+  primary key(transaction_hash, account_id)
+);
+insert into play_deposit_deliveries(transaction_hash, account_id, deposit_id, amount_yocto)
+select distinct on (destination_tx, account_id) destination_tx, account_id, id, coalesce(delivered_yocto, near_yocto)
+from play_deposits where state = 'SUCCESS' and finished_at is not null and destination_tx is not null
+order by destination_tx, account_id, finished_at, id
+on conflict do nothing;
+alter table play_deposits add column if not exists unwrap_pending_tx text;
+alter table play_deposits add column if not exists unwrap_signed_transaction text;
+alter table play_deposits add column if not exists unwrap_attempted_at timestamptz;
+create index if not exists play_deposits_pending_signer_idx on play_deposits(account_id)
+  where finished_at is null and unwrap_signed_transaction is not null;
+create table if not exists play_unwrap_transactions (
+  transaction_hash text primary key,
+  deposit_id uuid not null references play_deposits(id)
+);
+insert into play_unwrap_transactions(transaction_hash, deposit_id)
+select distinct on (coalesce(unwrap_tx, unwrap_pending_tx)) coalesce(unwrap_tx, unwrap_pending_tx), id
+from play_deposits where coalesce(unwrap_tx, unwrap_pending_tx) is not null
+order by coalesce(unwrap_tx, unwrap_pending_tx), created_at, id
+on conflict do nothing;

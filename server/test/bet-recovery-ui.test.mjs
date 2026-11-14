@@ -18,10 +18,10 @@ const fetchImpl = async (url, options) => {
     throw new Error(`Unexpected external request: ${url}`);
   }
   const { method, params } = JSON.parse(options.body);
-  if (method === 'tx') return new Response(JSON.stringify({ result: execution }));
+  if (method === 'tx') return new Response(JSON.stringify({ jsonrpc: '2.0', id: 'stated', result: execution }));
   if (method === 'query' && params.method_name === 'get_bet') {
     const { id } = JSON.parse(Buffer.from(params.args_base64, 'base64'));
-    return new Response(JSON.stringify({ result: { block_height: 100, result: [...Buffer.from(JSON.stringify(chains.get(id) || null))] } }));
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: 'stated', result: { block_height: 100, result: [...Buffer.from(JSON.stringify(chains.get(id) || null))] } }));
   }
   throw new Error('Unexpected synthetic NEAR RPC');
 };

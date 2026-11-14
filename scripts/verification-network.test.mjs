@@ -71,7 +71,7 @@ test('ruling Court reads recover on the same endpoint and report retry exhaustio
     const value = params.method_name === 'get_last_proposal_id' ? 1 : [{ id: 0,
       kind: proposalKind({ nearContract: evidence.contract }, betId, ruling.record.outcome),
       description: `ruling sha256:${fingerprint(ruling.record)}` }];
-    return Response.json({ result: { result: [...Buffer.from(JSON.stringify(value))] } });
+    return Response.json({ jsonrpc: '2.0', id: 'stated', result: { result: [...Buffer.from(JSON.stringify(value))] } });
   };
   await verifyCourtProposal(ruling.record, betId, (...args) => checks.push(args), {
     fetchImpl: request, networkOptions: { ...quiet, diagnostic: line => logs.push(line) },
@@ -119,7 +119,7 @@ function payoutFetch({ alwaysFail = false, disagree = false } = {}) {
       : params.request_type === 'view_access_key_list' ? params.account_id === evidence.contract ? 'access' : 'relayAccess'
       : ({ get_bet: 'bet', get_proposal: 'proposal', get_policy: 'policy' })[params.method_name];
     assert.ok(name, 'only known read-only calls');
-    return Response.json(responses[name]);
+    return Response.json({ ...responses[name], id: body.id });
   } };
 }
 

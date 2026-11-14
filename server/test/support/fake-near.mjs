@@ -17,7 +17,8 @@ const SIGNER_STORAGE = 1_820_000_000_000_000_000_000n;
 const callCost = (gas) => (gas + 5_000_000_000_000n) * GAS_PRICE + SIGNER_STORAGE;
 const RESOLUTION_WINDOW = 7n * DAY_NS;
 const RESPONSE_WINDOW = 2n * DAY_NS;
-const json = (value) => new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } });
+const json = (value) => new Response(JSON.stringify({ jsonrpc: '2.0', id: 'stated', ...value,
+  ...(value.error ? { error: { code: -32000, ...value.error } } : {}) }), { headers: { 'content-type': 'application/json' } });
 
 export class FakeNear {
   constructor({ contract = 'escrow.testnet', version = 2 } = {}) {
@@ -32,6 +33,8 @@ export class FakeNear {
     this.sent = [];
     this.faucetCalls = 0;
     this.keySeq = 0;
+    this.prepared = new Map();
+    this.broadcasts = new Map();
     // The wrapped-NEAR token contract: who is registered with it, and what each holds.
     this.wrapped = new Map();
     // Sputnik DAOs (v2 rules) by account: their policy and proposals.
@@ -88,6 +91,30 @@ export class FakeNear {
         if (this.daos.has(input.contractId)) return this.daoCall(input);
         return this.call(input);
       },
+      prepareCall: async (input) => {
+        const hash = baseEncode(randomBytes(32));
+        this.prepared.set(hash, input);
+        return { hash, signedTransaction: hash };
+      },
+      prepareRotation: async (input) => {
+        const hash = baseEncode(randomBytes(32));
+        this.prepared.set(hash, { rotation: input });
+        return { hash, signedTransaction: hash };
+      },
+      preparedFinalized: async ({ hash }) => this.txs.get(hash)?.final_execution_status === 'FINAL',
+      broadcastCall: async ({ signedTransaction }) => {
+        if (this.broadcasts.has(signedTransaction)) return this.broadcasts.get(signedTransaction);
+        const input = this.prepared.get(signedTransaction);
+        if (!input) throw new Error('Unknown prepared synthetic transaction');
+        const result = input.rotation ? await this.chain.rotateKey(input.rotation) : await this.chain.call(input);
+        const saved = { ...result, hash: signedTransaction };
+        const recorded = this.txs.get(result.hash);
+        if (recorded) this.txs.set(signedTransaction, { ...recorded,
+          transaction: { ...recorded.transaction, hash: signedTransaction } });
+        this.broadcasts.set(signedTransaction, saved);
+        return saved;
+      },
+      unwrapDelivery: async ({ transactionHash }) => this.broadcasts.get(transactionHash)?.ok === true,
       view: async ({ contractId, method, args }) => {
         if (this.daos.has(contractId)) return this.daoView(contractId, method, args || {});
         if (contractId !== network().wrap) throw new Error(`unsupported fake view ${contractId}.${method}`);

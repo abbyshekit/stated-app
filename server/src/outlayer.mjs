@@ -4,9 +4,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { isIP } from 'node:net';
 import { canonicalJson, fingerprint } from './canonical.mjs';
 import { checkPlan, decide, materialHash } from './enclave-ruling.mjs';
-import { nearChain, treasury, playAccountFor, secretOf, withManagedOperation } from './play.mjs';
+import { nearChain, treasury, playAccountFor, secretOf, reservePlaySigner, withAvailablePlaySigner, withManagedOperation } from './play.mjs';
 import { reserveNearRequest } from './near-request.mjs';
-import { rpc, walletPayload } from './near-escrow.mjs';
+import { walletPayload } from './near-escrow.mjs';
 import { verifyNearExecution } from './near-execution.mjs';
 import { syncNearBet } from './near-bets.mjs';
 import { UserError } from './store.mjs';
@@ -161,6 +161,19 @@ async function persistentCall(db, chain, bet, signer, method, args, deposit, gas
       and intent_key is not distinct from $6
       order by created_at desc,id desc limit 1`, [bet.id, signer.id, bet.referee_wallet, method, args, attemptKey]);
     if (previous && previous.execution_status !== 'failed' && !(repeat && previous.execution_status === 'succeeded')) return previous;
+    if (previous?.execution_status === 'failed' && previous.transaction_hash) {
+      // A downstream failure may follow a committed deposit. Failure alone
+      // never authorizes another signature, including legacy failed rows.
+      let safe = false;
+      try {
+        safe = previous.signed_transaction && typeof chain.preparedRetrySafe === 'function'
+          ? await chain.preparedRetrySafe({ transactionHash: previous.transaction_hash,
+            signedTransaction: previous.signed_transaction }, new TransactionExpiredError())
+          : Boolean(chain.requestRetrySafe && await chain.requestRetrySafe({
+            ...verificationRequest(previous), transaction_hash: previous.transaction_hash }));
+      } catch { /* retain the original intent until conclusive proof exists */ }
+      if (!safe) return previous;
+    }
     if (method === 'register_material' && registrationLimit !== null) {
       // A committed intent reserves its allowance before signing or broadcast.
       // Failed/ambiguous attempts retain the reservation; retries of the same
@@ -194,9 +207,11 @@ async function persistentCall(db, chain, bet, signer, method, args, deposit, gas
   if (!row.signed_transaction) {
     let prepared;
     try {
-      prepared = await chain.prepareCall({ signerId: signer.id, secret: signer.secret, contractId: bet.referee_wallet,
-        method, args, depositYocto: deposit, gas: BigInt(gas) });
+      prepared = await reservePlaySigner(db, chain, signer.id, `outlayer:${row.id}`, () => chain.prepareCall({
+        signerId: signer.id, secret: signer.secret, contractId: bet.referee_wallet,
+        method, args, depositYocto: deposit, gas: BigInt(gas) }), { outlayerId: row.id });
     } catch (error) {
+      if (error instanceof UserError && error.status === 409) throw error;
       await db.query(`update outlayer_near_requests set execution_status='failed',detail='Signing failed before broadcast',
         updated_at=clock_timestamp() where id=$1 and transaction_hash is null`, [row.id]);
       throw error;
@@ -209,18 +224,20 @@ async function persistentCall(db, chain, bet, signer, method, args, deposit, gas
   await db.query(`update outlayer_near_requests set broadcast_started_at=coalesce(broadcast_started_at,clock_timestamp()),
     updated_at=clock_timestamp() where id=$1`, [row.id]);
   try {
-    await chain.broadcastCall({ signedTransaction: row.signed_transaction });
+    await withAvailablePlaySigner(db, signer.id, () => chain.broadcastCall({ signedTransaction: row.signed_transaction }),
+      { chain, intentKey: `outlayer:${row.id}`, outlayerId: row.id });
   } catch (error) {
     if (!(error instanceof InvalidNonceError || error instanceof TransactionExpiredError)) throw error;
     const checked = await reconcileIntent(db, row, fetchImpl);
     if (checked.execution_status !== 'pending') return checked;
-    // A pending verification also covers outages. Retire unusable bytes only
-    // after a healthy RPC explicitly says the transaction is unknown.
+    // Historical lookup absence cannot distinguish nonexecution from a lost
+    // successful response. Require the saved signature's conclusive proof.
     try {
-      await rpc('tx', { tx_hash: row.transaction_hash, sender_account_id: signer.id, wait_until: 'FINAL' }, { fetchImpl });
-      return checked;
+      if (typeof chain.preparedRetrySafe !== 'function' || !await chain.preparedRetrySafe({
+        transactionHash: row.transaction_hash, signedTransaction: row.signed_transaction,
+      }, error)) return checked;
     } catch (lookupError) {
-      if (lookupError.rpcCause !== 'UNKNOWN_TRANSACTION') return checked;
+      return checked;
     }
     await db.query(`update outlayer_near_requests set execution_status='failed',detail='Signed transaction can no longer be included',
       updated_at=clock_timestamp() where id=$1 and execution_status='pending'`, [row.id]);
@@ -539,13 +556,14 @@ export async function outlayerEvidenceForBet(db, betId) {
     from bilateral_near_requests r join bilateral_bets b on b.id=r.bet_id
     where r.bet_id=$1 and r.method='submit_evidence' and r.execution_status='succeeded'
       and r.metadata->>'contract'=b.referee_wallet and r.wallet_account in (b.creator_wallet,b.acceptor_wallet)
-  ) submitted order by submitted.user_id,submitted.url,submitted.at`, [betId]);
+  ) submitted order by submitted.user_id,submitted.url,submitted.at limit 20`, [betId]);
 }
 
 export async function readOutlayerRuling(db, betId) {
   const row = await db.one(`select b.*,e.detail,e.at as recorded_at from bilateral_bets b
     join lateral (select detail,at from bilateral_bet_events where bet_id=b.id and kind='outlayer_ruling'
-      order by id desc limit 1) e on true where b.id=$1`, [betId]);
+      order by id desc limit 1) e on true where b.id=$1
+      and octet_length(e.detail::text)<=2097152 and octet_length(b.outlayer_material::text)<=32768`, [betId]);
   if (!row) return null;
   try {
     const material = boundMaterial(row);

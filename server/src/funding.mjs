@@ -5,7 +5,7 @@
 import { randomUUID } from 'node:crypto';
 import Decimal from 'decimal.js';
 import { network } from './near-network.mjs';
-import { inPilot, playAccountFor, secretOf, yocto } from './play.mjs';
+import { assertSignerAvailable, reservePlaySigner, withAvailablePlaySigner, inPilot, playAccountFor, secretOf, yocto } from './play.mjs';
 import { UserError } from './store.mjs';
 
 const D = Decimal.clone({ precision: 60 });
@@ -57,22 +57,33 @@ async function lockAccount(db, xUserId) {
   return db.one('select * from play_accounts where x_user_id = $1 for update', [String(xUserId)]);
 }
 
-async function callWrappedNear(config, chain, account, method, args, depositYocto) {
+async function wrappedCall(config, chain, account, method, args, depositYocto) {
   const secret = secretOf(config, account);
   const { balance, reserve } = await chain.callFunds(account.account_id, WRAP_CALL_GAS);
   if (balance < reserve + BigInt(depositYocto)) {
     throw new UserError('Add NEAR to this account to cover network fees.', 409);
   }
-  return chain.call({ signerId: account.account_id, secret, contractId: network().wrap,
-    method, args, depositYocto, gas: WRAP_CALL_GAS });
+  return { signerId: account.account_id, secret, contractId: network().wrap,
+    method, args, depositYocto, gas: WRAP_CALL_GAS };
 }
 
-export async function registerForWrapped(config, chain, account) {
+async function callWrappedNear(config, chain, account, method, args, depositYocto) {
+  return chain.call(await wrappedCall(config, chain, account, method, args, depositYocto));
+}
+
+export async function registerForWrapped(config, chain, account, db = null) {
+  if (db) await withAvailablePlaySigner(db, account.account_id, async () => {}, { chain, intentKey: 'wrapped-storage' });
   const wrap = network().wrap;
   const registered = await chain.view({ contractId: wrap, method: 'storage_balance_of', args: { account_id: account.account_id } });
   if (registered) return;
-  const sent = await callWrappedNear(config, chain, account, 'storage_deposit',
-    { account_id: account.account_id, registration_only: true }, WRAP_REGISTRATION_YOCTO);
+  const sent = db ? await chain.broadcastCall(await reservePlaySigner(db, chain, account.account_id, 'wrapped-storage',
+    async (_tx, current) => {
+      if (!current?.ready) throw new UserError('This account is no longer available.', 409);
+      return chain.prepareCall(await wrappedCall(config, chain, current, 'storage_deposit',
+        { account_id: account.account_id, registration_only: true }, WRAP_REGISTRATION_YOCTO));
+    }))
+    : await callWrappedNear(config, chain, account, 'storage_deposit',
+      { account_id: account.account_id, registration_only: true }, WRAP_REGISTRATION_YOCTO);
   if (!sent.ok) throw new UserError('This account could not be prepared to receive NEAR. It may be out of NEAR for network fees.', 409);
 }
 
@@ -83,10 +94,12 @@ export async function startDeposit(db, config, chain, intents, user, { assetId, 
   const token = (await intents.tokens()).find((t) => t.assetId === String(assetId || ''));
   if (!token) throw new UserError('Choose a token from the list.');
   const refund = refundAddress(refundTo, token);
+  await registerForWrapped(config, chain, await playAccountFor(db, user.x_user_id), db);
   return db.tx(async (tx) => {
     const account = await lockAccount(tx, user.x_user_id);
     // Ownership can change while the token list is loading or the lock is waiting.
     assertOpenAccount(config, user, account);
+    await assertSignerAvailable(tx, account.account_id, null, { chain });
     const same = await tx.one(`select * from play_deposits where x_user_id = $1 and origin_asset = $2 and near_yocto = $3 and refund_to = $4
       and finished_at is null and state = 'PENDING_DEPOSIT' and deadline > clock_timestamp()
       and created_at > clock_timestamp() - interval '2 minutes' order by created_at desc limit 1`,
@@ -97,7 +110,6 @@ export async function startDeposit(db, config, chain, intents, user, { assetId, 
       from play_deposits where x_user_id = $1`, [account.x_user_id]);
     if (counts.open >= OPEN_AT_ONCE) throw new UserError('You have payments still open. Finish those first, or wait for them to lapse.', 409);
     if (counts.today >= PER_DAY) throw new UserError('That is enough payments for one day. Try again tomorrow.', 429);
-    await registerForWrapped(config, chain, account);
     const made = await intents.deposit({ assetId: token.assetId, yocto: wanted, recipient: account.account_id, refundTo: refund });
     if (!made.ok) {
       if (made.reason === 'minimum') {
@@ -145,13 +157,75 @@ async function proveDelivery(chain, account, transactionHash, amountYocto) {
   return proof;
 }
 
+async function claimDelivery(tx, deposit, transactionHash, proof) {
+  // This claim survives lost broadcasts. One transaction can fund multiple
+  // recipients, but its net payment to one account belongs to one deposit.
+  await tx.query(`insert into play_deposit_deliveries(transaction_hash, account_id, deposit_id, amount_yocto)
+    values ($1, $2, $3, $4) on conflict do nothing`,
+  [transactionHash, deposit.account_id, deposit.id, proof.deliveredYocto]);
+  const claimed = await tx.one(`select deposit_id, amount_yocto from play_deposit_deliveries
+    where transaction_hash = $1 and account_id = $2`, [transactionHash, deposit.account_id]);
+  return String(claimed?.deposit_id) === String(deposit.id) && claimed.amount_yocto === proof.deliveredYocto;
+}
+
+async function reserveUnwrap(tx, deposit, hash) {
+  await tx.query('insert into play_unwrap_transactions(transaction_hash, deposit_id) values($1,$2) on conflict do nothing',
+    [hash, deposit.id]);
+  const owner = await tx.one('select deposit_id from play_unwrap_transactions where transaction_hash = $1', [hash]);
+  return String(owner?.deposit_id) === String(deposit.id);
+}
+
+async function completePreparedUnwrap(db, config, chain, row, now) {
+  if (!row?.unwrap_signed_transaction || row.finished_at) return row;
+  return db.tx(async (tx) => {
+    const account = await lockAccount(tx, row.x_user_id);
+    const fresh = await tx.one('select * from play_deposits where id = $1 and x_user_id = $2 for update', [row.id, String(row.x_user_id)]);
+    if (!fresh || fresh.finished_at || !fresh.unwrap_signed_transaction) return fresh;
+    if (account?.account_id !== fresh.account_id || account.claimed_at) return fresh;
+    if (fresh.unwrap_attempted_at && now - new Date(fresh.unwrap_attempted_at).getTime() < 4000) return fresh;
+    await tx.query('update play_deposits set unwrap_attempted_at = clock_timestamp(), checked_at = clock_timestamp() where id = $1', [fresh.id]);
+    if (!await reserveUnwrap(tx, fresh, fresh.unwrap_pending_tx)) {
+      // A legacy duplicate belongs to its recorded owner. Release this row's
+      // copy so it can prepare its own unwrap after the owner settles.
+      return tx.one('update play_deposits set unwrap_pending_tx = null, unwrap_signed_transaction = null where id = $1 returning *', [fresh.id]);
+    }
+    let delivered = false;
+    let rejection = null;
+    try {
+      const payment = { transactionHash: fresh.unwrap_pending_tx, accountId: fresh.account_id, amountYocto: fresh.near_yocto };
+      delivered = await chain.unwrapDelivery(payment);
+      if (!delivered) {
+        // The exact signed bytes committed above are the only permitted retry.
+        // Any failure or lost response leaves the reservation in place.
+        await chain.broadcastCall({ signedTransaction: fresh.unwrap_signed_transaction });
+        delivered = await chain.unwrapDelivery(payment);
+      }
+    } catch (error) { rejection = error; }
+    if (!delivered) {
+      // A proven root rollback, or never-executed bytes beyond finalized
+      // expiry, permits replacement. Ambiguous outcomes retain their bytes.
+      try {
+        if (typeof chain.unwrapRetrySafe === 'function' && await chain.unwrapRetrySafe({
+          signedTransaction: fresh.unwrap_signed_transaction, transactionHash: fresh.unwrap_pending_tx,
+        }, rejection)) {
+          return tx.one('update play_deposits set unwrap_pending_tx = null, unwrap_signed_transaction = null where id = $1 returning *', [fresh.id]);
+        }
+      } catch { /* keep the reservation until its outcome is known */ }
+      return fresh;
+    }
+    return tx.one(`update play_deposits set unwrap_tx = unwrap_pending_tx, finished_at = clock_timestamp(),
+      checked_at = clock_timestamp() where id = $1 and finished_at is null returning *`, [fresh.id]);
+  });
+}
+
 /** Refreshes under the account lock and reloads the row, never trusting a worker's old snapshot. */
 export async function refreshDeposit(db, config, chain, intents, row, { now = Date.now() } = {}) {
-  return db.tx(async (tx) => {
+  const updated = await db.tx(async (tx) => {
     const account = await lockAccount(tx, row.x_user_id);
     const fresh = await tx.one('select * from play_deposits where id = $1 and x_user_id = $2 for update', [row.id, String(row.x_user_id)]);
     if (!fresh) return null;
     if (fresh.finished_at) return fresh;
+    if (fresh.unwrap_signed_transaction) return fresh;
     if (fresh.checked_at && now - new Date(fresh.checked_at).getTime() < 4000) return fresh;
     const found = await intents.status({ depositAddress: fresh.deposit_address, depositMemo: fresh.deposit_memo });
     if (!found.ok && fresh.state !== 'SUCCESS') {
@@ -171,14 +245,29 @@ export async function refreshDeposit(db, config, chain, intents, row, { now = Da
       done = Boolean(unwrapTx);
       if (!done && account?.account_id === fresh.account_id) {
         try {
-          const proof = await proveDelivery(chain, account, details.destinationTx || fresh.destination_tx,
-            details.deliveredYocto ?? fresh.delivered_yocto ?? fresh.near_yocto);
-          if (proof?.kind === 'native') done = true;
-          if (proof?.kind === 'wrapped' && !account.claimed_at) {
+          const destinationTx = fresh.destination_tx || details.destinationTx;
+          // EXACT_OUTPUT fixes the promised output in the stored request. A
+          // provider's later status amount cannot replace it.
+          const amount = details.deliveredYocto ?? fresh.delivered_yocto ?? fresh.near_yocto;
+          const proof = positiveYocto(amount) && BigInt(amount) === BigInt(fresh.near_yocto)
+            ? await proveDelivery(chain, account, destinationTx, fresh.near_yocto) : null;
+          const claimed = proof && await claimDelivery(tx, fresh, destinationTx, proof);
+          if (claimed && proof.kind === 'native') done = true;
+          if (claimed && proof.kind === 'wrapped' && !account.claimed_at) {
             // Unwrap only this payment: sweeping the balance could leave a
             // second, independently delivered payment with no unwrap proof.
-            unwrapTx = await withdrawWrapped(config, chain, account, proof.deliveredYocto);
-            done = Boolean(unwrapTx);
+            if (typeof chain.prepareCall !== 'function' || typeof chain.broadcastCall !== 'function'
+              || typeof chain.unwrapDelivery !== 'function') throw new Error('Resumable unwrapping is unavailable');
+            await assertSignerAvailable(tx, account.account_id, fresh.id, { chain });
+            const held = await chain.view({ contractId: network().wrap, method: 'ft_balance_of', args: { account_id: account.account_id } });
+            if (positiveYocto(held) && BigInt(held) >= BigInt(proof.deliveredYocto)) {
+              const prepared = await chain.prepareCall(await wrappedCall(config, chain, account, 'near_withdraw',
+                { amount: proof.deliveredYocto }, '1'));
+              if (!prepared.hash || !prepared.signedTransaction
+                || !await reserveUnwrap(tx, fresh, prepared.hash)) throw new Error('Invalid prepared unwrap ownership');
+              await tx.query(`update play_deposits set unwrap_pending_tx = $2, unwrap_signed_transaction = $3
+                where id = $1 and unwrap_pending_tx is null`, [fresh.id, prepared.hash, prepared.signedTransaction]);
+            }
           }
         } catch { /* local delivery or unwrapping is not yet established; retry */ }
       }
@@ -189,12 +278,14 @@ export async function refreshDeposit(db, config, chain, intents, row, { now = Da
       where id = $1 and finished_at is null returning *`,
     [fresh.id, state, details.deliveredYocto, details.destinationTx, unwrapTx, details.refunded, details.refundReason, done]);
   });
+  return completePreparedUnwrap(db, config, chain, updated, now);
 }
 
 export async function refreshOpenDeposits(db, config, chain, intents) {
   if (!fundingOn(config)) return 0;
   const rows = await db.many(`select * from play_deposits where finished_at is null
-    and (checked_at is null or checked_at < clock_timestamp() - interval '20 seconds') order by created_at limit 20`);
+    and (checked_at is null or checked_at < clock_timestamp() - interval '20 seconds')
+    order by checked_at asc nulls first, created_at, id limit 20`);
   for (const row of rows) await refreshDeposit(db, config, chain, intents, row);
   return rows.length;
 }

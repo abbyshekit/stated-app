@@ -7,7 +7,7 @@ import { after, before, beforeEach, test } from 'node:test';
 import { createBet } from '../src/bets.mjs';
 import {
   consentToPublicBet, followPublicBet, followsFor, publicBet,
-  publishBet, recentPublicBets, withdrawBetPublication, publicBetHall,
+  publishBet, recentPublicBets, withdrawBetPublication, publicBetHall, publicBetsForProfile,
 } from '../src/bet-public.mjs';
 import { completeSetup, signInFromX } from '../src/store.mjs';
 import { startStack } from './support/app.mjs';
@@ -137,7 +137,87 @@ test('home renders without a hall when no Bet is published', async () => {
   const page = await s.browser().get('/');
   assert.equal(page.status, 200);
   assert.doesNotMatch(page.text, / settled, [0-9.]+ test NEAR won/);
-  assert.deepEqual(await publicBetHall(s.db), { rows: [], total: 0, settled: 0, paidYocto: '0', wonYocto: '0' });
+  assert.deepEqual(await publicBetHall(s.db), { rows: [], total: 0, settled: 0, paidYocto: '0', wonYocto: '0', hasOpen: false, next: null });
+});
+
+test('large public halls and profiles page without losing verified bets or changing global totals', async () => {
+  const published = [];
+  for (let i = 0; i < 85; i += 1) {
+    const bet = await makeBet();
+    await s.db.query("update bilateral_bets set created_at=created_at-interval '2 hours' where id=$1", [bet.id]);
+    await storeFinalizedSnapshot(bet);
+    await publishBet(s.db, creator, bet.id);
+    published.push(bet.id);
+  }
+  const seen = new Set();
+  let before = null;
+  do {
+    const page = await publicBetHall(s.db, { before });
+    assert.equal(page.total, published.length);
+    assert.equal(page.settled, 0);
+    assert.equal(page.wonYocto, '0');
+    assert.ok(page.rows.length <= 40);
+    for (const row of page.rows) { assert.equal(seen.has(row.id), false); seen.add(row.id); }
+    before = page.next;
+  } while (before);
+  assert.deepEqual(seen, new Set(published));
+  const profile = new Set();
+  do {
+    const page = await publicBetsForProfile(s.db, creator.x_username, { before });
+    assert.ok(page.rows.length <= 24);
+    for (const row of page.rows) { assert.equal(profile.has(row.id), false); profile.add(row.id); }
+    before = page.next;
+  } while (before);
+  assert.deepEqual(profile, new Set(published));
+  const html = await s.browser().get('/');
+  assert.equal(html.status, 200);
+  assert.match(html.text, /href="\/\?betsBefore=[^"]+"[^>]*>More bets/);
+  assert.ok((html.text.match(/class="prow note"/g) || []).length <= 40);
+  await withdrawBetPublication(s.db, creator, published[0]);
+  assert.equal((await publicBetHall(s.db)).total, published.length - 1);
+});
+
+test('public list predicates reject numeric JSON that the snapshot projection rejects', async () => {
+  const bet = await makeBet();
+  await storeFinalizedSnapshot(bet, { status: 'settled', acceptor: 'joiner.testnet' });
+  await publishBet(s.db, creator, bet.id);
+  const original = await s.db.one('select chain_state,creator_wallet,acceptor_wallet,terms_hash from bilateral_bets where id=$1', [bet.id]);
+  const implicit = '9'.repeat(64);
+  const otherImplicit = '8'.repeat(64);
+  const numericallyTyped = [
+    ['creator', implicit],
+    ['acceptor', otherImplicit],
+    ['creator_binding_hash', '9'.repeat(64)],
+    ['acceptor_binding_hash', '9'.repeat(64)],
+    ['stake_yocto', bet.stake_yocto],
+    ['accept_by_ns', ns(bet.accept_by)],
+    ['resolve_at_ns', ns(bet.resolve_at)],
+    ['terms_hash', '9'.repeat(64)],
+    ['proposal,proposer', implicit],
+    ['proposal,revision', '18446744073709551615'],
+  ];
+  for (const [path, value] of numericallyTyped) {
+    const chain = { ...original.chain_state, creator: implicit, acceptor: otherImplicit, terms_hash: implicit,
+      creator_binding_hash: implicit, acceptor_binding_hash: implicit,
+      proposal: { ...original.chain_state.proposal, proposer: implicit } };
+    await s.db.query(`update bilateral_near_requests set wallet_account=$2,binding_hash=$3 where bet_id=$1 and method='create_bet'`, [bet.id, implicit, implicit]);
+    await s.db.query(`update bilateral_bets set creator_wallet=$2,acceptor_wallet=$6,terms_hash=$2,
+      chain_state=jsonb_set($3::jsonb,$4::text[],$5::jsonb) where id=$1`,
+    [bet.id, implicit, chain, path.split(','), value, otherImplicit]);
+    assert.equal((await publicBet(s.db, bet.id)).funded, false, path);
+    assert.equal((await publicBetHall(s.db)).total, 0, path);
+    assert.deepEqual((await publicBetsForProfile(s.db, creator.x_username)).rows, [], path);
+  }
+  for (const revision of [1, 9007199254740991, '18446744073709551615']) {
+    const chain = { ...original.chain_state, creator: implicit, acceptor: otherImplicit, terms_hash: implicit,
+      creator_binding_hash: implicit, proposal: { ...original.chain_state.proposal, proposer: implicit, revision } };
+    await s.db.query('update bilateral_bets set chain_state=$2 where id=$1', [bet.id, chain]);
+    assert.equal((await publicBet(s.db, bet.id)).funded, true, String(revision));
+    assert.equal((await publicBetHall(s.db)).total, 1, String(revision));
+  }
+  await s.db.query(`update bilateral_bets set chain_state=jsonb_set(chain_state,'{proposal,revision}','1.0'::jsonb) where id=$1`, [bet.id]);
+  assert.equal((await publicBet(s.db, bet.id)).funded, true, 'legacy integer-valued JSON decimals');
+  assert.equal((await publicBetHall(s.db)).total, 1, 'legacy integer-valued JSON decimals');
 });
 
 test('unfunded and wrong-creator bets cannot be published', async () => {

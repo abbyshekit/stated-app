@@ -93,7 +93,7 @@ function fake(s) {
         result = s.tx;
       }
     }
-    return Response.json({ result });
+    return Response.json({ jsonrpc: '2.0', id: 'stated', result });
   };
 }
 
