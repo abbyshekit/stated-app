@@ -12,11 +12,17 @@ import { outlayerTestFetch } from './support/outlayer-fetch.mjs';
 // Public X API lookup captured 14 November 2026. Keep actual shortened tokens and entities.
 const actual = JSON.parse(readFileSync(new URL('./fixtures/x-public-claim-20261114.json', import.meta.url), 'utf8'));
 const sourceUrl = 'https://www.iana.org/domains/reserved';
-const expectedClaim = 'Controlled Stated product test: IANA reserved-domains page will list https://example.com at 21:00 UTC on 14 November 2026. Source: ' + sourceUrl;
-const now = Date.parse('2026-11-14T19:00:00.000Z');
+// PostgreSQL uses its real clock. Move only cloned dates into the future, keeping URL entities intact.
+const moduleNow = Date.now();
+const deadline = new Date(moduleNow + 2 * 86400_000);
+deadline.setUTCHours(21, 0, 0, 0);
+const deadlineDateText = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'UTC', day: '2-digit', month: 'long', year: 'numeric',
+}).format(deadline);
+const expectedClaim = `Controlled Stated product test: IANA reserved-domains page will list https://example.com at 21:00 UTC on ${deadlineDateText}. Source: ${sourceUrl}`;
 
 async function controlledStack(t) {
-  t.mock.timers.enable({ apis: ['Date'], now });
+  t.mock.timers.enable({ apis: ['Date'], now: moduleNow });
   const near = new FakeOutLayerNear({ contract: 'escrow.stated.near', referee: 'jury.stated.near' });
   Object.assign(near.outlayers.get(near.referee).config, { outlayer: 'outlayer.near', secrets_owner: 'sponsor.near' });
   const ai = fakeNearAi({ respond: () => ({ source: 'evidence' }) });
@@ -32,6 +38,10 @@ async function controlledStack(t) {
   const bot = stack.fakeX.addUser('2119638363397292032', 'statedforecast');
   const author = stack.fakeX.addUser(actual.includes.users[0].id, actual.includes.users[0].username);
   const [prediction, mention] = structuredClone(actual.data);
+  prediction.created_at = new Date(moduleNow - 5 * 60_000).toISOString();
+  mention.created_at = new Date(moduleNow - 4 * 60_000).toISOString();
+  prediction.text = prediction.text.replace('14 November 2026', deadlineDateText);
+  mention.text = mention.text.replace('14 November 2026', deadlineDateText);
   stack.fakeX.posts.set(prediction.id, prediction); stack.fakeX.posts.set(mention.id, mention);
   return { stack, near, fetchImpl, bot, author, prediction, mention };
 }
