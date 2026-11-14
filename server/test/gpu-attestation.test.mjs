@@ -189,6 +189,38 @@ test('completion preflight checks GPU evidence before inference and stores the s
   assert.equal(aiFailed.seen.completion, 0, 'inference is blocked when GPU preflight fails');
 });
 
+test('completion verifies every replica GPU payload and attaches the first matching evidence', async () => {
+  const ai = fakeNearAi({ respond: () => ({ agrees: true, reason: 'Evidence agrees.' }) });
+  let rejectReplica = false;
+  const checked = [];
+  const fetchImpl = async (url, options) => {
+    if (String(url).endsWith('/jwks.json')) return Response.json(jwks);
+    if (String(url) === `${NRAS}/v3/attest/gpu`) {
+      const payload = JSON.parse(options.body);
+      checked.push(payload.replica);
+      return Response.json([['JWT', token(claimsFor({ eat_nonce: payload.nonce, replica: payload.replica,
+        'x-nvidia-overall-att-result': !(rejectReplica && payload.replica === 1) }))]]);
+    }
+    const response = await ai.fetchImpl(url, options);
+    if (!String(url).includes('/attestation/report?')) return response;
+    const report = await response.json();
+    report.model_attestations.push(structuredClone(report.model_attestations[0]));
+    report.model_attestations.forEach((candidate, replica) => {
+      candidate.nvidia_payload = JSON.stringify({ nonce: candidate.request_nonce, evidence_list: [], replica });
+    });
+    return Response.json(report);
+  };
+  const config = { nearai: { baseUrl: NEARAI_BASE, apiKey: 'test-only', model: 'near/juror-a', requireGpu: true } };
+  const options = { fetchImpl, system: 'test', input: '{}', parse: JSON.parse };
+  const record = await attestedCompletion(config, options);
+  assert.deepEqual(checked, [0, 1]);
+  assert.equal(verifyGpuJwt(record.gpu.jwt, { jwks }).claims.replica, 0);
+  rejectReplica = true;
+  await assert.rejects(attestedCompletion(config, options), /verdict is not true/);
+  assert.deepEqual(checked, [0, 1, 0, 1]);
+  assert.equal(ai.seen.completion, 1, 'a failing matching replica blocks inference');
+});
+
 test('completion retains legacy shape when no GPU evidence is returned', async () => {
   const ai = fakeNearAi({ respond: () => ({ agrees: true, reason: 'Evidence agrees.' }) });
   const config = { nearai: { baseUrl: NEARAI_BASE, apiKey: 'test-only', model: 'near/juror-a' } };

@@ -11,8 +11,8 @@ test('runs every live verification with exact arguments after an offline incompl
   assert.equal(result.exitCode, 0);
   assert.deepEqual(calls.map(([bin, args, options]) => [bin, args, options.cwd, options.stdio]), [
     [process.execPath, ['scripts/verify-enclave-ruling.mjs', '--offline', 'evidence/enclave-ruling-3668aa04.json'], calls[0][2].cwd, 'inherit'],
-    [process.execPath, ['scripts/verify-enclave-ruling.mjs'], calls[1][2].cwd, 'inherit'],
-    [process.execPath, ['scripts/verify-hosted-payout.mjs', 'evidence/hosted-court-payout-testnet-20261112.json'], calls[2][2].cwd, 'inherit'],
+    [process.execPath, ['scripts/verify-enclave-ruling.mjs', 'https://stated-production.up.railway.app', '0bf4f3a7-8dfc-44e2-a139-1e33ce844178'], calls[1][2].cwd, 'inherit'],
+    [process.execPath, ['scripts/verify-hosted-payout.mjs', 'evidence/hosted-demo-payout-testnet-20261113.json'], calls[2][2].cwd, 'inherit'],
   ]);
   assert.equal(lines.length, 4);
   assert.match(lines[0], /EXPECTED INCOMPLETE/);

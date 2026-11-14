@@ -82,7 +82,7 @@ export async function attestedCompletion(config, { model = config.nearai.model, 
     responseHash: sha256(responseBytes), completionId: response.id, signature, attestation, nonce, verdict,
     startedAt, attestedAt, completedAt: new Date().toISOString() };
   verifyAttestedRecord(record, checkContent ? { checkContent, roots } : { roots });
-  // The response signer must uniquely match a retained, verified preflight report.
+  // Every matching replica quote and supplied GPU payload has verified; attach the first match's evidence.
   const normalized = value => String(value).replace(/^0x/i, '').toLowerCase();
   const signingCandidate = attestation.model_attestations.find(candidate =>
     candidate.signing_algo === signature.signing_algo
