@@ -4,7 +4,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { isIP } from 'node:net';
 import { canonicalJson, fingerprint } from './canonical.mjs';
 import { checkPlan, decide, materialHash } from './enclave-ruling.mjs';
-import { nearChain, treasury, playAccountFor, secretOf, reservePlaySigner, withAvailablePlaySigner, withManagedOperation } from './play.mjs';
+import { nearChain, treasury, playAccountFor, secretOf, reservePlaySigner, withAvailablePlaySigner, withManagedOperation, assertSignerAvailable } from './play.mjs';
+import { assertTreasuryCreationAvailable, assertTreasuryLiquidity, assertTreasurySpendFunds, rememberTreasurySpend, reconcileTreasurySpends, OUTLAYER_CLEANUP_COMPLETE_SQL } from './treasury-liquidity.mjs';
 import { reserveNearRequest } from './near-request.mjs';
 import { walletPayload } from './near-escrow.mjs';
 import { verifyNearExecution } from './near-execution.mjs';
@@ -24,11 +25,11 @@ const iso = value => new Date(value).toISOString();
 const fail = message => { throw new UserError(message, 409); };
 
 async function sponsor(db, config, chain) {
-  if (config.play?.enabled) return treasury(db, config, chain);
+  if (config.play?.enabled) return { ...await treasury(db, config, chain), real: Boolean(config.near?.real) };
   if (!isNamedAccount(config.play?.treasury || '') || !config.play?.treasuryKey) {
     throw new Error('OutLayer requires STATED_PLAY_TREASURY and STATED_PLAY_TREASURY_KEY for storage and keeper gas.');
   }
-  return { id: config.play.treasury, secret: config.play.treasuryKey };
+  return { id: config.play.treasury, secret: config.play.treasuryKey, real: Boolean(config.near?.real) };
 }
 
 export function supportsOpenEvidence(configView) {
@@ -130,7 +131,10 @@ function verificationRequest(row) {
     metadata: { contract: row.contract_account, depositYocto: row.deposit_yocto, gas: row.gas } };
 }
 
-async function reconcileIntent(db, row, fetchImpl) {
+async function reconcileIntent(db, row, fetchImpl, { chain, bankId } = {}) {
+  if (chain && bankId && bankId === row.signer_account && row.signed_transaction) {
+    await rememberTreasurySpend(db, bankId, { hash: row.transaction_hash, signedTransaction: row.signed_transaction });
+  }
   const checked = await verifyNearExecution(verificationRequest(row), row.transaction_hash, { fetchImpl });
   await db.query(`update outlayer_near_requests set execution_status=$2,detail=$3,updated_at=clock_timestamp()
     where id=$1 and transaction_hash=$4`, [row.id, checked.status, checked.explanation, row.transaction_hash]);
@@ -154,6 +158,14 @@ async function persistentCall(db, chain, bet, signer, method, args, deposit, gas
     try { return await persistentCall(db, chain, bet, signer, method, args, deposit, gas, fetchImpl, { repeat, attemptKey, signerLocked: true, registrationLimit, rulingDailyLimit }); }
     finally { await db.query('select pg_advisory_unlock(hashtextextended($1, 0))', [lockKey]); }
   }
+  if (signer.real) await assertTreasuryCreationAvailable(db, chain, signer.id);
+  const spend = async row => {
+    if (signer.real && row.signed_transaction) {
+      await rememberTreasurySpend(db, signer.id, { hash: row.transaction_hash, signedTransaction: row.signed_transaction });
+      await reconcileTreasurySpends(db, chain, signer.id, { strict: false });
+    }
+    return row;
+  };
   let row = await db.tx(async tx => {
     await tx.one('select id from bilateral_bets where id=$1 for update', [bet.id]);
     const previous = await tx.one(`select * from outlayer_near_requests where bet_id=$1
@@ -173,6 +185,12 @@ async function persistentCall(db, chain, bet, signer, method, args, deposit, gas
             ...verificationRequest(previous), transaction_hash: previous.transaction_hash }));
       } catch { /* retain the original intent until conclusive proof exists */ }
       if (!safe) return previous;
+    }
+    if (signer.real && method === 'register_material') {
+      await assertSignerAvailable(tx, signer.id, null, { chain });
+      await assertTreasuryLiquidity(tx, chain, signer.id, { spend: deposit, gas, excludeBetId: bet.id });
+    } else if (signer.real) {
+      await assertTreasurySpendFunds(tx, chain, signer.id, deposit, gas);
     }
     if (method === 'register_material' && registrationLimit !== null) {
       // A committed intent reserves its allowance before signing or broadcast.
@@ -202,8 +220,9 @@ async function persistentCall(db, chain, bet, signer, method, args, deposit, gas
       values($1,$2,$3,$4,$5,$6,$7,$8,$9) returning *`,
     [randomUUID(), bet.id, signer.id, bet.referee_wallet, method, args, deposit, gas, attemptKey]);
   });
+  await spend(row);
   if (row.transaction_hash && !['succeeded', 'failed'].includes(row.execution_status)) row = await reconcileIntent(db, row, fetchImpl);
-  if (['succeeded','failed'].includes(row.execution_status)) return row;
+  if (['succeeded','failed'].includes(row.execution_status)) return spend(row);
   if (!row.signed_transaction) {
     let prepared;
     try {
@@ -221,6 +240,7 @@ async function persistentCall(db, chain, bet, signer, method, args, deposit, gas
     [row.id, prepared.hash, prepared.signedTransaction]);
     if (!row) throw new Error('The OutLayer signing intent changed before broadcast.');
   }
+  await spend(row);
   await db.query(`update outlayer_near_requests set broadcast_started_at=coalesce(broadcast_started_at,clock_timestamp()),
     updated_at=clock_timestamp() where id=$1`, [row.id]);
   try {
@@ -229,21 +249,21 @@ async function persistentCall(db, chain, bet, signer, method, args, deposit, gas
   } catch (error) {
     if (!(error instanceof InvalidNonceError || error instanceof TransactionExpiredError)) throw error;
     const checked = await reconcileIntent(db, row, fetchImpl);
-    if (checked.execution_status !== 'pending') return checked;
+    if (checked.execution_status !== 'pending') return spend(checked);
     // Historical lookup absence cannot distinguish nonexecution from a lost
     // successful response. Require the saved signature's conclusive proof.
     try {
       if (typeof chain.preparedRetrySafe !== 'function' || !await chain.preparedRetrySafe({
         transactionHash: row.transaction_hash, signedTransaction: row.signed_transaction,
-      }, error)) return checked;
+      }, error)) return spend(checked);
     } catch (lookupError) {
-      return checked;
+      return spend(checked);
     }
     await db.query(`update outlayer_near_requests set execution_status='failed',detail='Signed transaction can no longer be included',
       updated_at=clock_timestamp() where id=$1 and execution_status='pending'`, [row.id]);
-    return { ...row, execution_status: 'failed' };
+    return spend({ ...row, execution_status: 'failed' });
   }
-  return reconcileIntent(db, row, fetchImpl);
+  return spend(await reconcileIntent(db, row, fetchImpl));
 }
 
 async function computePause(db, bet, ruling, budget, now, lastRequestAt) {
@@ -283,12 +303,13 @@ async function computePause(db, bet, ruling, budget, now, lastRequestAt) {
   return pause.detail;
 }
 
-async function observedRegistration(db, bet, ruling, fetchImpl) {
+async function observedRegistration(db, config, chain, bet, ruling, fetchImpl) {
   validateRuling(bet, ruling);
   const pending = await db.many(`select * from outlayer_near_requests where bet_id=$1 and contract_account=$2
     and method='register_material' and execution_status='pending' and transaction_hash is not null
     order by created_at,id limit 5`, [bet.id, bet.referee_wallet]);
-  for (const request of pending) await reconcileIntent(db, request, fetchImpl);
+  for (const request of pending) await reconcileIntent(db, request, fetchImpl,
+    { chain, bankId: config.near?.real ? config.play?.treasury : null });
   return ruling;
 }
 
@@ -297,7 +318,7 @@ export async function ensureOutlayerRegistration(db, config, chain, bet, { fetch
   const configView = await liveConfig(chain, config, bet);
   let ruling = await chain.view({ contractId: bet.referee_wallet, method: 'get_ruling', args: { bet_id: bet.id } });
   if (ruling) {
-    await observedRegistration(db, bet, ruling, fetchImpl);
+    await observedRegistration(db, config, chain, bet, ruling, fetchImpl);
     await snapshot(db, bet, configView, ruling);
     return ruling;
   }
@@ -315,7 +336,7 @@ export async function ensureOutlayerRegistration(db, config, chain, bet, { fetch
   const request = await persistentCall(db, chain, bet, signer, 'register_material', { material, salt: bet.terms_salt }, deposit, GAS, fetchImpl, { registrationLimit });
   ruling = await chain.view({ contractId: bet.referee_wallet, method: 'get_ruling', args: { bet_id: bet.id } });
   if (ruling) {
-    await observedRegistration(db, bet, ruling, fetchImpl);
+    await observedRegistration(db, config, chain, bet, ruling, fetchImpl);
     await snapshot(db, bet, configView, ruling);
     return ruling;
   }
@@ -336,7 +357,7 @@ async function snapshot(db, bet, configView, ruling, { escrowTerminal = false } 
   });
 }
 
-async function recordSettlement(db, bet, ruling, fetchImpl) {
+async function recordSettlement(db, bet, ruling, fetchImpl, treasuryProof = {}) {
   if (bet.status !== 'settled' || bet.chain_state?.resolution?.method !== 'referee' || ruling.stage !== 'settled'
     || bet.outcome !== ruling.outcome) return;
   validateRuling(bet, ruling);
@@ -349,13 +370,13 @@ async function recordSettlement(db, bet, ruling, fetchImpl) {
   let request = exact ? await db.one(`select * from outlayer_near_requests where bet_id=$1 and contract_account=$2
     and method='request_ruling' and transaction_hash is not null and execution_status<>'failed' and intent_key=$3
     order by created_at desc,id desc limit 1`, [bet.id, bet.referee_wallet, String(BigInt(acceptedNonce) - 1n)]) : null;
-  if (request?.execution_status === 'pending') request = await reconcileIntent(db, request, fetchImpl);
+  if (request?.execution_status === 'pending') request = await reconcileIntent(db, request, fetchImpl, treasuryProof);
   if (request?.execution_status !== 'succeeded') {
     exact = false;
     request = await db.one(`select * from outlayer_near_requests where bet_id=$1 and contract_account=$2
       and method='request_ruling' and transaction_hash is not null and execution_status<>'failed'
       order by created_at desc,id desc limit 1`, [bet.id, bet.referee_wallet]);
-    if (request?.execution_status === 'pending') request = await reconcileIntent(db, request, fetchImpl);
+    if (request?.execution_status === 'pending') request = await reconcileIntent(db, request, fetchImpl, treasuryProof);
     if (request?.execution_status !== 'succeeded') request = await db.one(`select * from outlayer_near_requests
       where bet_id=$1 and contract_account=$2 and method='request_ruling'
       and transaction_hash is not null and execution_status='succeeded'
@@ -383,9 +404,7 @@ export async function runOutlayerKeeper(db, config, { chain, fetchImpl = fetch, 
   const bets = await db.many(`select * from bilateral_bets where outlayer_material is not null
     and referee_wallet is not null and chain_state is not null
     and (status in ('offered','accepted','proposed','disputed') or (status in ('settled','refunded')
-      and not coalesce((select (e.detail->>'escrow_terminal')::boolean
-        and (e.detail->'ruling'='null'::jsonb or coalesce(e.detail->'ruling'->>'stage','idle')='settled') from bilateral_bet_events e
-        where e.bet_id=bilateral_bets.id and e.kind='outlayer_ruling' order by e.id desc limit 1),false))
+      and not ${OUTLAYER_CLEANUP_COMPLETE_SQL})
       or (status='settled' and chain_state->'resolution'->>'method'='referee'
         and outcome=(select e.detail->'ruling'->>'outcome' from bilateral_bet_events e
           where e.bet_id=bilateral_bets.id and e.kind='outlayer_ruling' order by e.id desc limit 1)
@@ -410,7 +429,7 @@ export async function runOutlayerKeeper(db, config, { chain, fetchImpl = fetch, 
       if (escrowTerminal) {
         ruling = await chain.view({ contractId: bet.referee_wallet, method: 'get_ruling', args: { bet_id: bet.id } });
         await snapshot(db, bet, configView, ruling, { escrowTerminal });
-        if (ruling) await recordSettlement(db, bet, ruling, fetchImpl);
+        if (ruling) await recordSettlement(db, bet, ruling, fetchImpl, { chain, bankId: config.near?.real ? config.play?.treasury : null });
       } else if (!ACTIVE.includes(bet.status)) {
         results.push({ betId: bet.id, status: bet.status });
         continue;
@@ -462,7 +481,7 @@ export async function runOutlayerKeeper(db, config, { chain, fetchImpl = fetch, 
         validateRuling(bet, ruling);
         await snapshot(db, bet, configView, ruling, { escrowTerminal });
         bet = await syncNearBet(db, config, user, bet.id, { fetchImpl, chain, skipOutlayerRegistration: true });
-        await recordSettlement(db, bet, ruling, fetchImpl);
+        await recordSettlement(db, bet, ruling, fetchImpl, { chain, bankId: config.near?.real ? config.play?.treasury : null });
       }
       results.push({ betId: bet.id, status: bet.status, stage: ruling.stage, outcome: ruling.outcome });
     } catch (error) { results.push({ betId: bet.id, status: 'error', error: error.message }); }

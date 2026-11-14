@@ -9,14 +9,16 @@ import { checkPlan, decide, materialHash } from '../src/enclave-ruling.mjs';
 import { UserError } from '../src/store.mjs';
 import { makeOutlayerMaterial } from '../src/outlayer.mjs';
 import { loadConfig } from '../src/config.mjs';
-import { reservePlaySigner, withAvailablePlaySigner } from '../src/play.mjs';
+import { reservePlaySigner, withAvailablePlaySigner, assertSignerAvailable } from '../src/play.mjs';
+import { assertTreasuryCreationAvailable, assertTreasuryLiquidity, assertTreasurySpendFunds, rememberTreasurySpend, reconcileTreasurySpends, OUTLAYER_CLEANUP_COMPLETE_SQL } from '../src/treasury-liquidity.mjs';
 
 // Exercise the production module with only transport/database boundaries replaced.
 async function sourceModule(dependencies = {}, names = []) {
   const source = await readFile(new URL('../src/outlayer.mjs', import.meta.url), 'utf8');
   const body = source.replace(/^import .*?;\n/gm, '').replace(/^export \{.*?\};\n/gm, '').replace(/^export /gm, '');
   const deps = { createHash, randomUUID, isIP, canonicalJson, fingerprint, checkPlan, decide, materialHash, reservePlaySigner, withAvailablePlaySigner,
-    UserError, InvalidNonceError, TransactionExpiredError, isNamedAccount: () => true, ...dependencies };
+    UserError, InvalidNonceError, TransactionExpiredError, assertSignerAvailable,
+    assertTreasuryCreationAvailable, assertTreasuryLiquidity, assertTreasurySpendFunds, rememberTreasurySpend, reconcileTreasurySpends, OUTLAYER_CLEANUP_COMPLETE_SQL, isNamedAccount: () => true, ...dependencies };
   return new Function(...Object.keys(deps), `${body}\nreturn {${names.join(',')}};`)(...Object.values(deps));
 }
 
@@ -75,6 +77,7 @@ async function registrationFixture({ stake = '100000000000000000000000', config 
   const rows = []; const events = []; const calls = []; const locks = [];
   const db = { tx: async fn => fn(db), many: async () => [],
     one: async (sql, args = []) => {
+      if (/select value from kv|select signer_intent from play_accounts|select id from play_deposits|select id from bilateral_near_requests|select id from outlayer_near_requests/.test(sql)) return null;
       if (sql === 'select * from play_accounts where account_id = $1 for update') return null;
       if (/pg_try_advisory_lock/.test(sql)) return { locked: true };
       if (/pg_advisory_xact_lock/.test(sql)) { locks.push(args[0]); return {}; }
@@ -94,7 +97,8 @@ async function registrationFixture({ stake = '100000000000000000000000', config 
       if (/insert into bilateral_bet_events/.test(sql)) events.push(args[2]);
       return { rowCount: 1 };
     } };
-  const chain = { view: async ({ method }) => method === 'get_config' ? { escrow: 'escrow.near', supports_open_evidence: true }
+  const chain = { callFunds: async () => ({ balance: 10n ** 25n, reserve: 10n ** 23n }),
+    view: async ({ method }) => method === 'get_config' ? { escrow: 'escrow.near', supports_open_evidence: true }
     : registered ? ruling : null,
   prepareCall: async input => { calls.push(input); return { hash: `hash${calls.length}`, signedTransaction: 'synthetic' }; },
   broadcastCall: async () => { registered = true; } };

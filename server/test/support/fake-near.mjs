@@ -53,8 +53,9 @@ export class FakeNear {
         this.accounts.set(accountId, { balance: 10n * 10n ** 24n, keys: new Set([publicKey]) });
       },
       balance: async (accountId) => (this.accounts.has(accountId) ? this.accounts.get(accountId).balance.toString() : null),
-      callFunds: async (accountId, gas = 100_000_000_000_000n) => ({
+      callFunds: async (accountId, gas = 100_000_000_000_000n, options = {}) => ({
         balance: this.accounts.get(accountId).balance, reserve: callCost(gas),
+        ...(options.minimumBlockHeight === undefined ? {} : { blockHeight: this.height }),
       }),
       hasKey: async (accountId, publicKey) => Boolean(this.accounts.get(accountId)?.keys.has(publicKey)),
       createAccount: async ({ parentId, accountId, publicKey, amountYocto }) => {
@@ -96,17 +97,39 @@ export class FakeNear {
         this.prepared.set(hash, input);
         return { hash, signedTransaction: hash };
       },
+      prepareCreateAccount: async (input) => {
+        const hash = baseEncode(randomBytes(32));
+        this.prepared.set(hash, { creation: input });
+        return { hash, signedTransaction: hash };
+      },
+      prepareTransfer: async (input) => {
+        const hash = baseEncode(randomBytes(32));
+        this.prepared.set(hash, { transfer: input });
+        return { hash, signedTransaction: hash };
+      },
       prepareRotation: async (input) => {
         const hash = baseEncode(randomBytes(32));
         this.prepared.set(hash, { rotation: input });
         return { hash, signedTransaction: hash };
       },
       preparedFinalized: async ({ hash }) => this.txs.get(hash)?.final_execution_status === 'FINAL',
+      preparedFundingFinalized: async ({ hash }) => {
+        const tx = this.txs.get(hash);
+        return tx?.final_execution_status === 'FINAL'
+          ? { blockHeight: tx.block_height, succeeded: typeof tx.status?.SuccessValue === 'string' } : null;
+      },
+      preparedSpendFinalized: async ({ hash }) => {
+        const tx = this.txs.get(hash);
+        return tx?.final_execution_status === 'FINAL' ? { blockHeight: tx.block_height } : null;
+      },
+      preparedNeverExecuted: async () => false,
       broadcastCall: async ({ signedTransaction }) => {
         if (this.broadcasts.has(signedTransaction)) return this.broadcasts.get(signedTransaction);
         const input = this.prepared.get(signedTransaction);
         if (!input) throw new Error('Unknown prepared synthetic transaction');
-        const result = input.rotation ? await this.chain.rotateKey(input.rotation) : await this.chain.call(input);
+        const result = input.rotation ? await this.chain.rotateKey(input.rotation)
+          : input.creation ? await this.chain.createAccount(input.creation)
+            : input.transfer ? await this.chain.transfer(input.transfer) : await this.chain.call(input);
         const saved = { ...result, hash: signedTransaction };
         const recorded = this.txs.get(result.hash);
         if (recorded) this.txs.set(signedTransaction, { ...recorded,
@@ -253,7 +276,7 @@ export class FakeNear {
   record({ signer, receiver, method = null, args = null, deposit = '0', failure = null, value = '' }) {
     this.height += 1;
     const hash = baseEncode(randomBytes(32));
-    const tx = { final_execution_status: 'FINAL',
+    const tx = { final_execution_status: 'FINAL', block_height: this.height,
       transaction: { hash, signer_id: signer, receiver_id: receiver,
         actions: method ? [{ FunctionCall: { method_name: method, args: Buffer.from(JSON.stringify(args)).toString('base64'), deposit, gas: 100000000000000 } }] : [{ Transfer: {} }] },
       status: failure ? { Failure: { ActionError: { kind: { FunctionCallError: { ExecutionError: failure } } } } } : { SuccessValue: Buffer.from(value).toString('base64') } };

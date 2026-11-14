@@ -159,11 +159,16 @@ export async function functionCallFunds(signer, gas, options) {
     rpc('query', { request_type: 'view_account', finality: 'final', account_id: account(signer) }, options),
     gasPricing(options),
   ]);
+  const minimum = options?.minimumBlockHeight;
+  if (minimum !== undefined && (!Number.isSafeInteger(minimum) || minimum < 0
+    || !Number.isSafeInteger(state.block_height) || state.block_height < minimum)) {
+    throw Object.assign(new Error('NEAR account balance is stale. Retry after funding confirms.'), { staleBalance: true });
+  }
   if (!Number.isSafeInteger(state.storage_usage) || state.storage_usage < 0) throw new Error('Invalid NEAR account storage usage');
   // The attached gas excludes the transaction and receipt fees. Allow headroom
   // for those and keep the balance required by the signer's existing storage.
   const reserve = (gas + CALL_OVERHEAD_GAS) * price + BigInt(state.storage_usage) * BigInt(unsigned(storage));
-  return { balance: BigInt(unsigned(state.amount)), reserve };
+  return { balance: BigInt(unsigned(state.amount)), reserve, ...(minimum === undefined ? {} : { blockHeight: state.block_height }) };
 }
 
 async function viewSnapshot(contract, methodName, args, options) {

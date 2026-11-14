@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { startPostgres } from './support/pg.mjs';
 import { createDb } from '../src/db.mjs';
+import { OUTLAYER_CLEANUP_COMPLETE_SQL } from '../src/treasury-liquidity.mjs';
 import { canonicalJson, fingerprint } from '../src/canonical.mjs';
 import { outlayerTermsHash } from '../src/outlayer.mjs';
 import { UserError } from '../src/store.mjs';
@@ -28,7 +29,7 @@ test('PostgreSQL keeper closes every terminal escrow stage, respects the cap, an
     const now = Date.now(); const rulings = new Map(); const prepared = new Map(); let signed = 0;
     const source = await readFile(new URL('../src/outlayer.mjs', import.meta.url), 'utf8');
     const body = source.replace(/^import .*?;\n/gm, '').replace(/^export \{.*?\};\n/gm, '').replace(/^export /gm, '');
-    const deps = { createHash, randomUUID, canonicalJson, fingerprint, UserError, reservePlaySigner, withManagedOperation, withAvailablePlaySigner,
+    const deps = { createHash, randomUUID, canonicalJson, fingerprint, UserError, reservePlaySigner, withManagedOperation, withAvailablePlaySigner, OUTLAYER_CLEANUP_COMPLETE_SQL,
       treasury: async () => ({ id: 'sponsor.testnet', secret: 'synthetic' }),
       syncNearBet: async (_db, _config, _user, id) => db.one('select * from bilateral_bets where id=$1', [id]),
       verifyNearExecution: async () => ({ status: 'succeeded' }) };
