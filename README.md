@@ -10,17 +10,17 @@ Keyless escrow `escrow.statedforecast.near` and referee `referee.statedforecast.
 
 After `npm ci`, run `node scripts/verify-mainnet-demo.mjs`. Its exact last line is `PASS mainnet demo: 2/2 cases; 15/15 checks`. This mainnet path does not verify per-model enclave attestation.
 
+[Mainnet app](https://stated-mainnet-production.up.railway.app/) · [Demo page](https://stated-mainnet-production.up.railway.app/demo) · [Mainnet video](https://github.com/abbyshekit/stated-app/releases/download/demo-20261114/stated-mainnet-demo.mp4)
+
 ## Proven on testnet
 
 The testnet three-model enclave jury is proven with verified Intel TDX quotes, NVIDIA GPU evidence and response signatures. `npm run verify` replays saved evidence, checks testnet ruling `0bf4f3a7-8dfc-44e2-a139-1e33ce844178` and checks the earlier `3668aa04` Court payout; the live ruling ends `37 checks passed, 0 failed, 0 not checked`, then the runner ends `final: PASS (3 verification steps)`. [Judge steps](JUDGE.md#start-here).
-
-[Mainnet app](https://stated-mainnet-production.up.railway.app/) · [Demo page](https://stated-mainnet-production.up.railway.app/demo) · [Mainnet video](docs/stated-demo-mainnet.mp4)
 
 Tracks: Open Innovation `open`; Privacy & Private AI `privacy`; Social Money `social`; AI Security & Defense `security`. [Proof by track and network](#why-each-track).
 
 ## Check it yourself
 
-The mainnet trials use IANA documentation-domain claims, with both sides held by the team; each paid 0.2 NEAR to the same team wallet. [Public demo post](https://x.com/statedforecast/status/2121639324454424641). The separate [X test thread](https://x.com/AbhishekEsq/status/2121456040327922071) reached review and expired unfunded. The video stops before funding a new stake.
+The mainnet trials use IANA documentation-domain claims, with both sides held by the team; each paid 0.2 NEAR to the same team wallet. [Initial demo announcement](https://x.com/statedforecast/status/2121639324454424641). The current [mainnet film](https://github.com/abbyshekit/stated-app/releases/tag/demo-20261114) shows a new [X reply](https://x.com/ChainAbstracted/status/2121703099156836360), its bot link and [both funded stakes](https://stated-mainnet-production.up.railway.app/bets/49e978f4-7726-4ad5-a800-260d08b0b98f), followed by the earlier settled trials in a separate chapter. The X-linked bet is still awaiting a jury result after transport failures; the film does not present the earlier payouts as its outcome. All participating wallets belong to the team.
 
 The [testnet app](https://stated-production.up.railway.app/), [earlier video](docs/stated-demo-live-testnet.mp4) and [signed ruling checks](JUDGE.md#verify-the-demo-bet) cover the Stated Court path. They do not establish who controls the participating X handles.
 
