@@ -198,10 +198,14 @@ function knownInstant(value) {
   return new Date(text);
 }
 
-export function createApp({ db, config, fetchImpl = fetch, chain = null, intents = null }) {
+export function createApp({ db, config, fetchImpl = fetch, chain = null, intents = null, demoEvidence = DEMO_EVIDENCE }) {
   // Cross-chain quotes for a stake, when they are turned on. A test passes its own.
   // A mainnet configuration that was not asked for in so many words never becomes an app.
   assertNetworkConfig(config);
+  const mainnetDemo = config.near.real && demoReady(demoEvidence) ? demoEvidence : null;
+  const demoProof = mainnetDemo ? `${mainnetDemo.cases.length} mainnet bets ruled and paid on ${new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'UTC', day: 'numeric', month: 'short', year: 'numeric',
+  }).format(new Date(mainnetDemo.checkedAt))}` : null;
   const quotes = intents || (config.intents?.enabled || config.intents?.deposits ? intentsQuotes() : null);
   const sourceHref = (row, original) => displaySourceUrl(row, config.x.simulatedOrigin, original);
   const xLabel = () => config.x.simulatedOrigin ? 'simulated X' : 'X';
@@ -802,12 +806,12 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
   const route = (method, pattern, fn) => routes.push({ method, pattern, fn });
 
   route('GET', /^\/demo$/, async (ctx) => {
-    send(ctx.res, 200, await layout(ctx, 'Demo', demoPage({ evidence: DEMO_EVIDENCE,
+    send(ctx.res, 200, await layout(ctx, 'Demo', demoPage({ evidence: demoEvidence,
       bot: await botUsername(), mainnet: true }), { flush: true, back: '/', signin: false }));
   });
   route('GET', /^\/demo\/evidence\.json$/, (ctx) => {
-    const ready = demoReady(DEMO_EVIDENCE);
-    json(ctx.res, ready ? 200 : 503, ready ? DEMO_EVIDENCE : { error: 'Demo evidence is unavailable. Retry verification.' });
+    const ready = demoReady(demoEvidence);
+    json(ctx.res, ready ? 200 : 503, ready ? demoEvidence : { error: 'Demo evidence is unavailable. Retry verification.' });
   });
   route('GET', /^\/static\/sentence\.js$/, (ctx) => {
     ctx.res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8',
@@ -950,7 +954,10 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
           : !settled ? { href: '/me', label: 'Your predictions' } : null;
     send(ctx.res, 200, await layout(ctx, 'Bets on what is said on X', html`
       ${config.near.real ? html`<section class="bet-start" aria-label="Make a bet">
-        <div class="hero"><h1>Make a bet</h1></div>
+        <div class="hero"><h1>Make a bet</h1>
+          ${!ctx.user ? html`<p>Bet on what someone says on X.<br>Both stakes sit in a NEAR contract that nobody holds a key to. Three AI models rule; the winner is paid.</p>
+            ${demoProof ? html`<p><a class="tl" href="/demo">${demoProof}</a></p>` : ''}` : ''}
+        </div>
         <form method="get" action="/me/bets/new" data-bet-start>
           <label for="home-sentence">Your bet</label>
           <textarea id="home-sentence" name="sentence" rows="3" maxlength="1100" required aria-describedby="home-example"></textarea>
@@ -969,7 +976,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
         : lead ? html`${postCard(lead, { faces, sweep: true, link: publicRow(lead).link })}${dareBet ? html`<div class="dare">${dareBet.line}</div>` : ''}` : ''}
       ${config.near.real ? '' : html`<p class="pitch home-intro${hasOpenOffers ? '' : ' empty'}">${hasOpenOffers ? '' : 'No open offers right now. '}Reply to any post on X with <span class="mention">@${bot} bet ${config.play.defaultStakeNear} no</span>.${hasOpenOffers ? ' Three AI models judge it and NEAR pays the winner.' : ''}</p>`}
       ${homeAction ? html`<div class="acts"><a class="pill solid big" href="${homeAction.href}">${homeAction.label}</a></div>` : ''}
-      ${hall.total ? html`<section id="public-bets"><p class="pitch"><a class="tl" href="#public-bets">${hall.total} ${hall.total === 1 ? 'bet' : 'bets'}</a>, ${hall.settled} settled, ${formatTestNear(hall.wonYocto)} ${unit()} won${outsideTaken >= 1 ? html`, <span class="outside-taken">${outsideTaken} ${outsideTaken === 1 ? 'bet' : 'bets'} taken by people outside the team</span>` : ''}</p>${offers.length ? html`<h2 class="lead">Open offers</h2>${betList(offers, { hall: true })}` : ''}${active.length ? html`<h2 class="lead">Bets in progress</h2>${betList(active, { hall: true })}` : ''}${finished.length ? html`<h2 class="lead">Finished bets</h2>${betList(finished, { hall: true })}` : ''}</section>` : config.near.real ? html`<p class="empty quiet home-empty">No public offers yet.</p>` : ''}
+      ${hall.total ? html`<section id="public-bets"><p class="pitch"><a class="tl" href="#public-bets">${hall.total} ${hall.total === 1 ? 'bet' : 'bets'}</a>, ${hall.settled} settled, ${formatTestNear(hall.wonYocto)} ${unit()} won${outsideTaken >= 1 ? html`, <span class="outside-taken">${outsideTaken} ${outsideTaken === 1 ? 'bet' : 'bets'} taken by people outside the team</span>` : ''}</p>${offers.length ? html`<h2 class="lead">Open offers</h2>${betList(offers, { hall: true })}` : ''}${active.length ? html`<h2 class="lead">Bets in progress</h2>${betList(active, { hall: true })}` : ''}${finished.length ? html`<h2 class="lead">Finished bets</h2>${betList(finished, { hall: true })}` : ''}</section>` : config.near.real ? (demoProof ? (ctx.user ? html`<p class="empty quiet home-empty"><a class="tl" href="/demo">${demoProof}</a></p>` : '') : html`<p class="empty quiet home-empty">No public offers yet.</p>`) : ''}
       ${hall.next ? html`<p class="gut"><a class="tl" rel="next" href="/?betsBefore=${hall.next}#public-bets">More bets</a></p>` : ''}
       ${rest.length ? fileList(rest, publicRow, faces, betLines) : ''}
     `, { flush: true, signin: false, og: {
@@ -2019,7 +2026,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
   registerBetRoutes({ route, db, config, layout, needUser, needAdmin, isAdmin, needPost, csrfField, send, json, redirect, notFound, fetchImpl, walletVersion: WALLET_VERSION, payVersion: PAY_VERSION, botUsername, chain: chainFor, quotes, allowHeavyRead, publicRuling });
   registerBetStartRoutes({ route, db, config, layout, send, redirect, botUsername, fileList, betLinesFor, publicRow, csp: CONTENT_SECURITY_POLICY });
   registerBetRulingRoutes({ route, db, config, layout, send, notFound, readRuling: readPublicRuling });
-  registerCourtRoutes({ route, db, config, layout, send, notFound, chain: chainFor });
+  registerCourtRoutes({ route, db, config, layout, send, notFound, chain: chainFor, demoEvidence: mainnetDemo });
   registerBetEvidenceRoutes({ route, db, config, layout, needPost, csrfField, send, redirect, notFound, chain: chainFor, fetchImpl, walletVersion: WALLET_VERSION });
   registerPlayRoutes({ botUsername, route, db, config, layout, needUser, needPost, csrfField, send, redirect, notFound, chain: chainFor, quotes, payVersion: PAY_VERSION, allowHeavyRead });
   registerWalletRpc({ route, config, needUser, json, fetchImpl });
@@ -2057,6 +2064,12 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
       const viewer = await viewerOf(req);
       ctx.user = viewer.user;
       ctx.session = viewer.session;
+      // DESIGN.md: keep private bets private; recorded demo cases have a public proof page.
+      if (req.method === 'GET' && !ctx.user && mainnetDemo) {
+        const betPath = /^\/bets\/([a-f\d-]{36})(?:\/ruling)?$/i.exec(url.pathname);
+        const demoCase = betPath && mainnetDemo.cases.find(item => item.id.toLowerCase() === betPath[1].toLowerCase());
+        if (demoCase) return redirect(res, `/demo#${demoCase.id}`);
+      }
       for (const r of routes) {
         if (r.method !== req.method) continue;
         const m = url.pathname.match(r.pattern);

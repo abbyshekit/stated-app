@@ -37,12 +37,13 @@ test('mainnet home starts with a sentence and one empty state; court reads actua
   const { s, near } = await stack(t);
   const home = await s.browser().get('/');
   assert.equal(home.status, 200);
-  for (const words of ['data-bet-start', 'name="sentence"', 'Review bet', 'See the demo', 'No public offers yet.']) {
+  for (const words of ['data-bet-start', 'name="sentence"', 'Review bet', 'See the demo', 'mainnet bets ruled and paid']) {
     assert.ok(home.text.includes(words), words);
   }
   assert.doesNotMatch(home.text, /0 bets|0 settled|0 NEAR won|No bets in progress|No finished bets/);
   const court = await s.browser().get('/court');
   assert.equal(court.status, 200);
+  assert.match(court.text, /Mainnet rulings are shown in the demo\./);
   assert.match(court.text, /0 access keys/);
   assert.match(court.text, /nearblocks\.io\/address\/referee\.statedforecast\.near#contract/);
   for (const model of ['Qwen/Qwen3.8-27B', 'deepseek-ai/DeepSeek-V4.1-Flash-1017', 'z-ai/glm-5.3-flash']) assert.ok(court.text.includes(model));

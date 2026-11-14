@@ -29,9 +29,11 @@ function dateFromNs(value) {
 
 function validCase(item, outcome) {
   try {
-    return item?.outcome === outcome && typeof item.claim === 'string' && item.claim.trim()
+    return item?.outcome === outcome && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(item.id || '')
+      && typeof item.claim === 'string' && item.claim.trim()
       && safeUrl(item.sourceUrl) && dateFromNs(item.resolvedAtNs)
       && item.payout?.verified === true && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(item.payout.hash || '')
+      && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(item.settlement?.hash || '')
       && new Decimal(formatTestNear(item.stakeYocto)).gt(0)
       && new Decimal(formatTestNear(item.payout.amountYocto)).eq(new Decimal(formatTestNear(item.stakeYocto)).times(2))
       && item.potYocto === item.payout.amountYocto && item.winner === item.payout.recipient
@@ -44,11 +46,11 @@ function validCase(item, outcome) {
 function example(item) {
   const [rawHeadline, ...terms] = item.claim.split(/(?=counts\s+as\s+yes\s*:)/i);
   const headline = rawHeadline.replace(/^Controlled validation [AB]\.\s*/, '').trim();
-  return html`<section class="demo-example" id="${item.outcome}">
-    <h2 class="demo-claim">${item.outcome === 'yes' ? html`<span class="hl">${headline.trim()}</span>` : html`<span class="struck">${headline.trim()}</span>`}</h2>
+  return html`<section class="demo-example" id="${item.id}">
+    <h2 class="demo-claim" id="${item.outcome}">${item.outcome === 'yes' ? html`<span class="hl">${headline.trim()}</span>` : html`<span class="struck">${headline.trim()}</span>`}</h2>
     <div class="verdict ruling-verdict${item.outcome === 'yes' ? ' yes' : ''}"><b>${word(item.outcome)}</b><span>${dateFromNs(item.resolvedAtNs)} UTC</span></div>
     <ul class="jury-rail">${item.verdicts.map(v => html`<li class="seat">${modelFace(v.model)}<b>${modelName(v.model)}</b><span>${word(v.outcome)}, ${new Decimal(v.confidence).times(100).toFixed()}% sure</span></li>`)}</ul>
-    <p class="gut">Verified payout: ${formatTestNear(item.payout.amountYocto)} NEAR. <a class="tl" href="https://nearblocks.io/txns/${item.payout.hash}" rel="noopener noreferrer">View withdrawal</a></p>
+    <p class="gut">Verified payout: ${formatTestNear(item.payout.amountYocto)} NEAR. <a class="tl" href="https://nearblocks.io/txns/${item.payout.hash}" rel="noopener noreferrer">View withdrawal</a> <a class="tl" href="https://nearblocks.io/txns/${item.settlement.hash}" rel="noopener noreferrer">View settlement</a></p>
     <p class="gut"><a class="tl" href="${safeUrl(item.sourceUrl)}" rel="noopener noreferrer">Evidence source</a></p>
     ${terms.length ? html`<details class="fold"><summary>Full terms</summary><p>${item.claim}</p></details>` : ''}
   </section>`;

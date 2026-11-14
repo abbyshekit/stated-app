@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 // projections are varied by these unit tests; they are not live runtime evidence.
 const corpus = JSON.parse(readFileSync(new URL('../../evidence/enclave-ruling-3668aa04.json', import.meta.url))).record;
 const payout = JSON.parse(readFileSync(new URL('../../evidence/hosted-court-payout-testnet-20261112.json', import.meta.url)));
+const demo = JSON.parse(readFileSync(new URL('../../evidence/mainnet-demo-20261114.json', import.meta.url)));
 
 const id = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const now = new Date();
@@ -73,14 +74,103 @@ function fakeDb(rows, { profile = false, publishedAt = null } = {}) {
   return db;
 }
 
-async function get(db, path) {
-  const config = loadConfig({ STATED_BASE_URL: 'http://localhost' });
+async function get(db, path, { mainnet = false, demoEvidence, chain } = {}) {
+  const config = loadConfig({ STATED_BASE_URL: 'http://localhost', ...(mainnet ? {
+    STATED_NEAR_NETWORK: 'mainnet', STATED_MAINNET: 'real-funds', STATED_TOKEN_KEY: 'k'.repeat(44),
+    STATED_NEAR_CONTRACT: demo.escrow, STATED_OUTLAYER_REFEREE: demo.referee,
+    STATED_PLAY_TREASURY: 'play.statedforecast.near', STATED_PLAY_TREASURY_KEY: 'synthetic-only',
+  } : {}) });
   config.play.enabled = true;
-  const handle = createApp({ db, config });
+  const handle = createApp({ db, config, demoEvidence, chain });
   const res = { headersSent: false, writeHead(status, headers) { this.status = status; this.headers = headers; this.headersSent = true; }, end(body) { this.body = String(body || ''); } };
   await handle({ method: 'GET', url: path, headers: {} }, res);
   return res;
 }
+
+const textOf = value => value.replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+
+test('signed-out mainnet home explains the bet and links ready proof once, in the hero', async t => {
+  const res = await get(fakeDb([]), '/', { mainnet: true });
+  assert.equal(res.status, 200);
+  const hero = res.body.match(/<div class="hero">[\s\S]*?<\/div>/)[0];
+  assert.match(hero, /Bet on what someone says on X\./);
+  assert.match(hero, /Both stakes sit in a NEAR contract that nobody holds a key to\. Three AI models rule; the winner is paid\./);
+  const proof = `${demo.cases.length} mainnet bets ruled and paid on ${new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'UTC', day: 'numeric', month: 'short', year: 'numeric',
+  }).format(new Date(demo.checkedAt))}`;
+  assert.ok(hero.includes(`<a class="tl" href="/demo">${proof}</a>`));
+  // The hero already carries the proof line for a signed-out visitor: it is not repeated in the empty state.
+  assert.equal(res.body.split(proof).length - 1, 1);
+  assert.doesNotMatch(res.body, /home-empty/);
+  assert.doesNotMatch(res.body, /No public offers yet\./);
+  const firstScreen = textOf(res.body.match(/<main\b[^>]*>([\s\S]*?)<\/main>/)[1]);
+  assert.ok(firstScreen.split(' ').length <= 80, firstScreen);
+  t.diagnostic(`Rendered signed-out home: ${firstScreen}`);
+});
+
+test('home proof date comes from loaded evidence', async () => {
+  const evidence = structuredClone(demo);
+  evidence.checkedAt = '2026-12-03T00:15:00Z';
+  const res = await get(fakeDb([]), '/', { mainnet: true, demoEvidence: evidence });
+  assert.match(res.body, /2 mainnet bets ruled and paid on 3 Dec 2026/);
+  assert.doesNotMatch(res.body, /paid on 14 Nov/);
+});
+
+test('missing or failed demo evidence leaves the ordinary mainnet empty state without proof', async () => {
+  for (const demoEvidence of [null, { ...demo, overall: 'FAIL' }]) {
+    const res = await get(fakeDb([]), '/', { mainnet: true, demoEvidence });
+    assert.equal(res.status, 200);
+    assert.match(res.body, /Bet on what someone says on X\./);
+    assert.match(res.body, /No public offers yet\./);
+    assert.doesNotMatch(res.body, /mainnet bets ruled and paid/);
+  }
+  const testnet = await get(fakeDb([]), '/');
+  assert.doesNotMatch(testnet.body, /mainnet bets ruled and paid|nobody holds a key/);
+});
+
+test('signed-out demo bet and ruling URLs redirect to their matching demo case only on mainnet', async () => {
+  for (const item of demo.cases) {
+    for (const suffix of ['', '/ruling']) {
+      const res = await get(fakeDb([]), `/bets/${item.id}${suffix}`, { mainnet: true });
+      assert.equal(res.status, 303);
+      assert.equal(res.headers.location, `/demo#${item.id}`);
+    }
+  }
+});
+
+test('non-demo bets and unavailable demo evidence retain the sign-in and private ruling behavior', async () => {
+  for (const options of [
+    { mainnet: true, betId: id(99) },
+    { mainnet: true, demoEvidence: null, betId: demo.cases[0].id },
+    { mainnet: true, demoEvidence: { ...demo, overall: 'FAIL' }, betId: demo.cases[0].id },
+    { mainnet: false, betId: demo.cases[0].id },
+  ]) {
+    const bet = await get(fakeDb([]), `/bets/${options.betId}`, options);
+    assert.equal(bet.status, 303);
+    assert.equal(bet.headers.location, `/signin?return=${encodeURIComponent(`/bets/${options.betId}`)}`);
+    const ruling = await get(fakeDb([]), `/bets/${options.betId}/ruling`, options);
+    assert.equal(ruling.status, 404);
+  }
+});
+
+test('mainnet court empty state links loaded mainnet rulings, with ordinary fallback', async t => {
+  const chain = {
+    async view() { return { escrow: demo.escrow }; },
+    async readAccessKeys() { return []; },
+  };
+  for (const demoEvidence of [demo, null, { ...demo, overall: 'FAIL' }]) {
+    const res = await get(fakeDb([]), '/court', { mainnet: true, demoEvidence, chain });
+    assert.equal(res.status, 200);
+    if (demoEvidence?.overall === 'PASS') {
+      assert.match(res.body, /<a class="tl" href="\/demo">Mainnet rulings are shown in the demo\.<\/a>/);
+      assert.doesNotMatch(res.body, /No public rulings yet\./);
+      t.diagnostic(`Rendered court empty state: ${textOf(res.body.match(/<p class="empty quiet">[\s\S]*?<\/p>/)[0])}`);
+    } else {
+      assert.match(res.body, /No public rulings yet\./);
+      assert.doesNotMatch(res.body, /Mainnet rulings are shown/);
+    }
+  }
+});
 
 test('home names Stated and lists each counted offer once in closing order', async () => {
   const rows = [offer(1, 10), offer(2, 5), offer(3, 8)];
