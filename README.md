@@ -6,6 +6,8 @@
 
 **Both mainnet outcomes paid.** Two operator-controlled bets settled through the OutLayer jury, one Yes and one No. Each winner received 0.2 NEAR. The demo links the real withdrawal transactions and labels the controlled tests. The separate [X test thread](https://x.com/AbhishekEsq/status/2121456040327922071) received a bet-review link; that FAA draft expired unfunded.
 
+Watch the [56-second narrated walkthrough](docs/stated-demo-mainnet.mp4): sentence entry, the unsigned review, the real X reply and the two controlled mainnet payouts. The walkthrough stops before funding a new stake.
+
 After `npm ci`, run `node scripts/verify-mainnet-demo.mjs`. The [saved evidence](evidence/mainnet-demo-20261114.json) records 15 passing checks covering deployment, committed terms, jury verdicts, settlement receipts and exact native-token withdrawals. It uses public RPC and needs no wallet or API key. It does not independently verify model attestation. [Verification details](JUDGE.md#verify-the-mainnet-demo)
 
 The earlier [42-second testnet video](docs/stated-demo-live-testnet.mp4) and [signed testnet ruling checks](JUDGE.md#verify-the-demo-bet) remain available. [Judge CI](.github/workflows/judge.yml) runs offline verification and Rust tests on pushes and pull requests.

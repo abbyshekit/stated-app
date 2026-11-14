@@ -4,6 +4,8 @@
 
 Open the [public demo](https://stated-mainnet-production.up.railway.app/demo). It shows operator-controlled Yes and No bets, their jury verdicts and their 0.2 NEAR withdrawals. No sign-in is required. The X thread linked there demonstrates draft creation separately; its FAA draft expired unfunded.
 
+The [56-second narrated walkthrough](docs/stated-demo-mainnet.mp4) shows the live sentence-to-review flow and the completed controlled payouts.
+
 After `npm ci`, run:
 
 ```sh

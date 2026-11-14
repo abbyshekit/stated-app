@@ -2,6 +2,8 @@
 
 ## Hosted mainnet demo
 
+The [56-second narrated walkthrough](stated-demo-mainnet.mp4), captured on 14 November 2026, shows the deployed app, the real X reply and the two controlled mainnet payouts. It stops at the unsigned review before funding a new stake.
+
 Open [Stated](https://stated-mainnet-production.up.railway.app/) and enter “FAA lifts the ground stop by midnight EST, 0.25 NEAR on yes.” Choose **Review bet**. Sign-in preserves the sentence and opens the prepared terms for review before any wallet signature.
 
 Open [Demo](https://stated-mainnet-production.up.railway.app/demo) to inspect the completed operator-controlled Yes and No mainnet outcomes. Each paid 0.2 NEAR to its winner. Follow the withdrawal links or run `node scripts/verify-mainnet-demo.mjs` after `npm ci`. [Public evidence](../evidence/mainnet-demo-20261114.json) records the checks and their scope. The X test thread demonstrates a separate draft that expired unfunded.
