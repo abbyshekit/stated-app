@@ -6,6 +6,7 @@ import { createReadLimiter } from './public-read-limits.mjs';
 import { publicSave, publicPredictionOwner } from './store.mjs';
 import { effectiveTerms, outcomeFor } from './terms.mjs';
 import { isPlaceholder } from './xtext.mjs';
+import { betProposition } from './bet-view.mjs';
 
 const betName = (username, wallet) => (username ? `@${username}` : wallet);
 
@@ -69,7 +70,7 @@ export function registerShareRoutes({ route, db, config, notFound, headersFor, r
         author = { authorName: row.author_name || `@${row.author_username}`, handle: `@${row.author_username}` };
       }
     }
-    image(ctx.res, { ...author, kind: 'bet', id: bet.id, claim: bet.claim,
+    image(ctx.res, { ...author, kind: 'bet', id: bet.id, claim: betProposition(bet),
       status: bet.status, outcome: bet.outcome, settledBy: bet.settled_by, acceptBy: bet.accept_by, funded: bet.funded,
       settlementVerified: bet.settlementVerified,
       date: bet.resolve_at, creatorSide: bet.creator_side,

@@ -8,7 +8,7 @@ import { readEnclaveRuling, verifiedQuoteSummary } from './enclave-ruling.mjs';
 import { createReadLimiter } from './public-read-limits.mjs';
 import { publicPredictionOwner, publicSave } from './store.mjs';
 import { dayMonth } from './marked.mjs';
-import { markedClaim } from './bet-view.mjs';
+import { betProposition, markedClaim } from './bet-view.mjs';
 import { formatTestNear } from './near-escrow.mjs';
 import { unit } from './near-network.mjs';
 import { dstackPasses } from './dstack-verifier.mjs';
@@ -63,8 +63,9 @@ export async function rulingPost(db, bet, outcome, { claimHref = null } = {}) {
   const pictures = available ? await facesFor(db, [source]) : await facesByUsername(db, [handle]);
   const picture = pictures.get(available ? String(source.speaker_x_user_id) : String(handle || '').toLowerCase());
   const post = xPostUrl(available ? source.source_url : bet.evidence_source_url);
+  const proposition = betProposition(bet);
   return html`<div class="ruling-post"><div class="post"><div class="head">${face({ url: picture, name: author })}<b>${author}</b>${handle && `@${handle}` !== author ? html`<span>@${handle}</span>` : ''}${postLogo(post)}</div></div>
-    <p class="prop bet-claim${bet.claim.length > 200 ? ' long' : bet.claim.length > 120 ? ' mid' : ''}">${claimHref ? html`<a href="${claimHref}">${markedClaim(bet.claim, outcome)}</a>` : markedClaim(bet.claim, outcome)}</p>
+    <p class="prop bet-claim${proposition.length > 200 ? ' long' : proposition.length > 120 ? ' mid' : ''}">${claimHref ? html`<a href="${claimHref}">${markedClaim(proposition, outcome)}</a>` : markedClaim(proposition, outcome)}</p>
     ${available ? postTime(post, source.published_at) : await betPostTime(db, bet)}
   </div>`;
 }
