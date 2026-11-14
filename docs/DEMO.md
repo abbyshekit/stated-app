@@ -1,5 +1,15 @@
 # Stated demo
 
+## Hosted mainnet demo
+
+Open [Stated](https://stated-mainnet-production.up.railway.app/) and enter “FAA lifts the ground stop by midnight EST, 0.25 NEAR on yes.” Choose **Review bet**. Sign-in preserves the sentence and opens the prepared terms for review before any wallet signature.
+
+Open [Demo](https://stated-mainnet-production.up.railway.app/demo) to inspect the completed operator-controlled Yes and No mainnet outcomes. Each paid 0.2 NEAR to its winner. Follow the withdrawal links or run `node scripts/verify-mainnet-demo.mjs` after `npm ci`. [Public evidence](../evidence/mainnet-demo-20261114.json) records the checks and their scope. The X test thread demonstrates a separate draft that expired unfunded.
+
+The [42-second testnet video](stated-demo-live-testnet.mp4) covers the earlier Stated Court flow. Its signed ruling and payout have [separate verification commands](../JUDGE.md#verify-the-demo-bet).
+
+## Local practice
+
 The local demo combines prediction tracking, bilateral Bet offers, public invitations, spectator updates and NEAR testnet escrow. X is simulated, and NEAR transactions use test tokens. The recorded judge walkthrough follows one reply Bet through a finalized 0.4 test NEAR payout. [Recording evidence](../evidence/hackathon-demo-20261111.json)
 
 When a testnet contract is configured, an independent NEAR worker reconciles escrow and pending transactions without enabling live X polling. Reload the Bet page to see its latest verified state.

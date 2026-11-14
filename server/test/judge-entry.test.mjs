@@ -34,8 +34,11 @@ test('signed-out home exposes only an eligible testnet Bet', async () => {
     if (visible) assert.match(res.text, new RegExp(`<section id="public-bets">[\\s\\S]*<a href="/bets/${bet.id}">Synthetic claim`));
     if (!acceptorNamed) assert.doesNotMatch(res.text, /fixture_acceptor|acceptor\.testnet/);
     assert.doesNotMatch(res.text, /private fixture note|Paid to your account/);
-    // Real NEAR sends a signed-out visitor to sign in and then on to the Make a bet page.
-    assert.match(res.text, s.config.near.real ? /href="\/signin\?return=%2Fme%2Fbets%2Fnew">Make a bet<\/a>/ : /href="\/signin">Make a bet<\/a>/);
+    // Mainnet starts with a sentence; testnet keeps its existing sign-in action.
+    if (s.config.near.real) {
+      assert.match(res.text, /<form method="get" action="\/me\/bets\/new" data-bet-start>/);
+      assert.match(res.text, />Review bet<\/button>/);
+    } else assert.match(res.text, /href="\/signin">Make a bet<\/a>/);
   };
   assert.equal(loadConfig({ STATED_DEMO_BET_ID: 'invalid' }).demoBetId, null);
   assert.equal(loadConfig({}).demoBetId, null);

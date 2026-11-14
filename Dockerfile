@@ -8,6 +8,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY . .
+RUN node --input-type=module -e "import { readFileSync } from 'node:fs'; import { demoReady } from './server/src/demo-page.mjs'; if (!demoReady(JSON.parse(readFileSync('evidence/mainnet-demo-20261114.json', 'utf8')))) throw new Error('Mainnet demo evidence is invalid');"
 RUN mkdir -p /data && chown node:node /data
 USER node
 ENV PORT=8080

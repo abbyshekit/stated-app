@@ -43,10 +43,6 @@ function readPayload(form, networkId) {
   return payload;
 }
 
-for (const sentence of document.querySelectorAll('form[data-bet-sentence]')) {
-  sentence.elements.namedItem('timeZone').value = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-}
-
 const localTimes = document.querySelectorAll('[data-bet-local-time]');
 if (localTimes.length) {
   const clock = new Intl.DateTimeFormat(undefined, {

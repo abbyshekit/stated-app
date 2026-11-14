@@ -2,45 +2,45 @@
 
 ## Check it yourself
 
-**Start with the [42-second demo](docs/stated-demo-live-testnet.mp4).** An X price claim became a funded testnet bet. All three models voted Yes, Stated Court approved the ruling after its challenge window, and the winner received 0.2 test NEAR. Reproduce the ruling and withdrawal from public data with the [demo verification commands](JUDGE.md#verify-the-demo-bet).
+**Open the [mainnet app](https://stated-mainnet-production.up.railway.app/) or the [public demo](https://stated-mainnet-production.up.railway.app/demo).** Type a sentence such as “FAA lifts the ground stop by midnight EST, 0.25 NEAR on yes.” The app fills in the claim, stake, side and dates, preserves the sentence through sign-in, and opens an unsigned bet for review.
 
-**Mainnet OutLayer deployment: 9 of 9 checks passed.** The [mainnet Court](https://stated-mainnet-production.up.railway.app/court) shows the referee and its zero access keys. [Saved verification](evidence/judge-outlayer-mainnet.json)
+**Both mainnet outcomes paid.** Two operator-controlled bets settled through the OutLayer jury, one Yes and one No. Each winner received 0.2 NEAR. The demo links the real withdrawal transactions and labels the controlled tests. The separate [X test thread](https://x.com/AbhishekEsq/status/2121456040327922071) received a bet-review link; that FAA draft expired unfunded.
 
-Run the [mainnet verification command](JUDGE.md#check-it-yourself) to reproduce the result from public NEAR data. To verify the recorded testnet Court ruling and payout, run `npm ci && npm run verify`.
+After `npm ci`, run `node scripts/verify-mainnet-demo.mjs`. The [saved evidence](evidence/mainnet-demo-20261114.json) records 15 passing checks covering deployment, committed terms, jury verdicts, settlement receipts and exact native-token withdrawals. It uses public RPC and needs no wallet or API key. It does not independently verify model attestation. [Verification details](JUDGE.md#verify-the-mainnet-demo)
 
-The deployment check covers the first three items below. A settled mainnet OutLayer bet is still needed for the fourth.
-
-- Referee: no access keys; code hash matches the approved referee build.
-- Config: expected escrow, OutLayer contract, jury URL/hash, secrets owner and profile.
-- Jury: downloaded bytes match the pinned SHA-256.
-- Bet: named referee, ruling stage/outcome, successful archival settlement and credits to the correct side.
-
-Settlement credits remain in escrow until withdrawal; this command checks those credits. It reads public RPC, needs no key and exits nonzero on a failed or pending bet check. [Judge CI](.github/workflows/judge.yml) runs offline verification and Rust tests on pushes and pull requests; its daily mainnet check waits for repository variables.
+The earlier [42-second testnet video](docs/stated-demo-live-testnet.mp4) and [signed testnet ruling checks](JUDGE.md#verify-the-demo-bet) remain available. [Judge CI](.github/workflows/judge.yml) runs offline verification and Rust tests on pushes and pull requests.
 
 [![checks](https://github.com/abbyshekit/stated-app/actions/workflows/checks.yml/badge.svg)](https://github.com/abbyshekit/stated-app/actions/workflows/checks.yml)
 
 Bet on anything said on X by replying to it. Three models from three makers, each in its own NEAR AI enclave, must all agree who won, or both stakes go back; a NEAR contract pays the winner, and one command re-checks the ruling from outside.
 
-Status on 13 November 2026: the hosted app runs on NEAR testnet with test NEAR. On 12 November it paid its first bet on a jury ruling: three models in NEAR AI enclaves agreed on a Coinbase price, Stated Court approved the ruling after its ten-minute window, and the escrow paid the winner. Both sides of that bet belong to the operator.
+Status on 14 November 2026: the mainnet app runs at [stated-mainnet-production.up.railway.app](https://stated-mainnet-production.up.railway.app/). The separate [testnet app](https://stated-production.up.railway.app/) uses test NEAR and retains the earlier Stated Court walkthrough.
 
 On 13 November the [testnet home](https://stated-production.up.railway.app/) showed 18 bets, six settlements and 0.84 test NEAR won. The app counted three takes by accounts it does not classify as operator accounts. The [demo bet](https://stated-production.up.railway.app/bets/0bf4f3a7-8dfc-44e2-a139-1e33ce844178) matched @ChainAbstracted and @General_Illia, with 0.1 test NEAR each.
 
 At the 16:00 UTC deadline, the Coinbase NEAR-USD candle opened at US$3.5052. Yes was unanimous. After the ten-minute challenge window, the escrow settled at 16:12 UTC and the withdrawal delivered 0.2 test NEAR to @ChainAbstracted ([ruling and payout verification](JUDGE.md#verify-the-demo-bet)).
 
-Mainnet, 13 November 2026: `escrow.statedforecast.near` is live with zero access keys (mainnet RPC `view_access_key_list`). It has settled one pilot round by mutual agreement: `pilot-a.statedforecast.near` created bet `15212c45-047a-4552-ba83-8adea874fd3f` and `pilot-b.statedforecast.near` accepted it, 0.01 NEAR each; `pilot-a` proposed yes, `pilot-b` confirmed it, and `pilot-a` withdrew its 0.02 NEAR credit, all between 03:12 and 03:15 UTC (`get_bet` returns `status: settled`, `resolution.method: agreement`, `referee: null`). No referee or jury took part. The OutLayer referee is built, and on testnet its jury and the full call chain ran up to the missing NEAR AI key ([docs/OUTLAYER.md](docs/OUTLAYER.md), [evidence/outlayer-testnet-referee-20261113.json](evidence/outlayer-testnet-referee-20261113.json), [evidence/outlayer-testnet-probe-20261113.json](evidence/outlayer-testnet-probe-20261113.json)). The [mainnet referee](https://nearblocks.io/address/referee.statedforecast.near) is deployed and the Court page reads its configuration. New real-NEAR bets are paused pending a controlled OutLayer payout test.
+The mainnet escrow `escrow.statedforecast.near` and [referee](https://nearblocks.io/address/referee.statedforecast.near) have zero access keys. The controlled Yes and No payouts in the demo used that referee and the deployed OutLayer jury. They are separate from the earlier pilot settled by mutual agreement. [Mainnet evidence](evidence/mainnet-demo-20261114.json)
 
 | | |
 | --- | --- |
 | Tracks | Open Innovation `open`; Privacy & Private AI `privacy`; Social Money `social`; AI Security & Defense `security` |
-| Hosted app | https://stated-production.up.railway.app (NEAR testnet, test NEAR) |
-| Demo video | [X claim to testnet payout](docs/stated-demo-live-testnet.mp4) |
-| Judge path | [JUDGE.md](JUDGE.md): five minutes, read-only; `npm run judge` checks the deployed contracts through public NEAR RPC |
+| Hosted app | [Mainnet](https://stated-mainnet-production.up.railway.app/) · [Testnet](https://stated-production.up.railway.app/) |
+| Demo | [Mainnet outcomes and withdrawals](https://stated-mainnet-production.up.railway.app/demo) · [Earlier testnet video](docs/stated-demo-live-testnet.mp4) |
+| Judge path | [JUDGE.md](JUDGE.md): read-only; `node scripts/verify-mainnet-demo.mjs` checks both mainnet payouts through public NEAR RPC |
 | Quick check | `npm ci`, then `npm run verify`; without network access, `npm run verify:offline` |
 | Tests | `npm test`: the whole suite with PostgreSQL 15+, otherwise the files that need no database |
 | Security | [docs/SECURITY.md](docs/SECURITY.md): a security review of the code and the hosted app, each finding and its fix |
 | Terms and privacy | [Terms of Service](https://stated-production.up.railway.app/terms) and [Privacy Policy](https://stated-production.up.railway.app/privacy) on the hosted app |
 
 ## Try it
+
+1. Open the [mainnet app](https://stated-mainnet-production.up.railway.app/), type a claim with a deadline, stake and side, and choose **Review bet**.
+2. Sign in with X. The review shows the prepared terms, stake and dates before any wallet signature. Correct them there if needed.
+3. Connect a wallet to fund the reviewed offer. Share its bet link so someone can take the other side.
+4. For a read-only demonstration, open [Demo](https://stated-mainnet-production.up.railway.app/demo) and follow either withdrawal link. Run `node scripts/verify-mainnet-demo.mjs` to recheck both outcomes.
+
+### Earlier testnet walkthrough
 
 Each step says what to do and what you should see. Steps 1 to 6 need no X account, wallet or API key.
 
@@ -50,11 +50,11 @@ Each step says what to do and what you should see. Steps 1 to 6 need no X accoun
 4. Open https://stated-production.up.railway.app/court. You see Stated Court, the Sputnik DAO that referees new bets, read from chain: its jury member is a relay contract that cannot approve a ruling until ten minutes after it was filed, and its council can only vote a ruling down.
 5. Check the chain with nothing of ours: the `curl` lines under [Check the chain yourself](#check-the-chain-yourself) print the access keys of the escrow, the relay and the DAO (none) and decode the relay's configuration and the DAO's policy.
 6. Run `npm test`. With PostgreSQL 15+ tools (`initdb`, `pg_ctl`) on PATH it runs the whole suite; without them it runs the test files that need no database and names the rest as skipped.
-7. With an X account, take one of the live bets below. You see the bot reply in the thread and a NEAR account made for your handle; at the deadline the jury rules, and the winner is paid after the ten-minute window.
+7. With an X account, check the [testnet home page](https://stated-production.up.railway.app/) for an open offer. The historical links below may already be taken or expired.
 
-## Take a live bet
+## Historical testnet offers
 
-These are real offers on X, each funded in a NEAR testnet escrow. Open a link with your own X account and post the reply it prepares; Stated makes you a NEAR account and funds your 0.1 test NEAR stake, so no wallet is needed. The offers were posted by the operator's account, @ChainAbstracted. The first two rows below (13 and 14 November) have since been taken, so their links no longer work; the home page lists the offers still open.
+These testnet offers were posted by the operator's account, @ChainAbstracted. Their availability changes as they are taken or expire. Check the [testnet home page](https://stated-production.up.railway.app/) for current offers; the links below document the earlier walkthrough.
 
 | Decides | The claim | Referee | Take it | Bet page |
 | --- | --- | --- | --- | --- |
@@ -70,6 +70,10 @@ These are real offers on X, each funded in a NEAR testnet escrow. Open a link wi
 The import-price bet is settled from links: after the release, whoever is right replies `yes <link>` or `no <link>` with the BLS page, or adds it on the bet's page, and the jury reads it. An offer can be taken until a minute before its deadline, and for at most seven days after it was made.
 
 ## How it works
+
+On mainnet, type the sentence in the app or tag `@statedforecast` on X with the claim, deadline, stake and side. The app prepares an unsigned draft. Review it, connect a wallet and fund the offer; the shared bet link lets another bettor escrow the opposite stake. After the deadline and evidence window, the OutLayer jury runs the three configured models. Unanimous Yes or No verdicts at the confidence threshold settle the escrow; an undecided jury retries, with a refund after the configured limit. Withdrawal moves the winning credit from escrow to the winning account. [OutLayer design](docs/OUTLAYER.md)
+
+The earlier testnet Court flow works as follows:
 
 1. Reply under a post with `@statedforecast bet 0.1 yes`; the reply may carry its own deadline, such as `bet 0.1 yes by 30 nov`.
 2. Someone takes the other side by replying `take` or on the bet's page, without bringing a wallet: Stated creates a named NEAR account per X handle, and a Rust escrow contract holds both stakes.
@@ -114,6 +118,8 @@ The import-price bet is settled from links: after the release, whoever is right 
 A Node.js and PostgreSQL app joins X reply intake, a jury of enclave models that reads evidence from both sides, a Sputnik DAO court and Rust escrow on NEAR, with a Docker walkthrough and scripts that re-check the hosted ruling, its payout and the contracts' code and keys from public sources.
 
 ## Who decides the result
+
+This section describes the earlier signed testnet Court flow. The hosted mainnet app uses the [OutLayer referee and jury](docs/OUTLAYER.md), with [completed Yes and No payout checks](JUDGE.md#verify-the-mainnet-demo).
 
 Enclave rulings require `STATED_ENCLAVE_RULINGS=1`, `NEARAI_API_KEY` and `NEARAI_RULING_MODELS` listing at least two distinct models (the hosted jury lists three). `NEARAI_RULING_MIN_CONFIDENCE` defaults to `0.8`. `STATED_REQUIRE_GPU_EVIDENCE` defaults on, and setting it to `0` is refused unless the NEAR AI URL is a loopback or `.test` host, as in the test stacks, whose fake NEAR AI has no GPU. Rulings also need `STATED_DSTACK_VERIFIER_URL`: the app refuses to start them without it, and an unreachable verifier fails the call.
 

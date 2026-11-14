@@ -389,6 +389,24 @@ table { font-size: 14px; }
 .hero h1 { margin: 0; font-size: 28px; font-weight: 600; line-height: 1.15; letter-spacing: -0.02em; }
 .hero p { margin: 6px 0 0; font-size: 17px; line-height: 1.4; color: var(--dim); }
 .hero p b { color: var(--ink); font-weight: 600; }
+/* DESIGN.md: sentence entry and verified demo stay in the timeline column. */
+.bet-start { padding-bottom: 16px; }
+.bet-start form, form[data-bet-sentence] { margin: 8px 16px 0; }
+.bet-start textarea, form[data-bet-sentence] textarea { min-height: 136px; font-size: 18px; line-height: 1.5; }
+.bet-start .acts, form[data-bet-sentence] .acts { padding: 16px 0 0; }
+.bet-start .acts button, form[data-bet-sentence] .acts button { width: 100%; }
+.home-demo { margin-top: 8px; }
+.home-empty { border-top: 1px solid var(--line); padding-block: 24px; }
+.sentence-status { margin: 12px 0 0; }
+.sentence-status:empty { display: none; }
+.demo-page { padding-top: 16px; }
+.demo-nav { display: flex; gap: 24px; padding-inline: 16px; flex-wrap: wrap; }
+.demo-example { margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--line); scroll-margin-top: 16px; }
+.demo-claim { margin: 0; padding: 0 16px; font-size: 24px; font-weight: 400; line-height: 1.35; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.demo-page .gut > .tl { white-space: normal; }
+@media (max-width: 390px) {
+  .demo-claim { font-size: 22px; }
+}
 .pitch { margin: 0; padding: 14px 16px 2px; font-size: 17px; line-height: 1.4; }
 .pitch b { font-weight: 700; }
 .signbox .pitch { padding: 0; }

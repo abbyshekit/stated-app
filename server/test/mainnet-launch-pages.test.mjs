@@ -33,12 +33,14 @@ async function stack(t) {
   return { s, near, signIn, fetchImpl };
 }
 
-test('mainnet home shows honest counters and all bet sections; court reads actual keys and outages', async t => {
+test('mainnet home starts with a sentence and one empty state; court reads actual keys and outages', async t => {
   const { s, near } = await stack(t);
   const home = await s.browser().get('/');
   assert.equal(home.status, 200);
-  for (const words of ['0 bets', '0 settled', '0 NEAR won', '0 bets taken by people outside the team',
-    'Open offers', 'Bets in progress', 'Finished bets', 'Sign in with X, add NEAR']) assert.ok(home.text.includes(words), words);
+  for (const words of ['data-bet-start', 'name="sentence"', 'Review bet', 'See the demo', 'No public offers yet.']) {
+    assert.ok(home.text.includes(words), words);
+  }
+  assert.doesNotMatch(home.text, /0 bets|0 settled|0 NEAR won|No bets in progress|No finished bets/);
   const court = await s.browser().get('/court');
   assert.equal(court.status, 200);
   assert.match(court.text, /0 access keys/);
@@ -49,6 +51,28 @@ test('mainnet home shows honest counters and all bet sections; court reads actua
   const down = await s.browser().get('/court');
   assert.equal(down.status, 503);
   assert.doesNotMatch(down.text, /0 access keys/);
+});
+
+test('the sentence survives sign-in return and stays escaped without creating a bet', async t => {
+  const { s, signIn } = await stack(t);
+  await signIn('8709', 'sentence_return');
+  const sentence = 'FAA lifts <the ground stop> by midnight, 0.25 NEAR on yes';
+  const target = `/me/bets/new?sentence=${encodeURIComponent(sentence)}`;
+  const visitor = s.browser();
+  const gate = await visitor.request('GET', target);
+  assert.equal(gate.status, 303);
+  assert.equal(new URL(gate.location, s.base).searchParams.get('return'), target);
+  s.fakeX.consentAs = '8709';
+  let returned;
+  try { returned = await visitor.follow(`/signin/x?return=${encodeURIComponent(target)}`); }
+  finally { s.fakeX.consentAs = null; }
+  assert.equal(returned.status, 200);
+  assert.equal(new URL(returned.url).pathname, '/me/bets/new');
+  assert.match(returned.text, /FAA lifts &lt;the ground stop&gt; by midnight, 0\.25 NEAR on yes/);
+  assert.match(returned.text, /\/static\/sentence\.js/);
+  assert.doesNotMatch(returned.text, /\/static\/wallet\.js/);
+  assert.equal((await s.db.one('select count(*)::int as n from bilateral_bets')).n, 0);
+  assert.equal((await visitor.get(`/me/bets/new?sentence=${'x'.repeat(1101)}`)).status, 400);
 });
 
 test('sponsored wallet reports actual grant, falls back after quota, refreshes only the signed-in account', async t => {

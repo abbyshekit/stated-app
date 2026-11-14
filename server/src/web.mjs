@@ -10,6 +10,7 @@ import { registerBetStartRoutes } from './bet-start.mjs';
 import { registerBetRulingRoutes, rulingPost } from './bet-ruling-pages.mjs';
 import { registerCourtRoutes } from './court-pages.mjs';
 import { registerBetEvidenceRoutes } from './bet-evidence-pages.mjs';
+import { demoPage, demoReady } from './demo-page.mjs';
 
 // One policy for every page. A page that must hand a form to another origin widens form-action for itself only.
 const CONTENT_SECURITY_POLICY = "default-src 'self'; style-src 'self'; img-src 'self' data: https://pbs.twimg.com; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
@@ -116,6 +117,12 @@ const WALLET_VERSION = createHash('sha256').update(WALLET_JS).digest('hex').slic
 // The copy buttons on the payment page.
 const PAY_JS = readFileSync(new URL('../public/pay.js', import.meta.url));
 const PAY_VERSION = createHash('sha256').update(PAY_JS).digest('hex').slice(0, 10);
+const SENTENCE_JS = readFileSync(new URL('../public/sentence.js', import.meta.url));
+let DEMO_EVIDENCE = null;
+try {
+  const bytes = readFileSync(new URL('../../evidence/mainnet-demo-20261114.json', import.meta.url));
+  if (bytes.length <= 64 * 1024) DEMO_EVIDENCE = JSON.parse(bytes.toString('utf8'));
+} catch { /* The demo view shows its unavailable state when evidence is absent. */ }
 const FONTS = new Map(['Archivo-latin.woff2', 'Inter-latin.woff2', 'ibm-plex-mono-latin-400-normal.woff2']
   .map((name) => [name, readFileSync(new URL(`../public/fonts/${name}`, import.meta.url))]));
 const X_MARK = raw('<svg class="xmark" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M18.9 2H22l-7.5 8.6L23 22h-6.9l-5.4-7-6.2 7H1.4l8-9.2L1 2h7l4.9 6.4L18.9 2Zm-1.2 18h1.9L7.4 3.9H5.4L17.7 20Z"/></svg>');
@@ -208,7 +215,7 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
   const signinBudget = createReadLimiter({ railway, capacity: 24, refillMs: 10_000 });
   const correctionBudget = createReadLimiter({ railway, capacity: 20, refillMs: 15_000 });
   const pageBudget = createReadLimiter({ railway, capacity: 60, refillMs: 1000 });
-  const publicPages = /^(?:\/$|\/court$|\/desk(?:\/\d{1,18})?$|\/u\/\w{1,40}(?:\/\d{1,18})?$|\/search$|\/api\/(?:search$|u\/\w{1,40}(?:\/\d{1,18})?$)|\/bets\/[a-f\d-]{36}(?:\/ruling)?$)/i;
+  const publicPages = /^(?:\/$|\/demo(?:\/evidence\.json)?$|\/court$|\/desk(?:\/\d{1,18})?$|\/u\/\w{1,40}(?:\/\d{1,18})?$|\/search$|\/api\/(?:search$|u\/\w{1,40}(?:\/\d{1,18})?$)|\/bets\/[a-f\d-]{36}(?:\/ruling)?$)/i;
   const publicRuling = createPublicRulingReader({ recipe: enclaveRecipe });
   const readPublicRuling = async (tx, id) => (await publicRuling(tx, id))?.record || null;
 
@@ -794,6 +801,20 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
   const routes = [];
   const route = (method, pattern, fn) => routes.push({ method, pattern, fn });
 
+  route('GET', /^\/demo$/, async (ctx) => {
+    send(ctx.res, 200, await layout(ctx, 'Demo', demoPage({ evidence: DEMO_EVIDENCE,
+      bot: await botUsername(), mainnet: true }), { flush: true, back: '/', signin: false }));
+  });
+  route('GET', /^\/demo\/evidence\.json$/, (ctx) => {
+    const ready = demoReady(DEMO_EVIDENCE);
+    json(ctx.res, ready ? 200 : 503, ready ? DEMO_EVIDENCE : { error: 'Demo evidence is unavailable. Retry verification.' });
+  });
+  route('GET', /^\/static\/sentence\.js$/, (ctx) => {
+    ctx.res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8',
+      'cache-control': 'no-cache', 'x-content-type-options': 'nosniff' });
+    ctx.res.end(SENTENCE_JS);
+  });
+
   route('GET', /^\/(?:favicon\.ico|static\/favicon\.svg)$/, (ctx) => {
     ctx.res.writeHead(200, { 'content-type': 'image/svg+xml', 'cache-control': 'public, max-age=86400' });
     ctx.res.end(FAVICON);
@@ -922,22 +943,33 @@ export function createApp({ db, config, fetchImpl = fetch, chain = null, intents
     const hasOpenOffers = hall.hasOpen;
     const active = listed.filter(bet => ['accepted', 'proposed', 'disputed'].includes(bet.status));
     const finished = listed.filter(bet => !betState(bet).open && !active.includes(bet));
-    const homeAction = config.near.real ? { href: ctx.user ? '/me/bets/new' : '/signin?return=%2Fme%2Fbets%2Fnew', label: 'Make a bet' }
+    const homeAction = config.near.real ? null
       : !ctx.user ? { href: '/signin', label: 'Make a bet' }
       : fallback ? { href: `/bets/${fallback.id}?join=1#accept`, label: `Bet ${fallback.creator_side === 'yes' ? 'no' : 'yes'}` }
         : dareBet ? { href: `/bets/${dareBet.id}`, label: `Bet ${dareBet.other}` }
           : !settled ? { href: '/me', label: 'Your predictions' } : null;
     send(ctx.res, 200, await layout(ctx, 'Bets on what is said on X', html`
-      <h1 class="visually-hidden">Stated</h1>
+      ${config.near.real ? html`<section class="bet-start" aria-label="Make a bet">
+        <div class="hero"><h1>Make a bet</h1></div>
+        <form method="get" action="/me/bets/new" data-bet-start>
+          <label for="home-sentence">Your bet</label>
+          <textarea id="home-sentence" name="sentence" rows="3" maxlength="1100" required aria-describedby="home-example"></textarea>
+          <p class="quiet" id="home-example">“FAA lifts the ground stop by midnight, 0.25 NEAR on yes”</p>
+          <div class="acts"><button class="primary big" type="submit">Review bet</button></div>
+        </form>
+        <p class="gut home-demo"><a class="tl" href="/demo">See the demo</a></p>
+        <p class="gut quiet">On X, tag <a class="tl" href="https://x.com/${bot}">@${bot}</a> with your bet.</p>
+        <script src="/static/sentence.js" defer></script>
+      </section>` : html`<h1 class="visually-hidden">Stated</h1>`}
       ${settled ? html`<section class="settled-feature">
         ${await rulingPost(db, settled, settled.outcome, { claimHref: `/bets/${settled.id}/ruling` })}
         <a class="feature-result" href="/bets/${settled.id}/ruling"><div class="verdict ruling-verdict${settled.outcome === 'yes' ? ' yes' : ''}"><b>${settled.outcome === 'yes' ? html`<span class="hl">Yes</span>` : 'No'}</b><span>${dayMonth(settled.enclave?.decidedAt || settled.outlayer?.recordedAt || settled.settled_at, { year: true })}</span></div>
         <p class="gut feature-winner">${betLead(settled).text} the ${formatTestNear((BigInt(settled.stake_yocto) * 2n).toString())} ${unit()} pot.</p></a><p class="gut settlement-line">${settlementMarkup(await settlementSentence(db, config, settled))}</p></section>`
       : fallback ? html`${await betSourceHeader(db, null, fallback, config.x.simulatedOrigin)}<p class="prop">${fallback.claim}</p>${await betSourceHeader(db, null, fallback, config.x.simulatedOrigin, { timestamp: true })}${detailBetBlock(fallback, { viewer: ctx.user, faces: fallbackFaces, joinHref: `/bets/${fallback.id}?join=1#accept` })}`
         : lead ? html`${postCard(lead, { faces, sweep: true, link: publicRow(lead).link })}${dareBet ? html`<div class="dare">${dareBet.line}</div>` : ''}` : ''}
-      ${config.near.real ? html`<p class="pitch home-intro">Sign in with X, add NEAR to your account, then make or take a bet. The <a class="tl" href="/court">OutLayer referee</a> rules and the winner is paid.</p>` : html`<p class="pitch home-intro${hasOpenOffers ? '' : ' empty'}">${hasOpenOffers ? '' : 'No open offers right now. '}Reply to any post on X with <span class="mention">@${bot} bet ${config.play.defaultStakeNear} no</span>.${hasOpenOffers ? ' Three AI models judge it and NEAR pays the winner.' : ''}</p>`}
+      ${config.near.real ? '' : html`<p class="pitch home-intro${hasOpenOffers ? '' : ' empty'}">${hasOpenOffers ? '' : 'No open offers right now. '}Reply to any post on X with <span class="mention">@${bot} bet ${config.play.defaultStakeNear} no</span>.${hasOpenOffers ? ' Three AI models judge it and NEAR pays the winner.' : ''}</p>`}
       ${homeAction ? html`<div class="acts"><a class="pill solid big" href="${homeAction.href}">${homeAction.label}</a></div>` : ''}
-      ${hall.total || config.near.real ? html`<section id="public-bets"><p class="pitch"><a class="tl" href="#public-bets">${hall.total} ${hall.total === 1 ? 'bet' : 'bets'}</a>, ${hall.settled} settled, ${formatTestNear(hall.wonYocto)} ${unit()} won${outsideTaken >= 1 || config.near.real ? html`, <span class="outside-taken">${outsideTaken} ${outsideTaken === 1 ? 'bet' : 'bets'} taken by people outside the team</span>` : ''}</p>${offers.length || config.near.real ? html`<h2 class="lead">Open offers</h2>${offers.length ? betList(offers, { hall: true }) : html`<p class="empty quiet">No open offers yet.</p>`}` : ''}${active.length || config.near.real ? html`<h2 class="lead">Bets in progress</h2>${active.length ? betList(active, { hall: true }) : html`<p class="empty quiet">No bets in progress yet.</p>`}` : ''}${finished.length || config.near.real ? html`<h2 class="lead">Finished bets</h2>${finished.length ? betList(finished, { hall: true }) : html`<p class="empty quiet">No finished bets yet.</p>`}` : ''}</section>` : ''}
+      ${hall.total ? html`<section id="public-bets"><p class="pitch"><a class="tl" href="#public-bets">${hall.total} ${hall.total === 1 ? 'bet' : 'bets'}</a>, ${hall.settled} settled, ${formatTestNear(hall.wonYocto)} ${unit()} won${outsideTaken >= 1 ? html`, <span class="outside-taken">${outsideTaken} ${outsideTaken === 1 ? 'bet' : 'bets'} taken by people outside the team</span>` : ''}</p>${offers.length ? html`<h2 class="lead">Open offers</h2>${betList(offers, { hall: true })}` : ''}${active.length ? html`<h2 class="lead">Bets in progress</h2>${betList(active, { hall: true })}` : ''}${finished.length ? html`<h2 class="lead">Finished bets</h2>${betList(finished, { hall: true })}` : ''}</section>` : config.near.real ? html`<p class="empty quiet home-empty">No public offers yet.</p>` : ''}
       ${hall.next ? html`<p class="gut"><a class="tl" rel="next" href="/?betsBefore=${hall.next}#public-bets">More bets</a></p>` : ''}
       ${rest.length ? fileList(rest, publicRow, faces, betLines) : ''}
     `, { flush: true, signin: false, og: {

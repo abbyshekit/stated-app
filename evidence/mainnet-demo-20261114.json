@@ -1,0 +1,174 @@
+{
+  "schemaVersion": 1,
+  "network": "mainnet",
+  "mode": "operator-controlled",
+  "checkedAt": "2026-11-14T12:30:31.058Z",
+  "escrow": "escrow.statedforecast.near",
+  "referee": "referee.statedforecast.near",
+  "overall": "PASS",
+  "checks": [
+    {
+      "name": "yes: free.rpc.fastnear.com",
+      "ok": true,
+      "detail": "Bet, ruling, calls, and full receipt delivery verified"
+    },
+    {
+      "name": "yes: near.drpc.org",
+      "ok": true,
+      "detail": "Bet, ruling, calls, and full receipt delivery verified"
+    },
+    {
+      "name": "yes: provider corroboration",
+      "ok": true,
+      "detail": "Public state agrees across both providers"
+    },
+    {
+      "name": "no: free.rpc.fastnear.com",
+      "ok": true,
+      "detail": "Bet, ruling, calls, and full receipt delivery verified"
+    },
+    {
+      "name": "no: near.drpc.org",
+      "ok": true,
+      "detail": "Bet, ruling, calls, and full receipt delivery verified"
+    },
+    {
+      "name": "no: provider corroboration",
+      "ok": true,
+      "detail": "Public state agrees across both providers"
+    },
+    {
+      "name": "referee referee.statedforecast.near: no access keys",
+      "ok": true,
+      "detail": "0 access keys"
+    },
+    {
+      "name": "referee referee.statedforecast.near: reproducible code hash",
+      "ok": true,
+      "detail": "code hash 37eTRabVTkLTgwKc5kDBx2HTrjBy1LLsbqpnsDry678n; SHA-256 1f6b35b9fce99165af5090ff04d4ff6493933ec90ab3c0a37a532255bf46ed83"
+    },
+    {
+      "name": "referee get_config.escrow",
+      "ok": true,
+      "detail": "\"escrow.statedforecast.near\""
+    },
+    {
+      "name": "referee get_config.outlayer",
+      "ok": true,
+      "detail": "\"outlayer.near\""
+    },
+    {
+      "name": "referee get_config.wasm_url",
+      "ok": true,
+      "detail": "\"https://stated-production.up.railway.app/static/outlayer/stated-jury-85198c7afbfca6ad6cb42c76fe064abdf480d18f4db4955b90ce205d768d9791.wasm\""
+    },
+    {
+      "name": "referee get_config.wasm_hash",
+      "ok": true,
+      "detail": "\"85198c7afbfca6ad6cb42c76fe064abdf480d18f4db4955b90ce205d768d9791\""
+    },
+    {
+      "name": "referee get_config.secrets_owner",
+      "ok": true,
+      "detail": "\"statedforecast.near\""
+    },
+    {
+      "name": "referee get_config.secrets_profile",
+      "ok": true,
+      "detail": "\"jury\""
+    },
+    {
+      "name": "jury download: pinned SHA-256",
+      "ok": true,
+      "detail": "https://stated-production.up.railway.app/static/outlayer/stated-jury-85198c7afbfca6ad6cb42c76fe064abdf480d18f4db4955b90ce205d768d9791.wasm; SHA-256 85198c7afbfca6ad6cb42c76fe064abdf480d18f4db4955b90ce205d768d9791"
+    }
+  ],
+  "cases": [
+    {
+      "id": "52fe13e9-0bc5-4dd1-9ff9-6dfecfe2bb25",
+      "outcome": "yes",
+      "claim": "Controlled validation A. IANA maintains example.com and example.org for documentation, and neither domain is available for registration or transfer.\n\nCounts as yes:\nResolve Yes if the IANA Example Domains page states that example.com and example.org are maintained for documentation and are unavailable for registration or transfer at the resolution deadline. Resolve No if the page contradicts that statement. Resolve Void if the source cannot establish either answer.",
+      "stakeYocto": "100000000000000000000000",
+      "potYocto": "200000000000000000000000",
+      "creatorSide": "yes",
+      "winner": "abhishekesq.play.statedforecast.near",
+      "resolvedAtNs": "1794634578195406674",
+      "verdicts": [
+        {
+          "model": "Qwen/Qwen3.8-27B",
+          "outcome": "yes",
+          "confidence": 0.99
+        },
+        {
+          "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+          "outcome": "yes",
+          "confidence": 0.97
+        },
+        {
+          "model": "z-ai/glm-5.3-flash",
+          "outcome": "yes",
+          "confidence": 0.95
+        }
+      ],
+      "sourceUrl": "https://www.iana.org/help/example-domains",
+      "payout": {
+        "hash": "Cd1bvxP93A8DEmF4mU27tjMvDXiQkYSyt44NrzbhRiQm",
+        "amountYocto": "200000000000000000000000",
+        "recipient": "abhishekesq.play.statedforecast.near",
+        "verified": true
+      },
+      "settlement": {
+        "hash": "H7pZgi5CkGZ99JzRhBA5jvU8Ky3NWSDSgf4AQyKKxrrS",
+        "method": "referee",
+        "referee": "referee.statedforecast.near"
+      },
+      "providers": [
+        "https://free.rpc.fastnear.com",
+        "https://near.drpc.org"
+      ]
+    },
+    {
+      "id": "8e3b3349-bb3e-4d83-80c3-6c133c0652d8",
+      "outcome": "no",
+      "claim": "Controlled validation B. IANA offers example.com and example.org for unrestricted public registration and transfer.\n\nCounts as yes:\nResolve Yes only if the IANA Example Domains page offers both example.com and example.org for unrestricted public registration and transfer at the resolution deadline. An explicit statement that those domains are unavailable for registration or transfer resolves No. Resolve Void if the source cannot establish either answer.",
+      "stakeYocto": "100000000000000000000000",
+      "potYocto": "200000000000000000000000",
+      "creatorSide": "no",
+      "winner": "abhishekesq.play.statedforecast.near",
+      "resolvedAtNs": "1794635157068015141",
+      "verdicts": [
+        {
+          "model": "Qwen/Qwen3.8-27B",
+          "outcome": "no",
+          "confidence": 0.99
+        },
+        {
+          "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+          "outcome": "no",
+          "confidence": 0.98
+        },
+        {
+          "model": "z-ai/glm-5.3-flash",
+          "outcome": "no",
+          "confidence": 0.97
+        }
+      ],
+      "sourceUrl": "https://www.iana.org/help/example-domains",
+      "payout": {
+        "hash": "CPgughxzKn2segrVaDSR8d56wKFC1PSDn48GyS1Pchwy",
+        "amountYocto": "200000000000000000000000",
+        "recipient": "abhishekesq.play.statedforecast.near",
+        "verified": true
+      },
+      "settlement": {
+        "hash": "5GVdQRjuGfNZV8QRdu6DZBTyWUPuFWitKLw8FkE4u6XK",
+        "method": "referee",
+        "referee": "referee.statedforecast.near"
+      },
+      "providers": [
+        "https://free.rpc.fastnear.com",
+        "https://near.drpc.org"
+      ]
+    }
+  ]
+}

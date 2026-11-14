@@ -540,14 +540,19 @@ export function registerBetRoutes({ route, db, config, layout, needUser, needAdm
         <textarea id="bet-sentence" name="sentence" rows="3" maxlength="1100" required aria-describedby="bet-example">${sentence}</textarea>
         <p class="quiet" id="bet-example">“FAA lifts the ground stop by midnight, 0.25 NEAR on yes”</p>
         <div class="acts"><button class="primary big" type="submit">Review bet</button></div>
+        <p class="quiet sentence-status" role="status" data-sentence-status></p>
       </form>
       <p class="gut"><a class="tl" href="/me/bets/new?details=1">Set terms manually</a></p>
-      <script src="/static/wallet.js?v=${walletVersion}" defer></script>
+      <script src="/static/sentence.js" defer></script>
     `, { status: error?.status || 200 });
   }
 
-  route('GET', /^\/me\/bets\/new$/, (ctx) => config.near?.real && !ctx.url.searchParams.has('save')
-    && ctx.url.searchParams.get('details') !== '1' ? quickBetPage(ctx) : newBetPage(ctx));
+  route('GET', /^\/me\/bets\/new$/, (ctx) => {
+    const sentence = ctx.url.searchParams.get('sentence') || '';
+    if (sentence.length > 1100) throw new UserError('Keep the bet sentence within 1100 characters.');
+    return config.near?.real && !ctx.url.searchParams.has('save') && ctx.url.searchParams.get('details') !== '1'
+      ? quickBetPage(ctx, { sentence }) : newBetPage(ctx);
+  });
 
   route('POST', /^\/me\/bets\/quick$/, async (ctx) => {
     const form = await needPost(ctx);

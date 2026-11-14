@@ -1,8 +1,23 @@
 # Judge path
 
+## Verify the mainnet demo
+
+Open the [public demo](https://stated-mainnet-production.up.railway.app/demo). It shows operator-controlled Yes and No bets, their jury verdicts and their 0.2 NEAR withdrawals. No sign-in is required. The X thread linked there demonstrates draft creation separately; its FAA draft expired unfunded.
+
+After `npm ci`, run:
+
+```sh
+node scripts/verify-mainnet-demo.mjs
+```
+
+The command reads public data, needs no key and exits nonzero on a failed check. The [saved run](evidence/mainnet-demo-20261114.json) passed 15 checks: the referee deployment, exact bet terms and material commitments, unanimous model verdicts, settlement receipt chains, and exact native-token withdrawals to the winning account. Both configured RPC providers must agree. Wrong amounts are explicitly rejected. This verifies the on-chain result and payout; it does not independently verify model attestation.
+
+- Yes withdrawal: [Cd1bvxP9…](https://nearblocks.io/txns/Cd1bvxP93A8DEmF4mU27tjMvDXiQkYSyt44NrzbhRiQm).
+- No withdrawal: [CPgughxz…](https://nearblocks.io/txns/CPgughxzKn2segrVaDSR8d56wKFC1PSDn48GyS1Pchwy).
+
 ## Verify the demo bet
 
-The [demo video](docs/stated-demo-live-testnet.mp4) shows the [ruling on bet 0bf4f3a7](https://stated-production.up.railway.app/bets/0bf4f3a7-8dfc-44e2-a139-1e33ce844178/ruling) and its 0.2 test NEAR withdrawal. Run these after `npm ci`. They use public data and need no wallet or API key.
+The earlier [testnet video](docs/stated-demo-live-testnet.mp4) shows the [ruling on bet 0bf4f3a7](https://stated-production.up.railway.app/bets/0bf4f3a7-8dfc-44e2-a139-1e33ce844178/ruling) and its 0.2 test NEAR withdrawal. Run these after `npm ci`. They use public data and need no wallet or API key.
 
 ```sh
 node scripts/verify-enclave-ruling.mjs https://stated-production.up.railway.app 0bf4f3a7-8dfc-44e2-a139-1e33ce844178
@@ -26,7 +41,7 @@ npm run judge -- --outlayer --network mainnet \
   --secrets-owner statedforecast.near
 ```
 
-The deployment check covers the first three items below. A settled mainnet OutLayer bet is still needed for the fourth.
+The deployment check covers the first three items below. The [mainnet demo verifier](#verify-the-mainnet-demo) also checks the two completed controlled settlements and their withdrawals.
 
 - Referee: no access keys; code hash matches the approved referee build.
 - Config: expected escrow, OutLayer contract, jury URL/hash, secrets owner and profile.

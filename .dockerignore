@@ -12,6 +12,7 @@ out
 design
 evidence/*
 !evidence/hackathon-demo-20261111.json
+!evidence/mainnet-demo-20261114.json
 eval
 contracts/**/target
 *.log

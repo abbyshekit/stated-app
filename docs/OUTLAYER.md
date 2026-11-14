@@ -2,7 +2,7 @@
 
 Stated can settle a bet without a Stated-controlled key. A keyless NEAR contract (the **referee**) is named as the referee in the escrow. To rule, it asks [OutLayer](https://app.outlayer.ai) to run a pinned WebAssembly program (the **jury**). The jury fetches the committed evidence, asks three NEAR AI Cloud models, and returns a result. The referee checks the result's internal consistency and tells the escrow to pay Yes, No or Void. If no ruling happens, anyone can refund both stakes seven days after the deadline.
 
-**Status, 13 November 2026.** The referee is deployed on NEAR testnet and OutLayer testnet ran the published jury. The full referee chain ran on testnet up to the point where the jury needs its NEAR AI API key, which had not been stored. No ruling has been produced on a live network, nothing is deployed on mainnet, and no payout has come from this path. [Live evidence](#live-evidence-so-far) lists what ran and [Not yet proven](#not-yet-proven) lists what did not.
+**Status, 14 November 2026.** The mainnet referee is deployed with zero access keys. Two operator-controlled bets completed the OutLayer jury, one Yes and one No, and each winner withdrew 0.2 NEAR. The [public demo](https://stated-mainnet-production.up.railway.app/demo) shows the outcomes and withdrawal links. `node scripts/verify-mainnet-demo.mjs` passed 15 public-data checks; [saved evidence](../evidence/mainnet-demo-20261114.json) records the run. It does not independently verify model attestation. [Remaining limits](#not-yet-proven) distinguish these completed trials from untested cases.
 
 Source: referee [contracts/outlayer-referee/src/lib.rs](../contracts/outlayer-referee/src/lib.rs), jury [outlayer/stated-jury/src](../outlayer/stated-jury/src), server [server/src/outlayer.mjs](../server/src/outlayer.mjs).
 
@@ -318,6 +318,15 @@ To audit one ruling by hand: read `get_ruling(bet_id)` for the registered materi
 
 ## Live evidence so far
 
+The [mainnet verifier](../scripts/verify-mainnet-demo.mjs) rechecks both controlled trials through two public RPC providers, including committed terms, jury material, settlement receipt chains and exact native-token withdrawals. It needs no key.
+
+| Mainnet trial | Result | Withdrawal |
+| --- | --- | --- |
+| `52fe13e9-0bc5-4dd1-9ff9-6dfecfe2bb25` | Unanimous Yes; winner received 0.2 NEAR | [Cd1bvxP9…](https://nearblocks.io/txns/Cd1bvxP93A8DEmF4mU27tjMvDXiQkYSyt44NrzbhRiQm) |
+| `8e3b3349-bb3e-4d83-80c3-6c133c0652d8` | Unanimous No; winner received 0.2 NEAR | [CPgughxz…](https://nearblocks.io/txns/CPgughxzKn2segrVaDSR8d56wKFC1PSDn48GyS1Pchwy) |
+
+The following table records the earlier testnet probes from 13 November 2026, before the secret was configured.
+
 | What | Result | Record |
 | --- | --- | --- |
 | Direct OutLayer testnet execution of the published jury (hash `3db758…4456`), with no secret attached | OutLayer fetched the artifact by URL and hash, compiled it, and ran it. The jury read its input and exited with `Encrypted NEARAI_API_KEY secret is missing`, before any fetch or model call. Charged 0.0011649 NEAR of a 0.03 NEAR deposit; the rest was refunded. | testnet transaction `AxvQYtmEF7yMFsqZDCCNU3hiQC6xHqZPU7czW92FGoL4` |
@@ -328,13 +337,12 @@ All three can be looked up by hash on a NEAR testnet explorer; the figures above
 
 ## Not yet proven
 
-- **The success path.** No live run has produced a valid `JuryResult`, passed `on_ruling`, selected Yes, No or Void, sent `referee_resolve`, credited the escrow or paid out. Everything after the failure callback is covered by unit tests with mock callbacks only.
-- **Secret release.** That OutLayer releases a hash-bound, referee-only `NEARAI_API_KEY` to a call that comes from the referee has not been exercised.
-- **Live network behavior of the jury.** No request has reached Coinbase, a linked page or NEAR AI from inside OutLayer. WASI HTTP, TLS, redirects, content-type handling, timeouts and the 150-second budget have been exercised only against mock transports. Real model latency and output validity are unmeasured.
+- **Void and refund cases.** The two completed mainnet trials exercise successful Yes and No settlement and withdrawal. They do not establish a live OutLayer Void or refund path.
+- **Secret enforcement.** The two juries completed with model verdicts, exercising the configured inference path. These trials do not independently audit OutLayer's secret-release confidentiality or access enforcement.
+- **Network edge cases.** The controlled trials used the IANA evidence page and returned three model verdicts. They do not benchmark latency or establish live Coinbase behavior, redirects, content-type failures, timeouts or the 150-second budget.
 - **Private-address resolution.** Blocking DNS names that resolve to private addresses is the worker host's job and has not been tested.
 - **OutLayer behavior at the edges.** That OutLayer rejects bytes that do not match the pinned hash, how it times out and resumes, and the real gas cost of the success path (the settlement receipts) are unverified.
 - **Costs.** The cost of a successful run and of NEAR AI inference has not been measured. The 0.019001 NEAR figure is a quoted estimate.
 - **Independent rebuild.** Both fingerprints were rebuilt byte-identically from two copied checkouts on one machine; no independent party has rebuilt either artifact yet.
-- **Mainnet.** The referee is deployed and [all nine deployment checks passed](../evidence/judge-outlayer-mainnet.json). An OutLayer ruling and payout remain to be verified on mainnet.
 - **Upstream trust remains.** OutLayer administrators and worker software, NEAR AI Cloud, and the evidence sources stay trusted as described above. This path does not verify NEAR AI's per-model attestation. Strict absence of administrative influence over outcomes is not claimed.
 - **Compatibility.** Existing bets and the old server referee path are unchanged and cannot move to this referee.
