@@ -97,7 +97,10 @@ export async function rpc(method, params, { fetchImpl = fetch, urls = fetchImpl 
       failure = error;
       continue;
     }
-    if (!response.ok || response.redirected) {
+    // Some providers use an HTTP client-error status for JSON-RPC errors,
+    // including the method error needed by the legacy receipt fallback.
+    const rpcErrorStatus = response.status === 400 || response.status === 422;
+    if ((!response.ok && !rpcErrorStatus) || response.redirected) {
       await response.body?.cancel().catch(() => {});
       failure = new Error(`NEAR RPC HTTP ${response.status}`);
       if (response.status === 408 || response.status === 429 || response.status >= 500) {
@@ -111,7 +114,10 @@ export async function rpc(method, params, { fetchImpl = fetch, urls = fetchImpl 
     const payload = await readRpcJson(response);
     if (payload?.jsonrpc !== '2.0' || payload.id !== 'stated'
       || Object.hasOwn(payload, 'result') === Object.hasOwn(payload, 'error')) throw new Error('Invalid NEAR RPC response');
-    if (Object.hasOwn(payload, 'result')) return payload.result;
+    if (Object.hasOwn(payload, 'result')) {
+      if (!response.ok) throw new Error(`NEAR RPC HTTP ${response.status}`);
+      return payload.result;
+    }
     if (!Number.isInteger(payload.error?.code) || typeof payload.error.message !== 'string') throw new Error('Invalid NEAR RPC response');
     const error = new Error(`NEAR RPC error: ${payload.error.message.slice(0, 300)}`);
     error.rpcCause = payload.error.cause?.name || null;

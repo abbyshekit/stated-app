@@ -95,6 +95,36 @@ test('RPC requires a matching response envelope and bounds the response stream',
   await assert.rejects(request(new Response(' '.repeat(1024 * 1024 + 1))), /response too large/);
 });
 
+for (const status of [400, 422]) {
+  test(`HTTP ${status} preserves a bound RPC method error without accepting an error-status result`, async () => {
+    const request = payload => rpc('tx_status', {}, { fetchImpl: async () => Response.json(payload, { status }) });
+    await assert.rejects(request({ jsonrpc: '2.0', id: 'stated', error: { code: -32601, message: 'method is not available' } }),
+      error => error.rpcCode === -32601);
+    await assert.rejects(request({ jsonrpc: '2.0', id: 'wrong', error: { code: -32601, message: 'method is not available' } }),
+      /Invalid NEAR RPC response/);
+    await assert.rejects(request({ jsonrpc: '2.0', id: 'stated', result: { forged: true } }), /NEAR RPC HTTP/);
+  });
+}
+
+test('an HTTP400 method error falls back to finalized legacy receipts for the exact payout', async () => {
+  const recorded = JSON.parse(readFileSync(new URL('./fixtures/hosted-court-payout-rpc.json', import.meta.url)));
+  const result = recorded.providers[0].responses.withdrawal.result;
+  const calls = [];
+  const chain = nearChain({ fetchImpl: async (_url, options) => {
+    const request = JSON.parse(options.body);
+    calls.push(request.method);
+    if (request.method === 'tx_status') return Response.json({ jsonrpc: '2.0', id: 'stated',
+      error: { code: -32601, message: 'method is not available' } }, { status: 400 });
+    assert.equal(request.method, 'EXPERIMENTAL_tx_status');
+    assert.equal(request.params.tx_hash, result.transaction.hash);
+    return Response.json({ jsonrpc: '2.0', id: 'stated', result });
+  } });
+  assert.deepEqual(await chain.depositDelivery({ transactionHash: result.transaction.hash,
+    accountId: result.transaction.signer_id, amountYocto: '20000000000000000000000', wrapContractId, unwrap: true }),
+  { final: true, kind: 'native', deliveredYocto: '20000000000000000000000' });
+  assert.deepEqual(calls, ['tx_status', 'EXPERIMENTAL_tx_status']);
+});
+
 test('the recorded finalized NEAR receipt graph still proves its escrow payout', () => {
   const recorded = JSON.parse(readFileSync(new URL('./fixtures/hosted-court-payout-rpc.json', import.meta.url)));
   for (const provider of Object.values(recorded.providers)) {
