@@ -7,6 +7,7 @@ import { runCompliance } from './compliance.mjs';
 import { checkSources, deliverDms, refreshEdited, scanDeadlines } from './notify.mjs';
 import { goneOnX, postFetcher, postText } from './xapi.mjs';
 import { applyTextPolicy, sourcesNeedingText, storesAllXText, syncXText, xClaimText } from './xtext.mjs';
+import { pollMentionDiscovery } from './mention-discovery.mjs';
 
 function mergeIncludes(pages) {
   const users = new Map();
@@ -57,9 +58,16 @@ export async function pollMentions(db, config, x, { maxPages = 50 } = {}) {
     }
   }
   const newest = pages[0]?.meta?.newest_id;
+  const discovery = typeof x.searchMentions === 'function' ? await pollMentionDiscovery(db, x, {
+    baselineId: sinceId || newest,
+    includeRecentBacklog: !sinceId && config.x.mentionsStart === 'all',
+    processMention: (mention, foundIncludes) => processMention(db, config, {
+      mention, includes: foundIncludes, bot, fetchPost,
+    }),
+  }) : null;
   if (newest && (!sinceId || BigInt(newest) > BigInt(sinceId))) await kvSet(db, 'mentions_since_id', newest);
   if (!initialized) await kvSet(db, 'mentions_initialized', new Date().toISOString());
-  return { processed, truncated: Boolean(token) };
+  return { processed, truncated: Boolean(token), ...(discovery ? { discovery } : {}) };
 }
 
 // Errors are retried up to three times; a claim abandoned by a crash is
