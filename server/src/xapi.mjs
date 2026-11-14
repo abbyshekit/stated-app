@@ -200,7 +200,7 @@ export function botClient(db, config, fetchImpl = fetch) {
     return current.accessToken;
   }
 
-  async function call(path, { method = 'GET', body } = {}, retried = false) {
+  async function call(path, { method = 'GET', body, signal } = {}, retried = false) {
     const res = await fetchImpl(`${config.x.apiBase}${path}`, {
       method,
       headers: {
@@ -208,10 +208,11 @@ export function botClient(db, config, fetchImpl = fetch) {
         ...(body ? { 'content-type': 'application/json' } : {}),
       },
       body: body ? JSON.stringify(body) : undefined,
+      ...(signal ? { signal } : {}),
     });
     if (res.status === 401 && !retried) {
       await refresh(cached?.version);
-      return call(path, { method, body }, true);
+      return call(path, { method, body, signal }, true);
     }
     const data = await readBody(res);
     if (!res.ok) {
@@ -238,6 +239,17 @@ export function botClient(db, config, fetchImpl = fetch) {
       if (sinceId) params.set('since_id', sinceId);
       if (paginationToken) params.set('pagination_token', paginationToken);
       return assertShape(await call(`/2/users/${userId}/mentions?${params}`));
+    },
+    async searchMentions({ sinceId, paginationToken } = {}) {
+      const { username } = await this.identity();
+      if (!/^[A-Za-z0-9_]{1,15}$/.test(username || '')) throw new Error('The bot username is invalid for mention discovery.');
+      const params = new URLSearchParams({
+        query: `@${username} -from:${username} -is:retweet`, max_results: '10',
+        'tweet.fields': TWEET_FIELDS, 'user.fields': USER_FIELDS, expansions: EXPANSIONS,
+      });
+      if (sinceId) params.set('since_id', sinceId);
+      if (paginationToken) params.set('next_token', paginationToken);
+      return assertShape(await call(`/2/tweets/search/recent?${params}`, { signal: AbortSignal.timeout(10_000) }));
     },
     async posts(ids, { fields = TWEET_FIELDS, expansions = 'author_id', userFields = USER_FIELDS } = {}) {
       const params = new URLSearchParams({
