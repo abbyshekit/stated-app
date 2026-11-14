@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { functionCallFunds, gasPurchasePrice, NEAR_CALL_GAS } from '../src/near-escrow.mjs';
 
-function mockGas(current, floor, version = 88) {
+function mockGas(current, floor, version = 88, blockHeight = undefined) {
   return { fetchImpl: async (_url, request) => {
     const { method } = JSON.parse(request.body);
     if (method === 'gas_price') return Response.json({ jsonrpc: '2.0', id: 'stated', result: { gas_price: current } });
-    if (method === 'query') return Response.json({ jsonrpc: '2.0', id: 'stated', result: { amount: '50000000000000000000000', storage_usage: 182 } });
+    if (method === 'query') return Response.json({ jsonrpc: '2.0', id: 'stated', result: { amount: '50000000000000000000000', storage_usage: 182, block_height: blockHeight } });
     assert.equal(method, 'EXPERIMENTAL_protocol_config');
     return Response.json({ jsonrpc: '2.0', id: 'stated', result: {
       protocol_version: version,
@@ -21,6 +21,19 @@ test('NEAR receipt prepayment uses the protocol floor when the block price is lo
   assert.equal(await gasPurchasePrice(mockGas('1200000000', '1000000000')), 1200000000n);
   assert.equal(await gasPurchasePrice(mockGas('100000000', undefined, 84)), 100000000n);
   await assert.rejects(gasPurchasePrice(mockGas('100000000', undefined)), /Invalid yoctoNEAR amount/);
+});
+
+test('funding views reject missing, malformed and older heights and accept fresh final views', async () => {
+  for (const blockHeight of [undefined, '120', -1, 119, Number.MAX_SAFE_INTEGER + 1]) {
+    await assert.rejects(functionCallFunds('managed.testnet', NEAR_CALL_GAS,
+      { ...mockGas('100000000', '1000000000', 88, blockHeight), minimumBlockHeight: 120 }), { staleBalance: true });
+  }
+  for (const blockHeight of [120, 121]) {
+    const funds = await functionCallFunds('managed.testnet', NEAR_CALL_GAS,
+      { ...mockGas('100000000', '1000000000', 88, blockHeight), minimumBlockHeight: 120 });
+    assert.equal(funds.blockHeight, blockHeight);
+    assert.equal(funds.balance, 50000000000000000000000n);
+  }
 });
 
 test('call liquidity includes the signer storage and fixed fees at the receipt gas price', async () => {

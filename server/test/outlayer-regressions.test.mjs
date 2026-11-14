@@ -14,6 +14,7 @@ import { outlayerTestFetch } from './support/outlayer-fetch.mjs';
 import { walletPayload } from '../src/near-escrow.mjs';
 import { assertMainnetStakeCap } from '../src/reputation.mjs';
 import { nearChain, reservePlaySigner, withAvailablePlaySigner } from '../src/play.mjs';
+import { OUTLAYER_CLEANUP_COMPLETE_SQL } from '../src/treasury-liquidity.mjs';
 
 // Execute the actual module with only its external boundaries replaced. This
 // keeps durable-intent and keeper regressions runnable when PG cannot start.
@@ -25,7 +26,7 @@ async function sourceModule(name, dependencies, names) {
 }
 
 const deps = { createHash, randomUUID, isIP, canonicalJson, fingerprint, checkPlan, decide, materialHash, UserError, reservePlaySigner, withAvailablePlaySigner,
-  InvalidNonceError, TransactionExpiredError, isNamedAccount: () => true };
+  InvalidNonceError, TransactionExpiredError, OUTLAYER_CLEANUP_COMPLETE_SQL, isNamedAccount: () => true };
 const base = { id: 'test-bet', claim: 'The release ships.', madeAt: '2026-11-12T18:00:00.000Z',
   deadline: '2026-11-12T19:00:00.000Z', postUrl: 'https://www.sec.gov/release', creatorSide: 'yes', plan: { source: 'evidence' } };
 

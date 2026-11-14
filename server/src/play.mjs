@@ -24,6 +24,7 @@ import { prepareNearAction, syncNearBet } from './near-bets.mjs';
 import { COURT_CALL_GAS, functionCallFunds, NEAR_CALL_GAS as GAS, rpc } from './near-escrow.mjs';
 import { inPilot, isNamedAccount, network, unit } from './near-network.mjs';
 import { UserError } from './store.mjs';
+import { assertTreasuryCreationAvailable, assertTreasuryFundingLiquidity, fundingReceiptProof, initialMainnetGrant, MAINNET_FEE_GRANT_YOCTO, sendTreasuryFunding, treasuryRecipientBalance, treasuryRecipientFunds } from './treasury-liquidity.mjs';
 
 const D = Decimal.clone({ precision: 60 });
 const NEAR = new D('1e24');
@@ -34,35 +35,6 @@ export const near = (yoctoAmount) => new D(yoctoAmount).div(NEAR).toFixed();
 // stop at the lifetime grant, so one account cannot drain the treasury.
 const LIFETIME_GRANT_YOCTO = yocto('6');
 const TREASURY_LOW_YOCTO = yocto('4');
-const MAINNET_FEE_GRANT_YOCTO = yocto('0.05');
-
-async function initialMainnetGrant(db, config, row, balance) {
-  return db.tx(async (tx) => {
-    // One database-wide reservation lock makes count + assignment atomic across
-    // processes. It is released before the network call; the assignment persists.
-    await tx.query("select pg_advisory_xact_lock(hashtextextended('play-mainnet-sponsor-grants', 0))");
-    const assigned = await tx.one('select * from play_account_grants where x_user_id=$1', [row.x_user_id]);
-    if (assigned) {
-      if (assigned.account_id !== row.account_id || assigned.public_key !== row.public_key) {
-        throw new UserError('This X account already received its starting balance. Restore its original account record before reopening it.', 409);
-      }
-      return assigned.amount_yocto;
-    }
-    // A pre-migration interrupted creation has no reliable funding record. Never
-    // substitute the current configuration for the amount that actually moved.
-    if (balance != null) throw new Error('This unfinished account has no recorded initial grant. Its funding needs operator review.');
-    const requested = yocto(config.play.startNear || '0.05');
-    let amount = requested;
-    if (BigInt(requested) > BigInt(MAINNET_FEE_GRANT_YOCTO)) {
-      const used = await tx.one('select count(*)::int as n from play_account_grants where amount_yocto::numeric > $1::numeric', [MAINNET_FEE_GRANT_YOCTO]);
-      // Zero deliberately disables sponsorship; it never means unlimited.
-      if (used.n >= (config.play.sponsorLimit ?? 25)) amount = MAINNET_FEE_GRANT_YOCTO;
-    }
-    await tx.query('insert into play_account_grants(x_user_id, account_id, public_key, amount_yocto) values($1,$2,$3,$4)',
-      [row.x_user_id, row.account_id, row.public_key, amount]);
-    return amount;
-  });
-}
 
 /**
  * The account a key controls with no transaction at all: its public key in hex. NEAR sent to that
@@ -129,7 +101,7 @@ export function nearChain({ urls, fetchImpl = fetch } = {}) {
       const text = Buffer.from(status.SuccessValue, 'base64').toString('utf8');
       try { value = JSON.parse(text); } catch { value = text; }
     }
-    return { hash, ok, value, failure: ok ? null : final && Object.hasOwn(status, 'Failure')
+    return { hash, ok, final, value, failure: ok ? null : final && Object.hasOwn(status, 'Failure')
       ? JSON.stringify(status.Failure).slice(0, 400) : 'Final success not established' };
   };
   const broadcast = async (transaction) => sent(await provider.sendTransactionUntil(transaction, 'FINAL'),
@@ -196,7 +168,7 @@ export function nearChain({ urls, fetchImpl = fetch } = {}) {
         throw error;
       }
     },
-    callFunds: (accountId, gas = GAS) => functionCallFunds(accountId, gas, rpcOptions),
+    callFunds: (accountId, gas = GAS, options = {}) => functionCallFunds(accountId, gas, { ...rpcOptions, ...options }),
     async readAccessKeys(accountId) {
       const state = await request('query', { request_type: 'view_access_key_list', finality: 'final', account_id: accountId });
       const valid = (key) => {
@@ -239,7 +211,17 @@ export function nearChain({ urls, fetchImpl = fetch } = {}) {
     },
     createAccount: ({ parentId, parentSecret, accountId, publicKey, amountYocto }) => send(parentId, parentSecret, accountId,
       [actions.createAccount(), actions.transfer(BigInt(amountYocto)), actions.addFullAccessKey(PublicKey.fromString(publicKey))]),
+    async prepareCreateAccount({ parentId, parentSecret, accountId, publicKey, amountYocto }) {
+      const transaction = await signer(parentId, parentSecret).createSignedTransaction({ receiverId: accountId,
+        actions: [actions.createAccount(), actions.transfer(BigInt(amountYocto)), actions.addFullAccessKey(PublicKey.fromString(publicKey))] });
+      return { hash: txHash(transaction), signedTransaction: Buffer.from(transaction.encode()).toString('base64') };
+    },
     transfer: ({ fromId, secret, toId, amountYocto }) => send(fromId, secret, toId, [actions.transfer(BigInt(amountYocto))]),
+    async prepareTransfer({ fromId, secret, toId, amountYocto }) {
+      const transaction = await signer(fromId, secret).createSignedTransaction({ receiverId: toId,
+        actions: [actions.transfer(BigInt(amountYocto))] });
+      return { hash: txHash(transaction), signedTransaction: Buffer.from(transaction.encode()).toString('base64') };
+    },
     call: ({ signerId, secret, contractId, method, args, depositYocto = '0', gas = GAS }) => send(signerId, secret, contractId,
       [actions.functionCall(method, args, gas, BigInt(depositYocto))]),
     async prepareCall({ signerId, secret, contractId, method, args, depositYocto = '0', gas = GAS }) {
@@ -252,7 +234,7 @@ export function nearChain({ urls, fetchImpl = fetch } = {}) {
       const transaction = SignedTransaction.decode(Buffer.from(signedTransaction, 'base64'));
       return broadcast(transaction);
     },
-    async preparedFinalized({ signedTransaction, hash }) {
+    async preparedFinalized({ signedTransaction, hash }, { funding = false, spend = false } = {}) {
       const signed = SignedTransaction.decode(Buffer.from(signedTransaction, 'base64'));
       if (txHash(signed) !== hash) return false;
       try {
@@ -261,7 +243,9 @@ export function nearChain({ urls, fetchImpl = fetch } = {}) {
           && result.transaction.actions.length === signed.transaction.actions.length
           && signed.transaction.actions.every((action, index) => {
             const observed = result.transaction.actions[index];
+            if (action.createAccount) return observed === 'CreateAccount';
             if (!observed || Object.keys(observed).length !== 1) return false;
+            if (action.transfer) return observed.Transfer?.deposit === action.transfer.deposit.toString();
             if (action.functionCall) {
               const call = action.functionCall;
               return observed.FunctionCall?.method_name === call.methodName
@@ -274,14 +258,19 @@ export function nearChain({ urls, fetchImpl = fetch } = {}) {
             if (action.deleteKey) return observed.DeleteKey?.public_key === PublicKey.from(action.deleteKey.publicKey).toString();
             return false;
           });
-        return result?.final_execution_status === 'FINAL' && result.transaction?.hash === hash
+        const final = result?.final_execution_status === 'FINAL' && result.transaction?.hash === hash
           && matchingActions
           && result.transaction.signer_id === signed.transaction.signerId
           && result.transaction.receiver_id === signed.transaction.receiverId
           && Object.keys(result.status || {}).length === 1
           && (typeof result.status.SuccessValue === 'string' || Boolean(result.status.Failure));
+        return (funding || spend) && final ? fundingReceiptProof(result, signed.transaction.receiverId,
+          blockId => request('block', { block_id: blockId }), { terminalRoot: !spend }) : final;
       } catch { return false; }
     },
+    async preparedFundingFinalized(intent) { return this.preparedFinalized(intent, { funding: true }); },
+    async preparedSpendFinalized(intent) { return this.preparedFinalized(intent, { spend: true }); },
+    async preparedNeverExecuted(intent) { return this.preparedRetrySafe({ ...intent, transactionHash: intent.hash }, new TransactionExpiredError(), { allowRollback: false }); },
     async prepareRotation({ accountId, secret, addPublicKey, removePublicKey }) {
       const transaction = await signer(accountId, secret).createSignedTransaction({ receiverId: accountId,
         actions: [actions.addFullAccessKey(PublicKey.fromString(addPublicKey)), actions.deleteKey(PublicKey.fromString(removePublicKey))] });
@@ -305,17 +294,20 @@ export function nearChain({ urls, fetchImpl = fetch } = {}) {
       // deposit. Require that transfer itself to have finalized successfully.
       return Boolean(deliveryFromReceipts(result, { transactionHash, accountId, amountYocto, wrapContractId, unwrap: true }));
     },
-    async preparedRetrySafe({ signedTransaction, transactionHash }, rejection) {
+    async preparedRetrySafe({ signedTransaction, transactionHash }, rejection, { allowRollback = true } = {}) {
       const signed = SignedTransaction.decode(Buffer.from(signedTransaction, 'base64'));
       if (txHash(signed) !== transactionHash) return false;
       const transaction = signed.transaction;
       const expected = transaction.actions[0]?.functionCall;
-      if (transaction.actions.length !== 1 || !expected) return false;
+      const creation = transaction.actions.length === 3 && transaction.actions[0]?.createAccount
+        && transaction.actions[1]?.transfer && transaction.actions[2]?.addKey;
+      const transfer = transaction.actions.length === 1 && transaction.actions[0]?.transfer;
+      if (!creation && !transfer && (transaction.actions.length !== 1 || !expected)) return false;
       try {
         const result = await receipts(transactionHash, transaction.signerId);
         // A failure of the exact root action rolls back its changes and deposit.
         // A failed downstream transfer or callback does not establish rollback.
-        return rootCallRolledBack(result, { hash: transactionHash, signerId: transaction.signerId,
+        return allowRollback && Boolean(expected) && rootCallRolledBack(result, { hash: transactionHash, signerId: transaction.signerId,
           contractId: transaction.receiverId, method: expected.methodName,
           argsBase64: Buffer.from(expected.args).toString('base64'), depositYocto: expected.deposit.toString(), gas: expected.gas.toString() });
       } catch (error) {
@@ -471,18 +463,35 @@ export async function topUpReferee(db, config, chain) {
   const judge = await referee(db, config, chain);
   const court = Boolean(config.court?.dao);
   const { balance, reserve } = await chain.callFunds(judge.id, court ? COURT_CALL_GAS : GAS);
-  if (balance >= reserve) return false;
+  if (balance >= reserve && !config.near?.real) return false;
   const bank = await treasury(db, config, chain);
   const top = BigInt(yocto('0.2'));
   const amount = court ? reserve - balance + top : top;
-  return (await chain.transfer({ fromId: bank.id, secret: bank.secret, toId: judge.id, amountYocto: String(amount) })).ok;
+  const input = { fromId: bank.id, secret: bank.secret, toId: judge.id, amountYocto: String(amount) };
+  if (!config.near?.real) return (await chain.transfer(input)).ok;
+  return withManagedOperation(db, `outlayer-signer:${bank.id}`, 'Treasury funding is busy. Retry shortly.', async locked => {
+    const pending = await assertTreasuryCreationAvailable(locked, chain, bank.id, judge.id);
+    if (!chain.prepareTransfer || !chain.broadcastCall) throw new Error('Mainnet treasury funding requires durable transaction signing.');
+    if (!pending) {
+      const current = await treasuryRecipientFunds(locked, chain, bank.id, judge.id, court ? COURT_CALL_GAS : GAS);
+      if (current.balance >= current.reserve) return false;
+      input.amountYocto = String(court ? current.reserve - current.balance + top : top);
+      await assertSignerAvailable(locked, bank.id, null, { chain });
+      await assertTreasuryFundingLiquidity(locked, config, chain, bank.id, input.amountYocto);
+    }
+    return (await sendTreasuryFunding(locked, chain, bank, judge.id, () => chain.prepareTransfer(input), pending)).ok;
+  });
 }
 
 /** The referee account: decides a Bet from Stated's recorded Result. Its key never leaves this server. */
-export async function referee(db, config, chain) {
+export async function referee(db, config, chain, treasuryLocked = false) {
   const stored = await kvGet(db, 'play_referee');
   if (stored) return JSON.parse(open(stored, config.tokenKey));
   const bank = await treasury(db, config, chain);
+  if (config.near?.real && !treasuryLocked) {
+    return withManagedOperation(db, `outlayer-signer:${bank.id}`, 'Treasury funding is busy. Retry shortly.',
+      locked => referee(locked, config, chain, true));
+  }
   const id = `referee.${bank.id}`;
   let pending = await kvGet(db, 'play_referee_pending');
   if (!pending) {
@@ -491,12 +500,24 @@ export async function referee(db, config, chain) {
   }
   if (JSON.parse(open(pending, config.tokenKey)).id !== id) throw new Error('The stored referee key belongs to a different treasury.');
   const key = JSON.parse(open(pending, config.tokenKey));
-  if ((await chain.balance(id)) == null) {
-    const made = await chain.createAccount({ parentId: bank.id, parentSecret: bank.secret, accountId: id, publicKey: key.publicKey, amountYocto: yocto('0.3') });
+  const intent = config.near?.real ? await assertTreasuryCreationAvailable(db, chain, bank.id, id) : null;
+  const balance = config.near?.real ? await treasuryRecipientBalance(db, chain, bank.id, id) : await chain.balance(id);
+  if (balance == null) {
+    const input = { parentId: bank.id, parentSecret: bank.secret, accountId: id, publicKey: key.publicKey, amountYocto: yocto('0.3') };
+    let made;
+    if (config.near?.real) {
+      if (!chain.prepareCreateAccount || !chain.broadcastCall) throw new Error('Mainnet treasury funding requires durable transaction signing.');
+      if (!intent) {
+        await assertSignerAvailable(db, bank.id, null, { chain });
+        await assertTreasuryFundingLiquidity(db, config, chain, bank.id, input.amountYocto);
+      }
+      made = await sendTreasuryFunding(db, chain, bank, id, () => chain.prepareCreateAccount(input), intent);
+    } else made = await chain.createAccount(input);
     if (!made.ok) throw new Error(`The referee account could not be created: ${made.failure || 'no transaction'}`);
   } else if (!(await chain.hasKey(id, key.publicKey, { fullAccess: true }))) {
     throw new Error('The referee account exists with a key this server does not hold.');
   }
+  if (intent && balance != null) throw new UserError('Treasury funding is still pending. Retry shortly.', 409);
   await kvSet(db, 'play_referee', seal(JSON.stringify({ id, secret: key.secret }), config.tokenKey));
   return { id, secret: key.secret };
 }
@@ -522,6 +543,12 @@ export async function ensurePlayAccount(db, config, chain, { xUserId, username }
   if (!inPilot(config, xUserId)) throw Object.assign(new UserError('Bets with real NEAR are invite-only for now.', 403), { pilot: true });
   const existing = await playAccountFor(db, xUserId);
   if (existing?.ready) return existing;
+  if (config.near?.real) {
+    const bank = await treasury(db, config, chain);
+    return withManagedOperation(db, `outlayer-signer:${bank.id}`,
+      'The treasury is processing another transaction. Retry opening your account shortly.',
+      locked => provisionPlayAccount(locked, config, chain, { xUserId, username }));
+  }
   return withManagedOperation(db, `managed-account:${config.near?.network || 'testnet'}:${String(xUserId)}`,
     'Your account is still being opened. Try again shortly.',
     (locked) => provisionPlayAccount(locked, config, chain, { xUserId, username }));
@@ -547,13 +574,24 @@ async function provisionPlayAccount(db, config, chain, { xUserId, username }) {
   }
   // The key and immutable funding assignment are committed before any money moves.
   // A retry after account creation uses that assignment, even after config changes.
-  const balance = await chain.balance(row.account_id);
-  const amount = config.near?.real ? await initialMainnetGrant(db, config, row, balance) : yocto(config.play.startNear || '1.6');
+  const pending = config.near?.real ? await assertTreasuryCreationAvailable(db, chain, bank.id, row.account_id) : null;
+  const balance = config.near?.real ? await treasuryRecipientBalance(db, chain, bank.id, row.account_id) : await chain.balance(row.account_id);
+  if (pending && balance != null) throw new UserError('Treasury funding is still pending. Retry shortly.', 409);
+  if (config.near?.real && balance == null && !pending) await assertSignerAvailable(db, bank.id, null, { chain });
+  if (config.near?.real && balance == null && (!chain.prepareCreateAccount || !chain.broadcastCall)) {
+    throw new Error('Mainnet account funding requires durable transaction signing.');
+  }
+  const amount = config.near?.real ? await initialMainnetGrant(db, config, chain, bank, row,
+    { balance, fundingPending: Boolean(pending), requested: yocto(config.play.startNear || '0.05') }) : yocto(config.play.startNear || '1.6');
   if (balance == null) {
     // Money is about to leave the treasury: top it up first if it is running low.
     await refillTreasury(db, config, chain);
-    const made = await chain.createAccount({ parentId: bank.id, parentSecret: bank.secret, accountId: row.account_id,
-      publicKey: row.public_key, amountYocto: amount });
+    const input = { parentId: bank.id, parentSecret: bank.secret, accountId: row.account_id,
+      publicKey: row.public_key, amountYocto: amount };
+    let made;
+    if (config.near?.real) {
+      made = await sendTreasuryFunding(db, chain, bank, row.account_id, () => chain.prepareCreateAccount(input), pending);
+    } else made = await chain.createAccount(input);
     if (!made.ok) throw new Error(`The play account could not be created: ${made.failure || 'no transaction'}`);
   } else if (!(await chain.hasKey(row.account_id, row.public_key, { fullAccess: true }))) {
     throw new Error(`That account name exists on ${network().id} with a key this server does not hold.`);
